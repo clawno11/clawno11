@@ -1,58 +1,128 @@
 import { useState } from "react";
-import { HardDrive, Server } from "lucide-react";
+import { HardDrive, Server, CheckCircle, XCircle, Loader } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
+import type { LocalDeployResult } from "@clawno/deploy-engine";
 
 type DeployMode = "local" | "remote";
 
-interface DeployProgress {
-  message: string;
-  percent: number;
+interface Step {
+  label: string;
+  status: "pending" | "running" | "done" | "error";
+  detail?: string;
+}
+
+const LOCAL_STEPS: Step[] = [
+  { label: "检查 Node.js 环境", status: "pending" },
+  { label: "安装 openclaw", status: "pending" },
+  { label: "安装 pm2 服务管理器", status: "pending" },
+  { label: "初始化配置", status: "pending" },
+  { label: "启动 openclaw 服务", status: "pending" },
+];
+
+function StepRow({ step }: { step: Step }) {
+  return (
+    <div className="flex items-center gap-3 py-2">
+      <div className="w-5 flex-shrink-0">
+        {step.status === "done" && <CheckCircle size={18} className="text-green-500" />}
+        {step.status === "error" && <XCircle size={18} className="text-red-500" />}
+        {step.status === "running" && (
+          <Loader size={18} className="text-primary animate-spin" />
+        )}
+        {step.status === "pending" && (
+          <div className="w-4 h-4 rounded-full border-2 border-muted" />
+        )}
+      </div>
+      <div className="flex-1">
+        <p
+          className={`text-sm ${
+            step.status === "pending"
+              ? "text-muted-foreground"
+              : step.status === "error"
+                ? "text-red-600"
+                : "text-foreground"
+          } ${step.status === "running" ? "font-medium" : ""}`}
+        >
+          {step.label}
+        </p>
+        {step.detail && (
+          <p className="text-xs text-muted-foreground mt-0.5">{step.detail}</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function DeployPage() {
   const [mode, setMode] = useState<DeployMode>("local");
-  const [progress, setProgress] = useState<DeployProgress | null>(null);
-  const [done, setDone] = useState(false);
+  const [steps, setSteps] = useState<Step[]>([]);
+  const [isDeploying, setIsDeploying] = useState(false);
+  const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
 
-  // Remote SSH form state
+  // Remote SSH form
   const [host, setHost] = useState("");
   const [username, setUsername] = useState("root");
   const [password, setPassword] = useState("");
-  const [port, setPort] = useState("22");
+  const [sshPort, setSshPort] = useState("22");
 
-  const handleDeploy = async () => {
-    setDone(false);
-    setProgress({ message: "准备部署...", percent: 0 });
+  const setStep = (index: number, patch: Partial<Step>) => {
+    setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
+  };
 
+  const handleLocalDeploy = async () => {
+    const initialSteps = LOCAL_STEPS.map((s) => ({ ...s }));
+    setSteps(initialSteps);
+    setResult(null);
+    setIsDeploying(true);
+
+    // Animate through steps while Rust does the real work
+    // Each step lights up in sequence; we call the Tauri command once at the end
+    const tick = (i: number) =>
+      new Promise<void>((res) => setTimeout(() => { setStep(i, { status: "running" }); res(); }, i * 400));
+
+    await tick(0);
+    await tick(1);
+    await tick(2);
+    await tick(3);
+    await tick(4);
+
+    try {
+      const res = await invoke<LocalDeployResult>("deploy_local", { port: 18789 });
+
+      if (res.success) {
+        // Mark all done
+        setSteps(LOCAL_STEPS.map((s) => ({ ...s, status: "done" })));
+        setResult({ success: true, message: `OpenClaw 已启动！Gateway: http://localhost:${res.port}` });
+      } else {
+        // Mark last running step as error
+        setSteps((prev) =>
+          prev.map((s) =>
+            s.status === "running" ? { ...s, status: "error", detail: res.error ?? "未知错误" } : s,
+          ),
+        );
+        setResult({ success: false, message: res.error ?? "部署失败" });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setSteps((prev) =>
+        prev.map((s) => (s.status === "running" ? { ...s, status: "error", detail: msg } : s)),
+      );
+      setResult({ success: false, message: msg });
+    } finally {
+      setIsDeploying(false);
+    }
+  };
+
+  const handleDeploy = () => {
     if (mode === "local") {
-      // Dynamic import to avoid SSR issues
-      const { LocalDeployer } = await import("@clawno/deploy-engine");
-      const deployer = new LocalDeployer({
-        onProgress: (p) => setProgress({ message: p.message, percent: p.percent }),
-      });
-      const result = await deployer.deploy();
-      if (result.success) {
-        setDone(true);
-      } else {
-        setProgress({ message: `错误：${result.error ?? "未知错误"}`, percent: 0 });
-      }
+      handleLocalDeploy();
     } else {
-      const { RemoteDeployer } = await import("@clawno/deploy-engine");
-      const deployer = new RemoteDeployer({
-        ssh: { host, username, password, port: parseInt(port) },
-        onProgress: (p) => setProgress({ message: p.message, percent: p.percent }),
-      });
-      const result = await deployer.deploy();
-      if (result.success) {
-        setDone(true);
-      } else {
-        setProgress({ message: `错误：${result.error ?? "未知错误"}`, percent: 0 });
-      }
+      setResult({ success: false, message: "服务器部署功能开发中，请先使用本机部署" });
     }
   };
 
   return (
     <div className="p-6 max-w-xl">
-      <h1 className="text-2xl font-bold mb-2">部署 OpenClaw</h1>
+      <h1 className="text-2xl font-bold mb-1">部署 OpenClaw</h1>
       <p className="text-muted-foreground text-sm mb-6">选择部署目标并一键完成安装配置</p>
 
       {/* Mode selector */}
@@ -60,11 +130,9 @@ export function DeployPage() {
         {(["local", "remote"] as const).map((m) => (
           <button
             key={m}
-            onClick={() => setMode(m)}
+            onClick={() => { setMode(m); setSteps([]); setResult(null); }}
             className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-colors ${
-              mode === m
-                ? "border-primary bg-primary/5"
-                : "border-border hover:border-primary/50"
+              mode === m ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
             }`}
           >
             {m === "local" ? <HardDrive size={28} /> : <Server size={28} />}
@@ -94,16 +162,14 @@ export function DeployPage() {
               <input
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="root"
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
             <div>
               <label className="text-sm font-medium mb-1 block">SSH 端口</label>
               <input
-                value={port}
-                onChange={(e) => setPort(e.target.value)}
-                placeholder="22"
+                value={sshPort}
+                onChange={(e) => setSshPort(e.target.value)}
                 className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
               />
             </div>
@@ -114,41 +180,49 @@ export function DeployPage() {
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="SSH 密码（或留空使用密钥）"
+              placeholder="SSH 密码"
               className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary"
             />
           </div>
         </div>
       )}
 
-      {/* Progress */}
-      {progress && (
-        <div className="mb-4">
-          <div className="flex justify-between text-sm mb-1">
-            <span className="text-muted-foreground">{progress.message}</span>
-            <span>{progress.percent}%</span>
-          </div>
-          <div className="h-2 bg-secondary rounded-full overflow-hidden">
-            <div
-              className="h-full bg-primary rounded-full transition-all duration-300"
-              style={{ width: `${progress.percent}%` }}
-            />
-          </div>
+      {/* Steps */}
+      {steps.length > 0 && (
+        <div className="mb-5 rounded-xl border border-border bg-card p-4 space-y-1">
+          {steps.map((step, i) => (
+            <StepRow key={i} step={step} />
+          ))}
         </div>
       )}
 
-      {done && (
-        <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
-          部署成功！OpenClaw Gateway 已启动。
+      {/* Result banner */}
+      {result && (
+        <div
+          className={`mb-5 flex items-start gap-3 p-4 rounded-xl border ${
+            result.success
+              ? "bg-green-50 border-green-200"
+              : "bg-red-50 border-red-200"
+          }`}
+        >
+          {result.success ? (
+            <CheckCircle size={18} className="text-green-600 mt-0.5 flex-shrink-0" />
+          ) : (
+            <XCircle size={18} className="text-red-500 mt-0.5 flex-shrink-0" />
+          )}
+          <p className={`text-sm ${result.success ? "text-green-700" : "text-red-600"}`}>
+            {result.message}
+          </p>
         </div>
       )}
 
       <button
         onClick={handleDeploy}
-        disabled={!!progress && !done}
-        className="w-full py-3 px-4 bg-primary text-primary-foreground rounded-xl font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        disabled={isDeploying}
+        className="w-full py-3 px-4 bg-primary text-primary-foreground rounded-xl font-semibold hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
       >
-        {progress && !done ? "部署中..." : "一键部署"}
+        {isDeploying && <Loader size={16} className="animate-spin" />}
+        {isDeploying ? "部署中..." : "一键部署"}
       </button>
     </div>
   );

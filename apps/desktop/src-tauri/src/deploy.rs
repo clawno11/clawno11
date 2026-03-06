@@ -1,6 +1,46 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
 
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+/// Run a command through the Windows shell so it can resolve `.cmd` scripts
+/// and pick up the full user PATH (Node.js, npm, pm2, etc.).
+fn shell(cmd: &str) -> std::io::Result<std::process::Output> {
+    // Inject common Node.js install locations so they are always found
+    let extra_paths = [
+        r"C:\Program Files\nodejs",
+        r"C:\Program Files (x86)\nodejs",
+        &format!(
+            r"{}\AppData\Roaming\npm",
+            std::env::var("USERPROFILE").unwrap_or_default()
+        ),
+        &format!(
+            r"{}\AppData\Local\Programs\nodejs",
+            std::env::var("USERPROFILE").unwrap_or_default()
+        ),
+    ];
+
+    let current_path = std::env::var("PATH").unwrap_or_default();
+    let full_path = format!("{};{}", extra_paths.join(";"), current_path);
+
+    Command::new("cmd")
+        .args(["/C", cmd])
+        .env("PATH", &full_path)
+        .output()
+}
+
+fn shell_ok(cmd: &str) -> bool {
+    shell(cmd).map(|o| o.status.success()).unwrap_or(false)
+}
+
+fn shell_output(cmd: &str) -> String {
+    shell(cmd)
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default()
+}
+
+// ── types ─────────────────────────────────────────────────────────────────────
+
 #[derive(Serialize, Deserialize, Clone)]
 pub struct LocalDeployResult {
     pub success: bool,
@@ -28,6 +68,8 @@ pub struct ServiceInfo {
     pub restarts: Option<u32>,
 }
 
+// ── commands ──────────────────────────────────────────────────────────────────
+
 #[tauri::command]
 pub async fn deploy_local(port: Option<u16>, config_dir: Option<String>) -> LocalDeployResult {
     let port = port.unwrap_or(18789);
@@ -37,112 +79,112 @@ pub async fn deploy_local(port: Option<u16>, config_dir: Option<String>) -> Loca
         .to_string();
     let config_dir = config_dir.unwrap_or_else(|| format!("{}/.openclaw", home));
 
-    // Check Node.js
-    let node_check = Command::new("node").arg("--version").output();
-    if node_check.is_err() {
+    // 1. Check Node.js
+    let node_ver = shell_output("node --version");
+    if node_ver.is_empty() {
         return LocalDeployResult {
             success: false,
             pid: None,
             port,
             config_dir,
-            error: Some("Node.js 未安装，请先安装 Node.js >= 22".into()),
+            error: Some(
+                "未检测到 Node.js，请先安装 Node.js >= 22 (https://nodejs.org)".into(),
+            ),
         };
     }
 
-    // Install openclaw if not present
-    let openclaw_check = Command::new("openclaw").arg("--version").output();
-    if openclaw_check.is_err() {
-        let install = Command::new("npm")
-            .args(["install", "-g", "openclaw"])
-            .output();
-        if let Err(e) = install {
+    // 2. Install openclaw if needed
+    let claw_ver = shell_output("openclaw --version");
+    if claw_ver.is_empty() {
+        let ok = shell_ok("npm install -g openclaw");
+        if !ok {
             return LocalDeployResult {
                 success: false,
                 pid: None,
                 port,
                 config_dir,
-                error: Some(format!("安装 openclaw 失败: {}", e)),
+                error: Some("npm install -g openclaw 失败，请检查网络或权限".into()),
             };
         }
     }
 
-    // Install pm2 if not present
-    let pm2_check = Command::new("pm2").arg("--version").output();
-    if pm2_check.is_err() {
-        let _ = Command::new("npm")
-            .args(["install", "-g", "pm2"])
-            .output();
+    // 3. Install pm2 if needed
+    let pm2_ver = shell_output("pm2 --version");
+    if pm2_ver.is_empty() {
+        shell_ok("npm install -g pm2");
     }
 
-    // Run onboard
-    let _ = Command::new("openclaw").args(["onboard", "--yes"]).output();
+    // 4. Onboard (init config, non-fatal)
+    shell_ok("openclaw onboard --yes");
 
-    // Start with pm2
-    let start = Command::new("pm2")
-        .args(["start", "openclaw", "--name", "openclaw"])
-        .env("OPENCLAW_PORT", port.to_string())
-        .output();
+    // 5. Start / restart via pm2
+    let running = shell_output("pm2 pid openclaw");
+    let started = if running.trim().is_empty() || running.trim() == "undefined" {
+        shell_ok(&format!(
+            "pm2 start openclaw --name openclaw -- --port {}",
+            port
+        ))
+    } else {
+        shell_ok("pm2 restart openclaw")
+    };
 
-    match start {
-        Ok(_) => LocalDeployResult {
+    if started {
+        LocalDeployResult {
             success: true,
             pid: None,
             port,
             config_dir,
             error: None,
-        },
-        Err(e) => LocalDeployResult {
+        }
+    } else {
+        LocalDeployResult {
             success: false,
             pid: None,
             port,
             config_dir,
-            error: Some(format!("启动失败: {}", e)),
-        },
+            error: Some("pm2 start 失败，请查看系统日志".into()),
+        }
     }
 }
 
 #[tauri::command]
 pub async fn get_local_service_info() -> ServiceInfo {
-    let output = Command::new("pm2").args(["jlist"]).output();
-    match output {
-        Ok(out) => {
-            let stdout = String::from_utf8_lossy(&out.stdout);
-            if stdout.contains("\"openclaw\"") && stdout.contains("\"online\"") {
-                ServiceInfo {
-                    name: "openclaw".into(),
-                    status: "running".into(),
-                    pid: None,
-                    uptime: None,
-                    restarts: None,
-                }
-            } else {
-                ServiceInfo {
-                    name: "openclaw".into(),
-                    status: "stopped".into(),
-                    pid: None,
-                    uptime: None,
-                    restarts: None,
-                }
-            }
+    let out = shell_output("pm2 jlist");
+    if out.contains("\"openclaw\"") && out.contains("\"online\"") {
+        ServiceInfo {
+            name: "openclaw".into(),
+            status: "running".into(),
+            pid: None,
+            uptime: None,
+            restarts: None,
         }
-        Err(_) => ServiceInfo {
+    } else if out.contains("\"openclaw\"") {
+        ServiceInfo {
+            name: "openclaw".into(),
+            status: "stopped".into(),
+            pid: None,
+            uptime: None,
+            restarts: None,
+        }
+    } else {
+        ServiceInfo {
             name: "openclaw".into(),
             status: "unknown".into(),
             pid: None,
             uptime: None,
             restarts: None,
-        },
+        }
     }
 }
 
 #[tauri::command]
 pub async fn stop_local_service() {
-    let _ = Command::new("pm2").args(["stop", "openclaw"]).output();
+    shell_ok("pm2 stop openclaw");
 }
 
 #[tauri::command]
 pub async fn restart_local_service() {
-    let _ = Command::new("pm2").args(["restart", "openclaw"]).output();
+    shell_ok("pm2 restart openclaw");
 }
 
 #[derive(Deserialize)]
@@ -158,8 +200,6 @@ pub struct RemoteDeployArgs {
 
 #[tauri::command]
 pub async fn deploy_remote(args: RemoteDeployArgs) -> RemoteDeployResult {
-    // Remote SSH deployment via bundled Node.js script
-    // TODO: implement via ssh2 Rust crate (openssh or ssh2-rs)
     RemoteDeployResult {
         success: false,
         host: args.host.clone(),
