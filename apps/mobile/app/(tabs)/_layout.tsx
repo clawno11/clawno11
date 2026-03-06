@@ -1,5 +1,5 @@
 import { Tabs } from "expo-router";
-import { MessageSquare, Server, Settings } from "lucide-react-native";
+import { MessageSquare, Server, Wifi, Settings } from "lucide-react-native";
 
 export default function TabsLayout() {
   return (
@@ -24,6 +24,15 @@ export default function TabsLayout() {
         options={{
           title: "会话",
           tabBarIcon: ({ color, size }) => <MessageSquare color={color} size={size} />,
+          tabBarBadge: undefined,
+        }}
+      />
+      <Tabs.Screen
+        name="gateway"
+        options={{
+          title: "连接",
+          tabBarIcon: ({ color, size }) => <Wifi color={color} size={size} />,
+          headerShown: false,
         }}
       />
       <Tabs.Screen

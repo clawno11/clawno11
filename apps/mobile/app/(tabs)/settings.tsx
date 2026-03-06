@@ -1,58 +1,108 @@
-import { View, Text, TextInput, TouchableOpacity, ScrollView } from "react-native";
+import { View, Text, ScrollView, TouchableOpacity, Switch } from "react-native";
+import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { Wifi, ChevronRight } from "lucide-react-native";
+import { useGatewayStore } from "../../store/gateway";
 import { useChatStore } from "../../store/chat";
+import { StatusBadge } from "../../components/StatusBadge";
+import { useEffect } from "react";
 
 export default function SettingsScreen() {
-  const { gatewayUrl, apiKey, setGatewayUrl, setApiKey } = useChatStore();
+  const router = useRouter();
+  const { connections, activeId, getActive, checkAll } = useGatewayStore();
+  const { setGatewayUrl, setApiKey } = useChatStore();
+
+  const active = getActive();
+
+  // Sync active gateway to chat store
+  useEffect(() => {
+    if (active) {
+      setGatewayUrl(active.url);
+      setApiKey(active.apiKey ?? "");
+    }
+  }, [activeId]);
+
+  useEffect(() => {
+    checkAll();
+  }, []);
 
   return (
-    <SafeAreaView className="flex-1 bg-white" edges={["bottom"]}>
+    <SafeAreaView className="flex-1 bg-gray-50" edges={["bottom"]}>
       <ScrollView className="flex-1 px-4 py-4">
-        <Text className="text-lg font-bold mb-1 text-gray-800">连接设置</Text>
-        <Text className="text-sm text-gray-500 mb-6">配置 OpenClaw Gateway 连接信息</Text>
 
-        <View className="space-y-4">
-          <View>
-            <Text className="text-sm font-medium text-gray-700 mb-1">Gateway 地址</Text>
-            <TextInput
-              value={gatewayUrl}
-              onChangeText={setGatewayUrl}
-              autoCapitalize="none"
-              keyboardType="url"
-              placeholder="http://localhost:18789"
-              className="border border-gray-200 rounded-xl px-4 py-3 text-sm bg-gray-50"
-            />
-            <Text className="text-xs text-gray-400 mt-1">
-              本地：http://localhost:18789 | 远程：https://your-server.com
-            </Text>
+        {/* Current Gateway */}
+        <Text className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
+          当前 Gateway
+        </Text>
+        <TouchableOpacity
+          onPress={() => router.push("/(tabs)/gateway")}
+          className="bg-white rounded-2xl border border-gray-200 p-4 mb-5"
+        >
+          {active ? (
+            <View className="flex-row items-center gap-3">
+              <View className="w-10 h-10 rounded-xl bg-primary items-center justify-center">
+                <Wifi size={18} color="#fff" />
+              </View>
+              <View className="flex-1">
+                <Text className="font-semibold text-gray-800">{active.name}</Text>
+                <Text className="text-xs text-gray-400" numberOfLines={1}>{active.url}</Text>
+              </View>
+              <View className="items-end gap-1.5">
+                <StatusBadge status={active.status} />
+                <ChevronRight size={14} color="#D1D5DB" />
+              </View>
+            </View>
+          ) : (
+            <View className="flex-row items-center gap-2">
+              <Wifi size={18} color="#9CA3AF" />
+              <Text className="text-gray-400 text-sm">未选择连接，点击配置</Text>
+              <ChevronRight size={14} color="#D1D5DB" style={{ marginLeft: "auto" }} />
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {/* All connections quick view */}
+        <Text className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1">
+          所有连接（{connections.length}）
+        </Text>
+        <View className="bg-white rounded-2xl border border-gray-200 mb-5 overflow-hidden">
+          {connections.map((conn, i) => (
+            <TouchableOpacity
+              key={conn.id}
+              onPress={() => router.push(`/(tabs)/gateway/${conn.id}`)}
+              className={`flex-row items-center px-4 py-3 ${
+                i < connections.length - 1 ? "border-b border-gray-100" : ""
+              }`}
+            >
+              <Text className="flex-1 text-sm text-gray-700" numberOfLines={1}>
+                {conn.name}
+              </Text>
+              <View className="flex-row items-center gap-2">
+                <StatusBadge status={conn.status} />
+                <ChevronRight size={12} color="#D1D5DB" />
+              </View>
+            </TouchableOpacity>
+          ))}
+          <TouchableOpacity
+            onPress={() => router.push("/(tabs)/gateway/add")}
+            className="px-4 py-3 border-t border-gray-100"
+          >
+            <Text className="text-primary text-sm text-center font-medium">+ 添加新连接</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* About */}
+        <View className="bg-white rounded-2xl border border-gray-200 p-4">
+          <Text className="text-sm font-semibold text-gray-700 mb-3">关于 ClawNo.11</Text>
+          <View className="space-y-1">
+            <Text className="text-xs text-gray-500">版本：0.1.0 (build 1)</Text>
+            <Text className="text-xs text-gray-400">OpenClaw 一键部署 & AI 聊天客户端</Text>
+            <Text className="text-xs text-gray-400">clawno11.com</Text>
+            <Text className="text-xs text-gray-400">github.com/clawno11/clawno11</Text>
           </View>
-
-          <View>
-            <Text className="text-sm font-medium text-gray-700 mb-1">API Key（可选）</Text>
-            <TextInput
-              value={apiKey}
-              onChangeText={setApiKey}
-              secureTextEntry
-              placeholder="sk-..."
-              className="border border-gray-200 rounded-xl px-4 py-3 text-sm bg-gray-50"
-            />
-          </View>
         </View>
 
-        <View className="mt-8 p-4 bg-blue-50 rounded-xl border border-blue-100">
-          <Text className="text-sm font-semibold text-blue-800 mb-1">💡 快速连接</Text>
-          <Text className="text-xs text-blue-600">
-            如果 OpenClaw 部署在本机，保持默认地址即可。{"\n"}
-            如果部署在服务器，使用 Cloudflare Tunnel 可获得 HTTPS 域名访问，无需公网 IP。
-          </Text>
-        </View>
-
-        <View className="mt-6 p-4 bg-gray-50 rounded-xl">
-          <Text className="text-sm font-semibold text-gray-700 mb-2">关于 ClawNo.11</Text>
-          <Text className="text-xs text-gray-500">版本 0.1.0</Text>
-          <Text className="text-xs text-gray-400 mt-1">OpenClaw 一键部署 & AI 聊天客户端</Text>
-          <Text className="text-xs text-gray-400">clawno11.com · github.com/clawno11/clawno11</Text>
-        </View>
+        <View className="h-8" />
       </ScrollView>
     </SafeAreaView>
   );
