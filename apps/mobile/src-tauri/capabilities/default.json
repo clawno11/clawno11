@@ -1,0 +1,22 @@
+{
+  "identifier": "default",
+  "description": "Default mobile capabilities (iOS + Android)",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:default",
+    "core:window:default",
+    "core:webview:default",
+    "sql:default",
+    "store:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "fs:default",
+    "fs:allow-read-file",
+    "fs:allow-read-dir",
+    "http:default",
+    "http:allow-fetch",
+    "http:allow-fetch-send-body",
+    "http:allow-fetch-cancel"
+  ]
+}

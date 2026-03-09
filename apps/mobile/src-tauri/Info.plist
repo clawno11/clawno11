@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  iOS 权限声明 & 传输配置
+  Tauri ios init 生成 Xcode 工程后，此文件内容会合并进
+  gen/apple/ClawNo_11/Info.plist
+-->
+<plist version="1.0">
+<dict>
+
+  <!-- ── 文件访问（RAG 知识库导入）──────────────────────────── -->
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>需要访问文档以导入知识库文件</string>
+
+  <!-- ── 本地网络（连接局域网内的 OpenClaw 网关）────────────── -->
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>需要访问本地网络以连接您的 OpenClaw AI 网关</string>
+
+  <!-- ── Bonjour 服务（局域网发现）──────────────────────────── -->
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_http._tcp</string>
+    <string>_https._tcp</string>
+  </array>
+
+  <!-- ── 允许 HTTP 明文连接（内网网关通常不带 TLS）────────────  -->
+  <key>NSAppTransportSecurity</key>
+  <dict>
+    <!-- 禁止全局明文，只对特定 IP/域名开放 -->
+    <key>NSAllowsArbitraryLoads</key>
+    <false/>
+    <!-- 允许对局域网地址发起 HTTP（127.x, 192.168.x, 10.x, 100.x Tailscale）-->
+    <key>NSAllowsLocalNetworking</key>
+    <true/>
+  </dict>
+
+  <!-- ── 显示名称 ──────────────────────────────────────────── -->
+  <key>CFBundleDisplayName</key>
+  <string>ClawNo.11</string>
+
+  <!-- ── 支持的界面方向（iPhone）────────────────────────────── -->
+  <key>UISupportedInterfaceOrientations</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+
+  <!-- ── 支持的界面方向（iPad）──────────────────────────────── -->
+  <key>UISupportedInterfaceOrientations~ipad</key>
+  <array>
+    <string>UIInterfaceOrientationPortrait</string>
+    <string>UIInterfaceOrientationPortraitUpsideDown</string>
+    <string>UIInterfaceOrientationLandscapeLeft</string>
+    <string>UIInterfaceOrientationLandscapeRight</string>
+  </array>
+
+</dict>
+</plist>

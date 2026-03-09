@@ -1,29 +1,139 @@
-mod deploy;
+// Sub-modules — each has a single, focused responsibility.
+pub mod platform;       // cross-platform shell + path helpers
+pub mod types;          // shared serializable types (StepResult, ServiceInfo, …)
+pub mod node;           // Node.js & openclaw CLI management
+pub mod pm2;            // pm2 daemon lifecycle
+pub mod gateway;        // openclaw gateway start / health / URL
+pub mod deploy;         // deployment coordinator + API-key config
+pub mod ssh_deploy;     // SSH remote deployment (step-by-step)
+pub mod secure_store;   // encrypted KV store (API keys, secrets)
+pub mod security;       // port scanning, firewall rules, security report
+pub mod connectors;     // IM connectors (Feishu, Tailscale)
+pub mod bots;           // Telegram + Discord background bots
+pub mod pairing;        // Secure QR-code pairing (OTP + PIN confirmation)
+pub mod mcp;            // MCP server security scanner
+pub mod rag;            // local RAG: text ingestion helper
+pub mod token_log;      // SQLite schema migrations
+pub mod chat;           // streaming chat proxy (SSE → Tauri events)
 
 use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(bots::BotManager::new())
+        .manage(pairing::PairingState::default())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(
+            tauri_plugin_sql::Builder::default()
+                .add_migrations(token_log::DB_URL, token_log::migrations())
+                .build(),
+        )
+        .plugin(tauri_plugin_http::init())
         .invoke_handler(tauri::generate_handler![
-            deploy::deploy_local,
+            // ── Deploy pre-check & update ────────────────────────────────────
+            node::check_deploy_status,
+            node::update_openclaw,
+            node::list_configured_providers,
+            // ── Deploy pipeline ──────────────────────────────────────────────
+            node::deploy_step_check_node,
+            node::deploy_step_install_openclaw,
+            pm2::deploy_step_install_pm2,
+            deploy::deploy_step_onboard,
+            gateway::deploy_step_start,
             deploy::deploy_remote,
-            deploy::get_local_service_info,
+            deploy::configure_api_key,
+            // ── SSH remote deploy pipeline ────────────────────────────────────
+            ssh_deploy::deploy_remote_connect,
+            ssh_deploy::deploy_remote_check_node,
+            ssh_deploy::deploy_remote_install_openclaw,
+            ssh_deploy::deploy_remote_onboard,
+            ssh_deploy::deploy_remote_start_gateway,
+            // ── Service management ───────────────────────────────────────────
+            pm2::get_local_service_info,
+            pm2::stop_local_service,
+            pm2::restart_local_service,
+            gateway::start_local_service,
+            gateway::get_browser_url,
+            gateway::open_in_browser,
+            gateway::probe_instance_health,
+            gateway::get_main_agent_model,
+            // ── Remote (stub) ────────────────────────────────────────────────
             deploy::get_remote_service_info,
-            deploy::stop_local_service,
-            deploy::restart_local_service,
+            // ── Secure store ─────────────────────────────────────────────────
+            secure_store::set_secure_value,
+            secure_store::get_secure_value,
+            secure_store::delete_secure_value,
+            secure_store::list_secure_keys,
+            secure_store::wipe_secure_store,
+            // ── Security ─────────────────────────────────────────────────────
+            security::scan_security_status,
+            security::get_port_connections,
+            security::check_firewall_active,
+            security::apply_local_only_firewall,
+            security::remove_local_only_firewall,
+            security::get_tool_permissions,
+            security::set_exec_mode,
+            security::add_exec_allowlist_entry,
+            security::remove_exec_allowlist_entry,
+            security::kill_switch_offline,
+            security::kill_switch_restore,
+            security::get_allowed_ips,
+            security::add_allowed_ip,
+            security::remove_allowed_ip,
+            security::scan_lan_devices,
+            security::get_local_lan_info,
+            security::get_network_access_mode,
+            security::set_network_access_mode,
+            // ── Connectors ───────────────────────────────────────────────────
+            connectors::test_feishu_connection,
+            connectors::save_feishu_config,
+            connectors::get_feishu_config,
+            connectors::get_tailscale_status,
+            // ── Secure Pairing ────────────────────────────────────────────────
+            pairing::generate_pair_qr,
+            pairing::generate_pair_qr_with_host,
+            pairing::verify_pair_token,
+            pairing::get_current_pair_pin,
+            // ── Bots (Telegram + Discord) ─────────────────────────────────────
+            bots::test_telegram_config,
+            bots::save_telegram_config,
+            bots::get_telegram_config,
+            bots::start_telegram_bot,
+            bots::stop_telegram_bot,
+            bots::get_telegram_bot_status,
+            bots::test_discord_config,
+            bots::save_discord_config,
+            bots::get_discord_config,
+            bots::start_discord_bot,
+            bots::stop_discord_bot,
+            bots::get_discord_bot_status,
+            // ── MCP ──────────────────────────────────────────────────────────
+            mcp::scan_mcp_server,
+            mcp::list_openclaw_plugins,
+            mcp::toggle_openclaw_plugin,
+            // ── RAG ──────────────────────────────────────────────────────────
+            rag::read_text_file,
+            // ── Chat proxy ───────────────────────────────────────────────────
+            chat::stream_chat,
         ])
         .setup(|app| {
-            #[cfg(debug_assertions)]
-            {
-                let window = app.get_webview_window("main").unwrap();
+            if let Some(window) = app.get_webview_window("main") {
+                // 动态设置窗口图标，确保 dev/release 均使用最新图标
+                let _ = window.set_icon(tauri::include_image!("icons/icon.png"));
+                #[cfg(debug_assertions)]
                 window.open_devtools();
             }
             Ok(())
+        })
+        .on_window_event(|_window, event| {
+            if let tauri::WindowEvent::Destroyed = event {
+                pm2::stop_openclaw_on_exit();
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
