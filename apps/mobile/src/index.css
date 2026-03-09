@@ -1,0 +1,160 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── CSS Variables (Design tokens) ─────────────────────────────────────── */
+
+:root {
+  --primary: 189 94% 43%;
+  --primary-foreground: 0 0% 100%;
+  --background: 0 0% 100%;
+  --foreground: 222 84% 5%;
+  --muted: 210 40% 96%;
+  --muted-foreground: 215 16% 47%;
+  --border: 214 32% 91%;
+  --card: 0 0% 100%;
+  --destructive: 0 84% 60%;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC",
+    "PingFang SC", sans-serif;
+}
+
+/* ── Mobile-first base styles ───────────────────────────────────────────── */
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  overscroll-behavior: none;
+  /* Prevent text size adjustment on orientation change */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+/* Safe area support for notched phones */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+/* ── Scrollable area ──────────────────────────────────────────────────── */
+
+.scrollable {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Page transitions ──────────────────────────────────────────────────── */
+
+.page-enter {
+  animation: pageEnter 0.18s ease-out;
+}
+
+@keyframes pageEnter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Touch feedback ────────────────────────────────────────────────────── */
+
+.touch-btn {
+  transition: opacity 0.1s;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.touch-btn:active {
+  opacity: 0.7;
+}
+
+/* ── Bottom navigation bar ─────────────────────────────────────────────── */
+
+.bottom-nav {
+  padding-bottom: max(var(--safe-bottom), 4px);
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  /* Ensure nav bar doesn't overlap with Android gesture nav */
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* ── Top bar / status bar area ─────────────────────────────────────────── */
+
+.top-bar {
+  padding-top: max(var(--safe-top), 8px);
+  padding-left: calc(var(--safe-left) + 1rem);
+  padding-right: calc(var(--safe-right) + 1rem);
+}
+
+/* ── Keyboard-aware scrollable area ─────────────────────────────────────── */
+/* Android adjustResize shrinks the viewport; dvh units adapt automatically */
+
+.scrollable {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  /* Allow smooth scroll to focused input */
+  scroll-behavior: smooth;
+}
+
+/* ── Chat input bar – stay above keyboard ───────────────────────────────── */
+
+.chat-input-bar {
+  padding-bottom: max(var(--safe-bottom), 8px);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/* ── Message bubble animations ─────────────────────────────────────────── */
+
+@keyframes bubbleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.bubble-enter {
+  animation: bubbleIn 0.15s ease-out;
+}
+
+/* ── Input focus styles ─────────────────────────────────────────────────── */
+
+input:focus,
+textarea:focus {
+  outline: none;
+}
+
+/* ── Scrollbar (WebKit) ─────────────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+  width: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(6, 182, 212, 0.3);
+  border-radius: 99px;
+}
