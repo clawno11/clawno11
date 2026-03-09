@@ -29,9 +29,9 @@ const FEATURED_AI = [
     id:          "zai" as const,
     emoji:       "🧠",
     name:        "智谱 AI (GLM)",
-    badge:       "永久免费",
+    badge:       "注册送额度",
     badgeClass:  "bg-emerald-50 border-emerald-200 text-emerald-700",
-    highlight:   "GLM-4-Flash 完全免费 · 国内直连 · 无需翻墙",
+    highlight:   "注册送免费额度 · GLM-4-Flash 低价 · 国内直连 · 无需翻墙",
     registerUrl: `${AI_REFER_BASE}/zhipu`,
     placeholder: "输入 API Key",
   },
@@ -69,7 +69,7 @@ interface ProviderPricing {
   priceNote: string;
 }
 const PROVIDER_PRICING: Record<string, ProviderPricing> = {
-  zai:         { hasFree: true,  freeLabel: "GLM-4-Flash 免费",  range: "¥1+/1M",     priceNote: "GLM-4-Flash 完全免费；GLM-4-Air ¥1/1M，GLM-4 ¥100/1M（输入/输出同价）" },
+  zai:         { hasFree: true,  freeLabel: "注册送额度",         range: "¥1+/1M",     priceNote: "注册送免费额度；GLM-4-Flash ¥0.1/1M，GLM-4-Air ¥1/1M，GLM-4 ¥100/1M（输入/输出同价）" },
   minimax:     { hasFree: false,                                  range: "¥0.15–1/1M", priceNote: "abab5.5 ¥0.15/1M · abab6.5s ¥1/1M（输入=输出同价）" },
   anthropic:   { hasFree: false,                                  range: "$0.25–75/1M", priceNote: "Haiku $0.25/$1.25 · Sonnet-3.5 $3/$15 · Opus $15/$75（输入/输出）" },
   openai:      { hasFree: false,                                  range: "$0.15–60/1M", priceNote: "GPT-4o-mini $0.15/$0.60 · GPT-4o $2.5/$10 · o1 $15/$60（输入/输出）" },
