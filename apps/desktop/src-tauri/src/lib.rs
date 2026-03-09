@@ -21,6 +21,15 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            // 点 × 时隐藏到系统托盘而不是退出，让应用保持后台运行
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    window.hide().ok();
+                }
+            }
+        })
         .manage(bots::BotManager::new())
         .manage(pairing::PairingState::default())
         .plugin(tauri_plugin_shell::init())
@@ -126,10 +135,45 @@ pub fn run() {
                 // 动态设置窗口图标，确保 dev/release 均使用最新图标
                 let _ = window.set_icon(tauri::include_image!("icons/icon.png"));
             }
+
+            // ── 系统托盘：最小化到托盘，双击恢复，右键退出 ──────────────────
+            let tray_menu = tauri::menu::MenuBuilder::new(app)
+                .item(&tauri::menu::MenuItem::with_id(app, "show", "显示 ClawNo.11", true, None::<&str>)?)
+                .item(&tauri::menu::MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?)
+                .build()?;
+
+            let _tray = tauri::tray::TrayIconBuilder::new()
+                .icon(tauri::include_image!("icons/icon.png"))
+                .tooltip("ClawNo.11 — You × AI = ∞")
+                .menu(&tray_menu)
+                .on_menu_event(|app, event| match event.id().as_ref() {
+                    "show" => {
+                        if let Some(w) = app.get_webview_window("main") {
+                            w.show().ok();
+                            w.set_focus().ok();
+                        }
+                    }
+                    "quit" => {
+                        pm2::stop_openclaw_on_exit();
+                        app.exit(0);
+                    }
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(w) = app.get_webview_window("main") {
+                            w.show().ok();
+                            w.set_focus().ok();
+                        }
+                    }
+                })
+                .build(app)?;
+
             Ok(())
         })
         .on_window_event(|window, event| {
-            // 只在主窗口关闭时停止网关，DevTools 等辅助窗口关闭不触发
+            // 只在真正退出时停止网关（通过托盘菜单退出触发 Destroyed）
             if window.label() == "main" {
                 if let tauri::WindowEvent::Destroyed = event {
                     pm2::stop_openclaw_on_exit();
