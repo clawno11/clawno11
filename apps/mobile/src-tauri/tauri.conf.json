@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "ai.clawno11.mobile",
   "build": {
-    "beforeDevCommand": "pnpm dev",
+    "beforeDevCommand": "pnpm run dev",
     "devUrl": "http://localhost:1421",
     "beforeBuildCommand": "pnpm build",
     "frontendDist": "../dist"
