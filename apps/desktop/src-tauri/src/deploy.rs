@@ -1,191 +1,77 @@
-use serde::{Deserialize, Serialize};
+/// Deployment coordinator — orchestrates node / pm2 / gateway sub-modules.
+///
+/// All heavy logic lives in the focused sub-modules:
+///   crate::node    — Node.js + openclaw CLI
+///   crate::pm2     — pm2 daemon lifecycle
+///   crate::gateway — openclaw gateway start / health / URL
+///
+/// This module owns only:
+///   • deploy_step_onboard   — openclaw one-time config init
+///   • deploy_remote         — remote deployment (stub, not yet implemented)
+///   • configure_api_key     — write AI provider token via CLI (stdin pipe)
+
 use std::process::Command;
+use serde::Deserialize;
 
-// ── helpers ──────────────────────────────────────────────────────────────────
+use crate::platform::{augmented_path, data_roaming, first_line, path_join, shell_result, user_home};
+use crate::types::{RemoteDeployResult, StepResult};
 
-/// Run a command through the Windows shell so it can resolve `.cmd` scripts
-/// and pick up the full user PATH (Node.js, npm, pm2, etc.).
-fn shell(cmd: &str) -> std::io::Result<std::process::Output> {
-    // Inject common Node.js install locations so they are always found
-    let extra_paths = [
-        r"C:\Program Files\nodejs",
-        r"C:\Program Files (x86)\nodejs",
-        &format!(
-            r"{}\AppData\Roaming\npm",
-            std::env::var("USERPROFILE").unwrap_or_default()
-        ),
-        &format!(
-            r"{}\AppData\Local\Programs\nodejs",
-            std::env::var("USERPROFILE").unwrap_or_default()
-        ),
-    ];
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-    let current_path = std::env::var("PATH").unwrap_or_default();
-    let full_path = format!("{};{}", extra_paths.join(";"), current_path);
+/// Strict allowlist of known AI provider identifiers.
+/// This prevents command injection via the `provider` argument passed to configure_api_key.
+const VALID_PROVIDERS: &[&str] = &[
+    "anthropic", "openai", "openrouter", "zai", "minimax", "deepseek",
+    "moonshot", "qwen", "doubao", "hunyuan", "spark", "baichuan",
+    "stepfun", "lingyi", "siliconflow",
+];
 
-    Command::new("cmd")
-        .args(["/C", cmd])
-        .env("PATH", &full_path)
-        .output()
-}
-
-fn shell_ok(cmd: &str) -> bool {
-    shell(cmd).map(|o| o.status.success()).unwrap_or(false)
-}
-
-fn shell_output(cmd: &str) -> String {
-    shell(cmd)
-        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
-// ── types ─────────────────────────────────────────────────────────────────────
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct LocalDeployResult {
-    pub success: bool,
-    pub pid: Option<u32>,
-    pub port: u16,
-    pub config_dir: String,
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct RemoteDeployResult {
-    pub success: bool,
-    pub host: String,
-    pub gateway_port: u16,
-    pub gateway_url: String,
-    pub error: Option<String>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct ServiceInfo {
-    pub name: String,
-    pub status: String,
-    pub pid: Option<u32>,
-    pub uptime: Option<u64>,
-    pub restarts: Option<u32>,
-}
-
-// ── commands ──────────────────────────────────────────────────────────────────
+// ── Onboard ───────────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn deploy_local(port: Option<u16>, config_dir: Option<String>) -> LocalDeployResult {
-    let port = port.unwrap_or(18789);
-    let home = dirs_next::home_dir()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-    let config_dir = config_dir.unwrap_or_else(|| format!("{}/.openclaw", home));
+pub async fn deploy_step_onboard() -> StepResult {
+    let mut fixes: Vec<String> = Vec::new();
+    let home_claw = path_join(&user_home(), ".openclaw");
 
-    // 1. Check Node.js
-    let node_ver = shell_output("node --version");
-    if node_ver.is_empty() {
-        return LocalDeployResult {
-            success: false,
-            pid: None,
-            port,
-            config_dir,
-            error: Some(
-                "未检测到 Node.js，请先安装 Node.js >= 22 (https://nodejs.org)".into(),
-            ),
-        };
+    let (ok, stdout, stderr) = shell_result("openclaw onboard --yes");
+    let combined = format!("{stdout} {stderr}").to_lowercase();
+
+    if ok || combined.contains("already") || combined.contains("skip") {
+        return StepResult::ok_fixed("config-initialized".to_string(), fixes);
     }
 
-    // 2. Install openclaw if needed
-    let claw_ver = shell_output("openclaw --version");
-    if claw_ver.is_empty() {
-        let ok = shell_ok("npm install -g openclaw");
-        if !ok {
-            return LocalDeployResult {
-                success: false,
-                pid: None,
-                port,
-                config_dir,
-                error: Some("npm install -g openclaw 失败，请检查网络或权限".into()),
-            };
+    if combined.contains("eacces") || combined.contains("permission") || combined.contains("access denied") {
+        let alt_dir = path_join(&data_roaming(), "openclaw");
+        let _ = std::fs::create_dir_all(&alt_dir);
+        fixes.push(format!("alt-config-dir:{}", alt_dir));
+        // Platform-specific env var syntax: cmd.exe uses "set VAR=val &&", sh uses "VAR=val cmd".
+        #[cfg(target_os = "windows")]
+        let onboard_cmd = format!("set OPENCLAW_STATE_DIR={alt_dir} && openclaw onboard --yes");
+        #[cfg(not(target_os = "windows"))]
+        let onboard_cmd = format!("OPENCLAW_STATE_DIR=\"{alt_dir}\" openclaw onboard --yes");
+        let (ok2, _, _) = shell_result(&onboard_cmd);
+        if ok2 { return StepResult::ok_fixed("config-initialized-alt-dir".to_string(), fixes); }
+    }
+
+    if combined.contains("parse") || combined.contains("invalid") || combined.contains("unexpected token") {
+        if std::path::Path::new(&home_claw).exists() {
+            let _ = std::fs::rename(&home_claw, format!("{home_claw}.bak"));
+            fixes.push(format!("backup-corrupt-config:{home_claw}.bak"));
         }
+        let (ok3, _, stderr3) = shell_result("openclaw onboard --yes");
+        if ok3 { return StepResult::ok_fixed("config-reset-and-initialized".to_string(), fixes); }
+        return StepResult::err_fixed(format!("config-reset-failed: {}", first_line(&stderr3)), fixes);
     }
 
-    // 3. Install pm2 if needed
-    let pm2_ver = shell_output("pm2 --version");
-    if pm2_ver.is_empty() {
-        shell_ok("npm install -g pm2");
-    }
-
-    // 4. Onboard (init config, non-fatal)
-    shell_ok("openclaw onboard --yes");
-
-    // 5. Start / restart via pm2
-    let running = shell_output("pm2 pid openclaw");
-    let started = if running.trim().is_empty() || running.trim() == "undefined" {
-        shell_ok(&format!(
-            "pm2 start openclaw --name openclaw -- --port {}",
-            port
-        ))
-    } else {
-        shell_ok("pm2 restart openclaw")
-    };
-
-    if started {
-        LocalDeployResult {
-            success: true,
-            pid: None,
-            port,
-            config_dir,
-            error: None,
-        }
-    } else {
-        LocalDeployResult {
-            success: false,
-            pid: None,
-            port,
-            config_dir,
-            error: Some("pm2 start 失败，请查看系统日志".into()),
-        }
-    }
+    // Non-fatal: gateway --allow-unconfigured handles missing config.
+    fixes.push("onboard-skipped-non-fatal".to_string());
+    StepResult::ok_fixed("config-skipped-using-defaults".to_string(), fixes)
 }
 
-#[tauri::command]
-pub async fn get_local_service_info() -> ServiceInfo {
-    let out = shell_output("pm2 jlist");
-    if out.contains("\"openclaw\"") && out.contains("\"online\"") {
-        ServiceInfo {
-            name: "openclaw".into(),
-            status: "running".into(),
-            pid: None,
-            uptime: None,
-            restarts: None,
-        }
-    } else if out.contains("\"openclaw\"") {
-        ServiceInfo {
-            name: "openclaw".into(),
-            status: "stopped".into(),
-            pid: None,
-            uptime: None,
-            restarts: None,
-        }
-    } else {
-        ServiceInfo {
-            name: "openclaw".into(),
-            status: "unknown".into(),
-            pid: None,
-            uptime: None,
-            restarts: None,
-        }
-    }
-}
-
-#[tauri::command]
-pub async fn stop_local_service() {
-    shell_ok("pm2 stop openclaw");
-}
-
-#[tauri::command]
-pub async fn restart_local_service() {
-    shell_ok("pm2 restart openclaw");
-}
+// ── Remote deploy (stub) ──────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
 pub struct RemoteDeployArgs {
@@ -205,22 +91,162 @@ pub async fn deploy_remote(args: RemoteDeployArgs) -> RemoteDeployResult {
         host: args.host.clone(),
         gateway_port: args.gateway_port,
         gateway_url: format!("http://{}:{}", args.host, args.gateway_port),
-        error: Some("远程部署功能开发中".into()),
+        error: Some("remote-deploy-not-implemented".to_string()),
     }
 }
 
 #[tauri::command]
 pub async fn get_remote_service_info(
-    host: String,
-    port: u16,
-    username: String,
-    password: Option<String>,
-) -> ServiceInfo {
-    ServiceInfo {
-        name: "openclaw".into(),
-        status: "unknown".into(),
-        pid: None,
-        uptime: None,
-        restarts: None,
+    host: String, port: u16, username: String, password: Option<String>,
+) -> crate::types::ServiceInfo {
+    let _ = (host, port, username, password);
+    crate::types::ServiceInfo {
+        name: "openclaw".to_string(),
+        status: "unknown".to_string(),
+        pid: None, uptime: None, restarts: None,
+    }
+}
+
+// ── AI provider key configuration ─────────────────────────────────────────────
+
+/// Map a provider ID to the model string used in `openclaw models set <model>`.
+///
+/// Direct providers (anthropic, openai, zai, minimax) use their own routing prefix.
+/// Relay providers (deepseek, moonshot, qwen, …) MUST use the `openrouter/` prefix
+/// because OpenClaw routes them through OpenRouter — using a bare `deepseek/…` name
+/// causes `FailoverError: Unknown model` since there is no direct DeepSeek connector.
+fn provider_default_model(provider: &str) -> Option<&'static str> {
+    match provider {
+        // ── Direct connectors ────────────────────────────────────────────────
+        "anthropic"   => Some("anthropic/claude-sonnet-4-6"),
+        "openai"      => Some("openai/gpt-4o"),
+        "openrouter"  => Some("openrouter/anthropic/claude-3.5-sonnet"),
+        "zai"         => Some("zai/glm-4.7"),
+        "minimax"     => Some("minimax/MiniMax-M2.5"),
+        // ── Relay providers: route through OpenRouter ────────────────────────
+        // These use the `openrouter/<provider>/<model>` form so that OpenClaw
+        // looks up the model via the OpenRouter endpoint instead of trying a
+        // non-existent direct connector.
+        "deepseek"    => Some("openrouter/deepseek/deepseek-chat"),
+        "moonshot"    => Some("openrouter/moonshot-ai/moonshot-v1-8k"),
+        "qwen"        => Some("openrouter/qwen/qwen-plus"),
+        "doubao"      => Some("openrouter/bytedance/doubao-pro-32k"),
+        "hunyuan"     => Some("openrouter/tencent/hunyuan-turbos-20250313"),
+        "spark"       => Some("openrouter/iflytek/spark-4-ultra"),
+        "baichuan"    => Some("openrouter/baichuan-inc/baichuan2-turbo"),
+        "stepfun"     => Some("openrouter/stepfun-inc/step-2-16k"),
+        "lingyi"      => Some("openrouter/01-ai/yi-large"),
+        "siliconflow" => Some("openrouter/meta-llama/llama-3.1-8b-instruct"),
+        _             => None,
+    }
+}
+
+/// Run a command silently (no window) using the platform shell abstraction.
+fn run_silent(cmd: &str) -> (bool, String) {
+    match crate::platform::shell_cmd(cmd) {
+        Ok(o) => {
+            let out = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            );
+            (o.status.success(), out)
+        }
+        Err(e) => (false, e.to_string()),
+    }
+}
+
+/// Configure an AI provider API key via the OpenClaw CLI.
+/// The key is piped via stdin — it never appears in the process command line.
+/// The provider is validated against a strict allowlist to prevent command injection.
+#[tauri::command]
+pub async fn configure_api_key(provider: String, api_key: String) -> StepResult {
+    let mut fixes: Vec<String> = Vec::new();
+
+    if provider.is_empty() || api_key.is_empty() {
+        return StepResult::err("provider-or-key-empty".to_string());
+    }
+
+    // Security: validate provider against allowlist before shell interpolation.
+    if !VALID_PROVIDERS.contains(&provider.as_str()) {
+        return StepResult::err(format!("invalid-provider:{}", provider));
+    }
+
+    // Use the platform shell (cmd on Windows, sh on Unix) for cross-platform support.
+    let cmd_str = format!("openclaw models auth paste-token --provider {}", provider);
+    #[cfg(target_os = "windows")]
+    let mut c = {
+        let mut b = Command::new("cmd");
+        b.args(["/C", &cmd_str]);
+        b.creation_flags(CREATE_NO_WINDOW);
+        b
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut c = {
+        let mut b = Command::new("sh");
+        b.args(["-c", &cmd_str]);
+        b
+    };
+    c.env("PATH", augmented_path())
+     .stdin(std::process::Stdio::piped())
+     .stdout(std::process::Stdio::piped())
+     .stderr(std::process::Stdio::piped());
+
+    let paste_result = (|| -> Result<std::process::Output, String> {
+        let mut child = c.spawn().map_err(|e| format!("spawn-failed:{e}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(api_key.as_bytes()).map_err(|e| format!("stdin-write-failed:{e}"))?;
+        }
+        child.wait_with_output().map_err(|e| format!("wait-failed:{e}"))
+    })();
+
+    match paste_result {
+        Ok(o) => {
+            let out = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            );
+            if o.status.success() {
+                fixes.push(format!("auth-written:{}", provider));
+            } else {
+                return StepResult::err(format!("paste-token-failed:{}", out.trim()));
+            }
+        }
+        Err(e) => return StepResult::err(e),
+    }
+
+    if let Some(model) = provider_default_model(&provider) {
+        let set_cmd = format!("openclaw models set {}", model);
+        let (ok, out) = run_silent(&set_cmd);
+        if ok {
+            fixes.push(format!("model-set:{}", model));
+        } else {
+            fixes.push(format!("model-set-skipped:{}", out.trim().chars().take(80).collect::<String>()));
+        }
+    }
+
+    StepResult::ok_fixed("api-key-configured".to_string(), fixes)
+}
+
+// ── Unit tests ────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_default_model_known() {
+        assert_eq!(provider_default_model("anthropic"), Some("anthropic/claude-sonnet-4-6"));
+        assert_eq!(provider_default_model("openai"), Some("openai/gpt-4o"));
+        // Relay providers must use the openrouter/ prefix
+        assert_eq!(provider_default_model("deepseek"), Some("openrouter/deepseek/deepseek-chat"));
+        assert_eq!(provider_default_model("moonshot"), Some("openrouter/moonshot-ai/moonshot-v1-8k"));
+    }
+
+    #[test]
+    fn provider_default_model_unknown_returns_none() {
+        assert_eq!(provider_default_model("nonexistent_provider"), None);
     }
 }

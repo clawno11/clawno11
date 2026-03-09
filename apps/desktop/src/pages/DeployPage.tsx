@@ -138,7 +138,11 @@ function translateFix(fix: string): string {
   if (fix.startsWith("backup-corrupt-config:")) return `备份损坏配置：${fix.slice(22)}`;
   if (fix.startsWith("alt-config-dir:")) return `使用备用配置目录：${fix.slice(15)}`;
   if (fix.startsWith("auth-written:")) return `已写入 ${fix.slice(13)} API Key`;
-  if (fix.startsWith("model-set:")) return `已设置默认模型：${fix.slice(10)}`;
+  if (fix.startsWith("model-set:")) {
+    const m = fix.slice(10);
+    if (m.startsWith("openrouter/")) return `已设置默认模型：${m}（通过 OpenRouter 路由）`;
+    return `已设置默认模型：${m}`;
+  }
   if (fix.startsWith("model-set-skipped:")) return `模型设置跳过（${fix.slice(18).slice(0, 40)}）`;
 
   return fix;
