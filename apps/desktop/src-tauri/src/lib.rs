@@ -56,6 +56,7 @@ pub fn run() {
             gateway::deploy_step_start,
             deploy::deploy_remote,
             deploy::configure_api_key,
+            deploy::fix_model_config,
             // ── SSH remote deploy pipeline ────────────────────────────────────
             ssh_deploy::deploy_remote_connect,
             ssh_deploy::deploy_remote_check_node,

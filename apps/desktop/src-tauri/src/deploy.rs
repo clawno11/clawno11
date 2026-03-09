@@ -218,6 +218,7 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
     }
 
     if let Some(model) = provider_default_model(&provider) {
+        // Set as the active default model.
         let set_cmd = format!("openclaw models set {}", model);
         let (ok, out) = run_silent(&set_cmd);
         if ok {
@@ -225,9 +226,93 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
         } else {
             fixes.push(format!("model-set-skipped:{}", out.trim().chars().take(80).collect::<String>()));
         }
+
+        // Always register this model in the fallback chain so that if the
+        // primary model fails (e.g. rate-limit, auth error, quota exhausted),
+        // OpenClaw can automatically retry with the next available model.
+        let fb_cmd = format!("openclaw models fallbacks add {}", model);
+        let (fb_ok, fb_out) = run_silent(&fb_cmd);
+        if fb_ok {
+            fixes.push(format!("fallback-added:{}", model));
+        } else {
+            fixes.push(format!("fallback-add-skipped:{}", fb_out.trim().chars().take(60).collect::<String>()));
+        }
     }
 
     StepResult::ok_fixed("api-key-configured".to_string(), fixes)
+}
+
+// ── Model config auto-fix ─────────────────────────────────────────────────────
+
+/// Run on app startup: detect missing-auth models, auto-switch default,
+/// and build the fallback chain from all providers that have auth configured.
+///
+/// Returns a summary string for telemetry / logging only.
+#[tauri::command]
+pub fn fix_model_config() -> String {
+    let (ok, out) = run_silent("openclaw models");
+    if !ok {
+        return format!("skip:openclaw-not-ready");
+    }
+
+    // ── 1. Collect models that have auth (from "Providers w/ OAuth/tokens" line) ──
+    let mut auth_providers: Vec<&str> = Vec::new();
+    for line in out.lines() {
+        if line.trim_start().starts_with("- ") {
+            // e.g. "- zai effective=..." — extract provider name before the space
+            let rest = line.trim_start_matches("- ").trim();
+            if let Some(pname) = rest.split_whitespace().next() {
+                // strip trailing colon if present
+                let p = pname.trim_end_matches(':');
+                if !p.is_empty() && !auth_providers.contains(&p) {
+                    auth_providers.push(p);
+                }
+            }
+        }
+    }
+
+    // ── 2. Check if current default model has auth ────────────────────────────
+    let default_model = out.lines()
+        .find(|l| l.trim_start().starts_with("Default"))
+        .and_then(|l| l.splitn(2, ':').nth(1))
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default();
+
+    let default_provider = default_model.split('/').next().unwrap_or("").to_string();
+
+    // "openrouter/X/Y" prefix — route through openrouter which counts as having auth
+    let default_has_auth = auth_providers.contains(&default_provider.as_str())
+        || default_provider == "openrouter";
+
+    let mut actions: Vec<String> = Vec::new();
+
+    // ── 3. If default has no auth, switch to first model with auth ────────────
+    if !default_has_auth && !auth_providers.is_empty() {
+        // Pick the best available model for each known auth provider
+        let candidate = auth_providers.iter().find_map(|&p| provider_default_model(p));
+        if let Some(new_model) = candidate {
+            let (ok2, _) = run_silent(&format!("openclaw models set {}", new_model));
+            if ok2 {
+                actions.push(format!("switched-default:{}", new_model));
+            }
+        }
+    }
+
+    // ── 4. Ensure every auth-bearing provider is in the fallback chain ────────
+    for p in &auth_providers {
+        if let Some(model) = provider_default_model(p) {
+            let (ok3, _) = run_silent(&format!("openclaw models fallbacks add {}", model));
+            if ok3 {
+                actions.push(format!("fallback-ensured:{}", model));
+            }
+        }
+    }
+
+    if actions.is_empty() {
+        "ok:no-changes-needed".to_string()
+    } else {
+        actions.join(";")
+    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────
