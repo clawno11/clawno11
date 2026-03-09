@@ -125,14 +125,15 @@ pub fn run() {
             if let Some(window) = app.get_webview_window("main") {
                 // 动态设置窗口图标，确保 dev/release 均使用最新图标
                 let _ = window.set_icon(tauri::include_image!("icons/icon.png"));
-                #[cfg(debug_assertions)]
-                window.open_devtools();
             }
             Ok(())
         })
-        .on_window_event(|_window, event| {
-            if let tauri::WindowEvent::Destroyed = event {
-                pm2::stop_openclaw_on_exit();
+        .on_window_event(|window, event| {
+            // 只在主窗口关闭时停止网关，DevTools 等辅助窗口关闭不触发
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Destroyed = event {
+                    pm2::stop_openclaw_on_exit();
+                }
             }
         })
         .run(tauri::generate_context!())
