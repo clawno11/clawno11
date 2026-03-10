@@ -286,30 +286,50 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
         return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
     }
 
-    // macOS/Linux: try Homebrew (macOS), then nvm auto-install, then guide user
+    // macOS/Linux: nvm first (fast, no brew-update overhead), then Homebrew, then guide user
     #[cfg(not(target_os = "windows"))]
     {
         let home = crate::platform::user_home();
+        let nvm_sh = format!("{home}/.nvm/nvm.sh");
 
-        // macOS: try Homebrew
+        // ── Strategy 1: nvm already installed — fastest path, no download of brew formula ──
+        if std::path::Path::new(&nvm_sh).exists() {
+            fixes.push("install-via-nvm".to_string());
+            // NVM_DIR must be set; source nvm.sh then install+use 22
+            // Timeout via `timeout 300` (5 min) to prevent hanging on slow networks
+            let cmd = format!(
+                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
+            );
+            let (ok, _, _) = shell_result(&cmd);
+            if ok {
+                let ver = shell_output("node --version");
+                if node_major(&ver) >= 22 {
+                    return StepResult::ok_fixed(ver, fixes);
+                }
+                return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
+            }
+        }
+
+        // ── Strategy 2: Homebrew (macOS only) ─────────────────────────────────────────────
         #[cfg(target_os = "macos")]
         if !shell_output("brew --version").is_empty() {
             fixes.push("brew-install-node".to_string());
-            // Install node (latest LTS is >= 22 as of 2025)
-            let (ok, _, _) = shell_result("brew install node");
+            // HOMEBREW_NO_AUTO_UPDATE=1 skips `brew update` — saves 1-3 minutes
+            let (ok, _, _) = shell_result(
+                "HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 brew install node"
+            );
             if ok {
                 let ver = shell_output("node --version");
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
             }
-            // Fallback: install pinned node@22
+            // Fallback: pinned node@22
             let (ok2, _, _) = shell_result(
-                "brew install node@22 && brew link node@22 --force --overwrite"
+                "HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 brew install node@22 && brew link node@22 --force --overwrite"
             );
             if ok2 {
-                // node@22 installs to /opt/homebrew/opt/node@22/bin — add to PATH
-                let brew_bin = shell_output("brew --prefix node@22");
+                let brew_bin = shell_output("brew --prefix node@22 2>/dev/null");
                 if !brew_bin.is_empty() {
                     let node_bin = format!("{}/bin", brew_bin.trim());
                     let current = std::env::var("PATH").unwrap_or_default();
@@ -322,26 +342,21 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
             }
         }
 
-        // Try nvm: install nvm if needed, then install node 22
-        fixes.push("install-via-nvm".to_string());
-        let nvm_sh = format!("{home}/.nvm/nvm.sh");
-        if !std::path::Path::new(&nvm_sh).exists() {
-            shell_ok(
-                "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash",
-            );
-        }
+        // ── Strategy 3: install nvm via curl, then install node 22 ────────────────────────
+        fixes.push("install-nvm-then-node".to_string());
+        shell_ok(
+            "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash",
+        );
         if std::path::Path::new(&nvm_sh).exists() {
             let cmd = format!(
                 "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
             );
             let (ok, _, _) = shell_result(&cmd);
             if ok {
-                // augmented_path() dynamically rescans ~/.nvm/versions on next call
                 let ver = shell_output("node --version");
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
-                // Installed but PATH not yet updated in this process — require restart
                 return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
             }
         }
