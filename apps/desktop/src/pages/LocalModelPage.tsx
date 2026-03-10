@@ -7,7 +7,7 @@ import {
 import { open as openUrl } from "@tauri-apps/plugin-shell";
 import {
   ollamaCheckStatus, ollamaEnsureInstalled, ollamaStartServer,
-  ollamaListLocalModels, ollamaDeleteModel, ollamaPullModel,
+  ollamaListLocalModels, ollamaDeleteModel, ollamaPullModel, ollamaSetModel,
   type OllamaStatus, type OllamaModel, type OllamaPullProgress,
 } from "../ipc";
 
@@ -270,8 +270,11 @@ export function LocalModelPage() {
       }));
 
       if (p.done && !p.error) {
-        // Model downloaded — refresh list
+        // Model downloaded — refresh list and auto-set as default if none set yet.
         refresh(true);
+        if (!getDefaultModel()) {
+          handleSetDefault(p.model);
+        }
       }
     });
 
@@ -342,9 +345,15 @@ export function LocalModelPage() {
   };
 
   // ── Set default model ────────────────────────────────────────────────────────
-  const handleSetDefault = (name: string) => {
+  const handleSetDefault = async (name: string) => {
     setDefaultModel(name);
     setDefaultModelState(name);
+    // Notify OpenClaw gateway to route to this Ollama model.
+    try {
+      await ollamaSetModel(name);
+    } catch {
+      // Non-fatal: gateway will pick it up on next restart.
+    }
   };
 
   const installedNames = new Set(localModels.map((m) => m.name));

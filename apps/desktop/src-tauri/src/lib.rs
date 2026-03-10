@@ -138,6 +138,7 @@ pub fn run() {
             ollama::ollama_list_local_models,
             ollama::ollama_delete_model,
             ollama::ollama_pull_model,
+            ollama::set_ollama_model,
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {

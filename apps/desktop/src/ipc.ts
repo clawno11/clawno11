@@ -249,4 +249,5 @@ export const ollamaEnsureInstalled    = ()                   => invoke<StepResul
 export const ollamaStartServer        = ()                   => invoke<StepResult>("ollama_start_server");
 export const ollamaListLocalModels    = ()                   => invoke<OllamaModel[]>("ollama_list_local_models");
 export const ollamaDeleteModel        = (name: string)       => invoke<StepResult>("ollama_delete_model", { name });
+export const ollamaSetModel           = (modelName: string)  => invoke<StepResult>("set_ollama_model", { modelName });
 export const ollamaPullModel          = (name: string)       => invoke<StepResult>("ollama_pull_model", { name });

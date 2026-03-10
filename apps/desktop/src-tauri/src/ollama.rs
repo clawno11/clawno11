@@ -453,3 +453,35 @@ pub async fn ollama_pull_model(app: AppHandle, name: String) -> StepResult {
 
     StepResult::ok(format!("pulled:{}", name))
 }
+
+/// Tell OpenClaw gateway to use this Ollama model as its active default.
+///
+/// Runs `openclaw models set ollama/<model_name>` so that subsequent chat
+/// requests are routed to the locally-running Ollama instance.
+/// Also registers the model in the fallback chain for resilience.
+#[tauri::command]
+pub fn set_ollama_model(model_name: String) -> StepResult {
+    if model_name.trim().is_empty() {
+        return StepResult::err("model-name-empty".to_string());
+    }
+    // Sanitise: reject anything that looks like shell injection.
+    if model_name.contains('"') || model_name.contains('\'') || model_name.contains(';') || model_name.contains('&') {
+        return StepResult::err("model-name-invalid".to_string());
+    }
+
+    let model_str = format!("ollama/{}", model_name);
+
+    // Set as active model.
+    let set_cmd = format!("openclaw models set {}", model_str);
+    let (set_ok, set_out, set_err) = shell_result(&set_cmd);
+    if !set_ok {
+        let detail = format!("{}{}", set_out, set_err);
+        return StepResult::err(format!("set-model-failed:{}", detail.trim().chars().take(120).collect::<String>()));
+    }
+
+    // Add to fallback chain so it is retried automatically.
+    let fb_cmd = format!("openclaw models fallbacks add {}", model_str);
+    let _ = shell_result(&fb_cmd);
+
+    StepResult::ok(format!("ollama-model-set:{}", model_name))
+}
