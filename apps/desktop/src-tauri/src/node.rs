@@ -155,6 +155,36 @@ pub fn node_major(ver: &str) -> u32 {
         .unwrap_or(0)
 }
 
+/// Run the node binary by its **full path** (bypasses shell PATH entirely).
+/// Used as a fallback when `shell_output("node --version")` returns empty
+/// due to Tauri sandbox PATH isolation on macOS.
+fn node_version_direct() -> String {
+    if let Some(dir) = scan_node_paths() {
+        #[cfg(target_os = "windows")]
+        let bin = format!("{}\\node.exe", dir);
+        #[cfg(not(target_os = "windows"))]
+        let bin = format!("{}/node", dir);
+
+        if std::path::Path::new(&bin).exists() {
+            let ver = std::process::Command::new(&bin)
+                .arg("--version")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            // Also inject the dir into current process PATH so npm/pm2 steps can use it
+            if !ver.is_empty() {
+                let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+                let current = std::env::var("PATH").unwrap_or_default();
+                if !current.contains(&dir) {
+                    std::env::set_var("PATH", format!("{}{}{}", dir, sep, current));
+                }
+            }
+            return ver;
+        }
+    }
+    String::new()
+}
+
 /// Search well-known directories for an existing `node.exe` / `node` binary.
 pub fn scan_node_paths() -> Option<String> {
     let home  = crate::platform::user_home();
@@ -292,21 +322,29 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
         let home = crate::platform::user_home();
         let nvm_sh = format!("{home}/.nvm/nvm.sh");
 
-        // ── Strategy 1: nvm already installed — fastest path, no download of brew formula ──
+        // ── 检测辅助：shell PATH 或直接路径都行 ────────────────────────────────────────────
+        let node_ver = || -> String {
+            let v = shell_output("node --version");
+            if !v.is_empty() { return v; }
+            node_version_direct() // Tauri sandbox PATH 隔离时用完整路径直接运行
+        };
+
+        // ── Strategy 1: nvm already installed — fastest path ──────────────────────────────
         if std::path::Path::new(&nvm_sh).exists() {
             fixes.push("install-via-nvm".to_string());
-            // NVM_DIR must be set; source nvm.sh then install+use 22
-            // Timeout via `timeout 300` (5 min) to prevent hanging on slow networks
             let cmd = format!(
                 "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
             );
             let (ok, _, _) = shell_result(&cmd);
             if ok {
-                let ver = shell_output("node --version");
+                let ver = node_ver();
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
-                return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
+                // nvm reported success but still can't find node — fatal
+                return StepResult::err_fixed(
+                    "node-install-failed: nvm ok but binary not found".to_string(), fixes,
+                );
             }
         }
 
@@ -319,7 +357,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
                 "HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 brew install node"
             );
             if ok {
-                let ver = shell_output("node --version");
+                let ver = node_ver();
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
@@ -333,9 +371,11 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
                 if !brew_bin.is_empty() {
                     let node_bin = format!("{}/bin", brew_bin.trim());
                     let current = std::env::var("PATH").unwrap_or_default();
-                    std::env::set_var("PATH", format!("{}:{}", node_bin, current));
+                    if !current.contains(&node_bin) {
+                        std::env::set_var("PATH", format!("{}:{}", node_bin, current));
+                    }
                 }
-                let ver = shell_output("node --version");
+                let ver = node_ver();
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
@@ -353,11 +393,13 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
             );
             let (ok, _, _) = shell_result(&cmd);
             if ok {
-                let ver = shell_output("node --version");
+                let ver = node_ver();
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
-                return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
+                return StepResult::err_fixed(
+                    "node-install-failed: nvm ok but binary not found".to_string(), fixes,
+                );
             }
         }
 
@@ -387,24 +429,24 @@ fn openclaw_semver(raw: &str) -> String {
 pub async fn deploy_step_check_node() -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
 
+    // ── 1. shell PATH 直接检测 ────────────────────────────────────────────────
     let ver = shell_output("node --version");
     if !ver.is_empty() && node_major(&ver) >= 22 { return StepResult::ok(ver); }
 
-    if ver.is_empty() {
-        if let Some(node_dir) = scan_node_paths() {
-            fixes.push(format!("found-node-at:{}", node_dir));
-            let current = std::env::var("PATH").unwrap_or_default();
-            let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-            std::env::set_var("PATH", format!("{}{}{}", node_dir, sep, current));
-            let ver2 = shell_output("node --version");
-            if !ver2.is_empty() && node_major(&ver2) >= 22 {
-                return StepResult::ok_fixed(ver2, fixes);
-            }
-            if !ver2.is_empty() { return upgrade_node(&ver2, fixes); }
+    // ── 2. shell PATH 找不到 → 用文件系统扫描 + 直接路径运行（Tauri sandbox 兼容）──
+    let ver_direct = node_version_direct();
+    if !ver_direct.is_empty() {
+        // node_version_direct 内部已把目录注入了当前进程 PATH
+        if node_major(&ver_direct) >= 22 {
+            fixes.push("found-via-direct-path".to_string());
+            return StepResult::ok_fixed(ver_direct, fixes);
         }
-        return install_node_auto(fixes);
+        // 版本过低 → 升级
+        return upgrade_node(&ver_direct, fixes);
     }
-    upgrade_node(&ver, fixes)
+
+    // ── 3. 完全找不到 → 自动安装 ─────────────────────────────────────────────
+    install_node_auto(fixes)
 }
 
 #[tauri::command]
