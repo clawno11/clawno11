@@ -1,13 +1,31 @@
 /** @type {import('tailwindcss').Config} */
-module.exports = {
-  content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
-  presets: [require("nativewind/preset")],
+export default {
+  content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
       colors: {
-        primary: "#3B82F6",
-        "primary-dark": "#2563EB",
+        primary: "hsl(var(--primary))",
+        background: "hsl(var(--background))",
+        foreground: "hsl(var(--foreground))",
+        muted: {
+          DEFAULT: "hsl(var(--muted))",
+          foreground: "hsl(var(--muted-foreground))",
+        },
+        border: "hsl(var(--border))",
+        card: "hsl(var(--card))",
+        destructive: "hsl(var(--destructive))",
+      },
+      fontFamily: {
+        sans: [
+          "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto",
+          "Noto Sans SC", "PingFang SC", "sans-serif",
+        ],
+        mono: ["SF Mono", "Menlo", "Monaco", "Consolas", "monospace"],
+      },
+      spacing: {
+        safe: "env(safe-area-inset-bottom)",
       },
     },
   },
+  plugins: [],
 };

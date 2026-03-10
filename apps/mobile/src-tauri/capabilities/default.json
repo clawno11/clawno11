@@ -16,7 +16,8 @@
     "fs:allow-read-dir",
     "http:default",
     "http:allow-fetch",
-    "http:allow-fetch-send-body",
+    "http:allow-fetch-send",
+    "http:allow-fetch-read-body",
     "http:allow-fetch-cancel"
   ]
 }
