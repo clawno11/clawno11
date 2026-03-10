@@ -1,3 +1,4 @@
+import { Stars } from "@/components/Stars";
 import { Nav } from "@/components/Nav";
 import { Hero } from "@/components/Hero";
 import { Stats } from "@/components/Stats";
@@ -9,15 +10,20 @@ import { Footer } from "@/components/Footer";
 
 export default function Home() {
   return (
-    <main>
-      <Nav />
-      <Hero />
-      <Stats />
-      <Features />
-      <HowItWorks />
-      <Security />
-      <Download />
-      <Footer />
-    </main>
+    <>
+      {/* Fixed starfield — visible across all sections */}
+      <Stars />
+
+      <main className="relative z-10">
+        <Nav />
+        <Hero />
+        <Stats />
+        <Features />
+        <HowItWorks />
+        <Security />
+        <Download />
+        <Footer />
+      </main>
+    </>
   );
 }

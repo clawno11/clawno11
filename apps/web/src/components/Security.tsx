@@ -40,8 +40,9 @@ export function Security() {
           {/* Right: text */}
           <div className="order-1 lg:order-2 space-y-8">
             <div className="space-y-4">
-              <div className="inline-block px-3 py-1 rounded-full border border-primary/30 bg-primary/5 text-primary text-xs font-medium">
-                {t.security.badge}
+              <div className="flex items-center gap-2 text-lg font-semibold text-white">
+                <span className="text-primary font-bold text-xl">{")"}</span>
+                <span className="text-sm font-medium text-slate-400">{t.security.badge}</span>
               </div>
               <h2 className="text-4xl md:text-5xl font-black text-white leading-tight">
                 {t.security.title}

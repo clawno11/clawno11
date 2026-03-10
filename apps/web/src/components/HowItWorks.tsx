@@ -8,12 +8,12 @@ export function HowItWorks() {
   return (
     <section id="how" className="py-24 bg-bg-card/30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="text-center mb-16 space-y-4">
-          <div className="inline-block px-3 py-1 rounded-full border border-primary/30 bg-primary/5 text-primary text-xs font-medium">
-            How it Works
-          </div>
-          <h2 className="text-4xl md:text-5xl font-black text-white">{t.howItWorks.title}</h2>
+        {/* Section header — openclaw style */}
+        <div className="flex items-center justify-between mb-12">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
+            <span className="text-primary font-bold text-xl">{")"}</span>
+            {t.howItWorks.title}
+          </h2>
         </div>
 
         {/* Steps */}

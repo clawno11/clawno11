@@ -3,126 +3,104 @@
 import { Apple, Monitor, ArrowRight } from "lucide-react";
 import { useI18n } from "@/i18n/context";
 
+/** Styled claw icon — mirrors openclaw's centered mascot placement */
+function ClawIcon() {
+  return (
+    <div className="relative flex items-center justify-center w-28 h-28 mx-auto mb-6">
+      {/* Ambient glow */}
+      <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl scale-150" />
+      {/* Outer ring */}
+      <div className="absolute inset-0 rounded-[28px] border border-primary/20" />
+      {/* Icon body */}
+      <div
+        className="relative w-24 h-24 rounded-[24px] bg-gradient-to-br from-primary via-primary to-cyan-300 flex items-center justify-center"
+        style={{ boxShadow: "0 0 48px rgba(6,182,212,0.5), 0 0 12px rgba(6,182,212,0.3)" }}
+      >
+        {/* Claw SVG mark */}
+        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-12 h-12">
+          <path d="M24 8C24 8 14 14 14 24C14 30.627 18.373 36 24 36C29.627 36 34 30.627 34 24C34 14 24 8 24 8Z" fill="white" fillOpacity="0.9"/>
+          <path d="M18 26C18 26 16 32 20 36" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+          <path d="M30 26C30 26 32 32 28 36" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
+          <circle cx="24" cy="22" r="3" fill="rgba(6,182,212,0.8)"/>
+        </svg>
+      </div>
+    </div>
+  );
+}
+
 export function Hero() {
   const { t } = useI18n();
   const releases = "https://github.com/clawno11/clawno11/releases";
 
   return (
-    <section className="relative min-h-screen flex items-center pt-16 overflow-hidden">
-      {/* Background elements */}
+    <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-4 pt-20 pb-24">
+      {/* Radial gradient behind content */}
       <div className="absolute inset-0 pointer-events-none">
-        {/* Radial glow behind content */}
-        <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] rounded-full bg-primary/5 blur-[120px]" />
-        <div className="absolute top-1/2 right-0 w-[400px] h-[400px] rounded-full bg-indigo-500/5 blur-[100px]" />
-
-        {/* Grid lines */}
-        <div
-          className="absolute inset-0 opacity-[0.03]"
-          style={{
-            backgroundImage:
-              "linear-gradient(rgba(6,182,212,1) 1px, transparent 1px), linear-gradient(90deg, rgba(6,182,212,1) 1px, transparent 1px)",
-            backgroundSize: "60px 60px",
-          }}
-        />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[600px] rounded-full bg-primary/4 blur-[140px]" />
       </div>
 
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-20 w-full">
-        <div className="grid lg:grid-cols-2 gap-12 items-center">
-          {/* Left: text */}
-          <div className="space-y-8">
-            {/* Badge */}
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-primary/30 bg-primary/5 text-primary text-xs font-medium">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              {t.hero.badge}
-            </div>
+      <div className="relative z-10 flex flex-col items-center">
+        <ClawIcon />
 
-            {/* Headline */}
-            <div>
-              <h1 className="text-5xl sm:text-6xl lg:text-7xl font-black leading-none tracking-tight text-white">
-                {t.hero.title1}
-                <br />
-                <span className="gradient-text">{t.hero.title2}</span>
-              </h1>
-            </div>
+        {/* Main title — matches openclaw's giant logo text */}
+        <h1 className="text-[80px] sm:text-[100px] lg:text-[120px] font-black leading-none tracking-tight text-white mb-3">
+          {t.hero.title}
+        </h1>
 
-            {/* Subtitle */}
-            <p className="text-lg text-slate-400 leading-relaxed max-w-lg">
-              {t.hero.subtitle}
-            </p>
+        {/* Uppercase tagline — exact openclaw style */}
+        <p className="text-xs sm:text-sm font-semibold uppercase tracking-[0.22em] text-primary mb-6">
+          {t.hero.tagline}
+        </p>
 
-            {/* CTAs */}
-            <div className="flex flex-wrap gap-3">
-              <a
-                href={releases}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 px-5 py-3 rounded-xl bg-primary hover:bg-primary-dark text-white font-semibold text-sm transition-all glow-cyan-sm hover:glow-cyan"
-              >
-                <Apple size={16} />
-                {t.hero.ctaMac}
-              </a>
-              <a
-                href={releases}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 px-5 py-3 rounded-xl bg-white/5 hover:bg-white/10 border border-border-dim hover:border-primary/40 text-white font-semibold text-sm transition-all"
-              >
-                <Monitor size={16} />
-                {t.hero.ctaWindows}
-              </a>
-              <a
-                href="https://github.com/clawno11/clawno11"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-1 px-5 py-3 rounded-xl text-slate-400 hover:text-white text-sm font-semibold transition-colors"
-              >
-                {t.hero.ctaGithub}
-                <ArrowRight size={14} />
-              </a>
-            </div>
+        {/* Description */}
+        <p className="text-base sm:text-lg text-slate-400 leading-relaxed max-w-lg mb-8 whitespace-pre-line">
+          {t.hero.subtitle}
+        </p>
 
-            {/* Trust line */}
-            <p className="text-xs text-slate-600">
-              Zero telemetry · No account required · Data stays local
-            </p>
-          </div>
-
-          {/* Right: screenshot mockup */}
-          <div className="relative">
-            {/* Glow behind mockup */}
-            <div className="absolute inset-0 bg-primary/10 blur-[60px] rounded-3xl" />
-
-            {/* Desktop mockup */}
-            <div className="relative rounded-2xl overflow-hidden border border-border-dim bg-bg-card shadow-2xl shadow-black/50 animate-float">
-              {/* Fake window chrome */}
-              <div className="flex items-center gap-1.5 px-4 py-3 border-b border-border-dim bg-bg-card2">
-                <div className="w-2.5 h-2.5 rounded-full bg-red-500/60" />
-                <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/60" />
-                <div className="w-2.5 h-2.5 rounded-full bg-green-500/60" />
-                <div className="flex-1 mx-4">
-                  <div className="w-48 h-4 rounded bg-white/5 mx-auto" />
-                </div>
-              </div>
-
-              {/* Screenshot area */}
-              <div className="screenshot-placeholder aspect-[16/10] w-full text-center flex-col gap-2">
-                <div className="text-primary/50 text-3xl mb-2">🖥️</div>
-                <div>{t.hero.screenshotHint}</div>
-                <div className="text-[11px] opacity-60 mt-1">推荐尺寸: 1280×800px</div>
-              </div>
-            </div>
-
-            {/* Mobile mockup badge */}
-            <div className="absolute -bottom-4 -right-4 w-32 h-56 rounded-3xl border-2 border-border-dim bg-bg-card shadow-xl overflow-hidden">
-              <div className="flex items-center justify-center h-full screenshot-placeholder rounded-3xl">
-                <div className="text-center">
-                  <div className="text-2xl mb-1">📱</div>
-                  <div className="text-[10px]">Mobile App</div>
-                </div>
-              </div>
-            </div>
-          </div>
+        {/* CTA buttons — centered row */}
+        <div className="flex flex-wrap items-center justify-center gap-3 mb-8">
+          <a
+            href={releases}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-6 py-3 rounded-full bg-primary hover:bg-primary-dark text-white font-semibold text-sm transition-all"
+            style={{ boxShadow: "0 0 20px rgba(6,182,212,0.35)" }}
+          >
+            <Apple size={15} />
+            {t.hero.ctaMac}
+          </a>
+          <a
+            href={releases}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-semibold text-sm transition-all"
+          >
+            <Monitor size={15} />
+            {t.hero.ctaWindows}
+          </a>
+          <a
+            href="https://github.com/clawno11/clawno11"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1.5 px-4 py-3 text-slate-400 hover:text-white font-semibold text-sm transition-colors"
+          >
+            {t.hero.ctaGithub}
+            <ArrowRight size={13} />
+          </a>
         </div>
+
+        {/* Announcement pill — matches openclaw's news badge */}
+        <a
+          href={releases}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/4 hover:border-primary/30 hover:bg-primary/5 text-slate-400 hover:text-white text-xs transition-all"
+        >
+          <span className="px-1.5 py-0.5 rounded-full bg-primary text-white text-[10px] font-bold tracking-wide">
+            NEW
+          </span>
+          {t.hero.announcement}
+        </a>
       </div>
     </section>
   );

@@ -16,10 +16,10 @@ export function Download() {
 
       <div className="relative max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
         <div className="space-y-4 mb-12">
-          <div className="inline-block px-3 py-1 rounded-full border border-primary/30 bg-primary/5 text-primary text-xs font-medium">
-            Download
+          <div className="flex items-center justify-center gap-2 text-lg font-semibold text-white">
+            <span className="text-primary font-bold text-xl">{")"}</span>
+            <h2 className="text-4xl md:text-5xl font-black text-white">{d.title}</h2>
           </div>
-          <h2 className="text-4xl md:text-5xl font-black text-white">{d.title}</h2>
           <p className="text-slate-400">{d.subtitle}</p>
         </div>
 

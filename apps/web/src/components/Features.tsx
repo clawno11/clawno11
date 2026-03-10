@@ -1,6 +1,9 @@
 "use client";
 
-import { Rocket, Shield, Smartphone, Brain, GitBranch, MessageSquare, type LucideIcon } from "lucide-react";
+import {
+  Rocket, Shield, Smartphone, Brain, GitBranch, MessageSquare,
+  type LucideIcon,
+} from "lucide-react";
 import { useI18n } from "@/i18n/context";
 
 const ICON_MAP: Record<string, LucideIcon> = {
@@ -11,49 +14,68 @@ export function Features() {
   const { t } = useI18n();
 
   return (
-    <section id="features" className="py-24">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        {/* Header */}
-        <div className="text-center mb-16 space-y-4">
-          <div className="inline-block px-3 py-1 rounded-full border border-primary/30 bg-primary/5 text-primary text-xs font-medium">
-            Core Features
-          </div>
-          <h2 className="text-4xl md:text-5xl font-black text-white">{t.features.title}</h2>
-          <p className="text-slate-400 max-w-2xl mx-auto">{t.features.subtitle}</p>
+    <section id="features" className="py-20 px-4">
+      <div className="max-w-6xl mx-auto">
+        {/* Section header — ") What People Say" style from openclaw */}
+        <div className="flex items-center justify-between mb-8">
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
+            <span className="text-primary font-bold text-xl">{")"}</span>
+            {t.features.title}
+          </h2>
+          <a
+            href="https://github.com/clawno11/clawno11"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-sm text-slate-400 hover:text-white transition-colors"
+          >
+            GitHub →
+          </a>
         </div>
 
-        {/* Grid */}
-        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+        {/* 3-column card grid — styled like openclaw testimonials */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {t.features.items.map((item, i) => {
             const Icon = ICON_MAP[item.icon] ?? Rocket;
             return (
-              <div
-                key={i}
-                className="relative group rounded-2xl border border-border-dim bg-bg-card p-6 card-hover"
-              >
-                {/* Top: icon + badge */}
-                <div className="flex items-start justify-between mb-4">
-                  <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center">
-                    <Icon size={18} className="text-primary" />
-                  </div>
-                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/20 font-medium">
-                    {item.badge}
-                  </span>
-                </div>
-
-                {/* Title */}
-                <h3 className="text-lg font-bold text-white mb-2">{item.title}</h3>
-
-                {/* Desc */}
-                <p className="text-sm text-slate-400 leading-relaxed">{item.desc}</p>
-
-                {/* Hover glow */}
-                <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none bg-gradient-to-br from-primary/5 to-transparent" />
-              </div>
+              <FeatureCard key={i} item={item} Icon={Icon} />
             );
           })}
         </div>
       </div>
     </section>
+  );
+}
+
+interface CardItem {
+  icon: string;
+  title: string;
+  desc: string;
+  badge: string;
+}
+
+function FeatureCard({ item, Icon }: { item: CardItem; Icon: LucideIcon }) {
+  return (
+    <div className="group flex flex-col justify-between p-5 rounded-2xl border border-white/8 bg-white/[0.03] hover:border-primary/25 hover:bg-primary/[0.03] transition-all duration-200 min-h-[160px]">
+      {/* Quote-style body text — mirrors openclaw's testimonial text */}
+      <p className="text-sm text-slate-300 leading-relaxed flex-1">
+        "{item.desc}"
+      </p>
+
+      {/* Divider */}
+      <div className="my-4 border-t border-white/6" />
+
+      {/* Author row — icon + name + badge, mirrors openclaw's @username row */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center flex-shrink-0">
+            <Icon size={14} className="text-primary" />
+          </div>
+          <span className="text-sm font-semibold text-white">{item.title}</span>
+        </div>
+        <span className="text-[11px] px-2 py-0.5 rounded-full bg-primary/10 text-primary border border-primary/15 font-medium">
+          {item.badge}
+        </span>
+      </div>
+    </div>
   );
 }
