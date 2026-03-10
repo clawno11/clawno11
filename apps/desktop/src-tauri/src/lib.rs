@@ -48,6 +48,7 @@ pub fn run() {
             // ── Deploy pre-check & update ────────────────────────────────────
             node::check_deploy_status,
             node::update_openclaw,
+            node::uninstall_local_instance,
             node::list_configured_providers,
             // ── Deploy pipeline ──────────────────────────────────────────────
             node::deploy_step_check_node,

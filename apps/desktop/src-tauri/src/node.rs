@@ -412,6 +412,51 @@ pub async fn update_openclaw() -> StepResult {
     StepResult::ok_fixed(format!("installed:{}", sv2), fixes)
 }
 
+/// Fully uninstall a local OpenClaw instance:
+///   1. Stop + delete the pm2 process (service gone, no autostart on reboot)
+///   2. Uninstall the openclaw npm package from every known install location
+///
+/// Data in ~/.openclaw/ is intentionally NOT deleted so the user can
+/// restore conversations and configuration by re-deploying.
+#[tauri::command]
+pub async fn uninstall_local_instance() -> StepResult {
+    let mut fixes: Vec<String> = Vec::new();
+
+    // ── 1. Stop + remove from pm2 ─────────────────────────────────────────────
+    let (stop_ok, _, _) = shell_result("pm2 stop openclaw");
+    if stop_ok { fixes.push("pm2-stopped".to_string()); }
+
+    let (delete_ok, _, _) = shell_result("pm2 delete openclaw");
+    if delete_ok { fixes.push("pm2-deleted".to_string()); }
+
+    // Persist the pm2 process list so openclaw doesn't resurrect after a reboot.
+    let _ = shell_result("pm2 save");
+
+    // ── 2. Uninstall openclaw npm package ─────────────────────────────────────
+    // Try global uninstall first, then the user-prefix fallback path.
+    let (global_ok, _, _) = shell_result("npm uninstall -g openclaw");
+    if global_ok {
+        fixes.push("npm-uninstalled-global".to_string());
+    } else {
+        // Fallback: user prefix (clawno-npm-global)
+        let local = crate::platform::data_local();
+        let prefix = crate::platform::path_join(&local, "clawno-npm-global");
+        let cmd = format!("npm uninstall -g openclaw --prefix \"{}\"", prefix);
+        let (prefix_ok, _, _) = shell_result(&cmd);
+        if prefix_ok {
+            fixes.push("npm-uninstalled-user-prefix".to_string());
+        } else {
+            fixes.push("npm-uninstall-skipped-not-fatal".to_string());
+        }
+    }
+
+    // ── 3. Data directory left intact ─────────────────────────────────────────
+    // ~/.openclaw/ is preserved so the user can restore by re-deploying.
+    fixes.push("data-preserved".to_string());
+
+    StepResult::ok_fixed("uninstalled".to_string(), fixes)
+}
+
 // ── Unit tests ───────────────────────────────────────────────────────────────
 
 #[cfg(test)]

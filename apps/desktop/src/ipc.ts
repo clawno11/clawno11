@@ -84,6 +84,7 @@ export interface DeployStatus {
 
 export const checkDeployStatus          = ()             => invoke<DeployStatus>("check_deploy_status");
 export const updateOpenclaw             = ()             => invoke<StepResult>("update_openclaw");
+export const uninstallLocalInstance     = ()             => invoke<StepResult>("uninstall_local_instance");
 export const listConfiguredProviders    = ()             => invoke<string[]>("list_configured_providers");
 
 // ── Deploy commands ─────────────────────────────────────────────────────────

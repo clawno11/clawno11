@@ -9,7 +9,7 @@ import {
 import { open } from "@tauri-apps/plugin-shell";
 import {
   probeInstanceHealth, configureApiKey,
-  getBrowserUrl, openInBrowser, startLocalService,
+  getBrowserUrl, openInBrowser, startLocalService, uninstallLocalInstance,
 } from "../ipc";
 import { useTranslation } from "react-i18next";
 import { useInstanceStore, type ClawInstance, type InstanceHealth } from "../store/instances";
@@ -1018,6 +1018,20 @@ export function InstancesPage() {
     return { ok: true, msg: t("instances.actions.stop") };
   };
 
+  const handleRemove = async (inst: ClawInstance) => {
+    if (inst.kind === "local") {
+      const confirmed = window.confirm(
+        "确认删除本机 OpenClaw 实例？\n\n" +
+        "• 服务进程将被停止并卸载\n" +
+        "• 历史对话和配置数据（~/.openclaw/）将保留，重新部署后可恢复\n\n" +
+        "确认要继续吗？"
+      );
+      if (!confirmed) return;
+      await uninstallLocalInstance();
+    }
+    remove(inst.id);
+  };
+
   return (
     <div className="page-enter p-6 max-w-3xl mx-auto">
       <div className="flex items-center justify-between mb-6">
@@ -1076,7 +1090,7 @@ export function InstancesPage() {
               onStart={() => handleStart(inst)}
               onStop={() => handleStop(inst)}
               onRestart={() => handleRestart(inst)}
-              onRemove={() => remove(inst.id)}
+              onRemove={() => handleRemove(inst)}
             />
           ))}
         </div>
