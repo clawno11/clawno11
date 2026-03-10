@@ -28,7 +28,8 @@ pub fn find_pm2_cmd() -> Option<String> {
     ];
     #[cfg(not(target_os = "windows"))]
     let candidates = vec![
-        "/usr/local/bin/pm2".to_string(),
+        "/opt/homebrew/bin/pm2".to_string(), // Apple Silicon Homebrew
+        "/usr/local/bin/pm2".to_string(),    // Intel Mac Homebrew / Linux
         "/usr/bin/pm2".to_string(),
         format!("{}/.npm-global/bin/pm2", crate::platform::user_home()),
         format!("{}/clawno-npm-global/bin/pm2", local),
