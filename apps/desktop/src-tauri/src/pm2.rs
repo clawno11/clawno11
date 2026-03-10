@@ -4,6 +4,7 @@ use std::process::Command;
 use crate::platform::{augmented_path, data_local, data_roaming, first_line, path_join};
 use crate::node::npm_install_with_fallback;
 use crate::types::{ServiceInfo, StepResult};
+use tauri::Emitter;
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -187,13 +188,15 @@ pub async fn stop_local_service() {
 }
 
 #[tauri::command]
-pub async fn restart_local_service() {
+pub async fn restart_local_service(app: tauri::AppHandle) {
     // Reset active model to default priority BEFORE restarting so the gateway
     // picks up the correct config on startup. Any session-level model override
     // the user set in chat is intentionally cleared here.
     let mut fixes = Vec::new();
     crate::deploy::auto_select_active_model(&mut fixes);
     run_pm2(&["restart", "openclaw"]);
+    // Notify the frontend so any manual model override in the chat UI is cleared.
+    let _ = app.emit("gateway-restarted", ());
 }
 
 // ── Unit tests ───────────────────────────────────────────────────────────────

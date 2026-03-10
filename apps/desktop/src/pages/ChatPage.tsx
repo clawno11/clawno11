@@ -28,6 +28,22 @@ import { logSecurityEvent } from "../store/securityEventStore";
 /** Max characters sent in a single model request (≈ 8k tokens at ~4 chars/token). */
 const MAX_CONTEXT_CHARS = 32_000;
 
+/** Provider ID → cheapest available model, mirroring deploy.rs provider_cheapest_model. */
+const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string; badge: string }> = {
+  siliconflow: { model: "openrouter/meta-llama/llama-3.1-8b-instruct", label: "SiliconFlow Llama 3.1 8B", badge: "免费" },
+  hunyuan:     { model: "openrouter/tencent/hunyuan-lite",             label: "混元 Lite",                 badge: "免费" },
+  spark:       { model: "openrouter/iflytek/spark-lite",               label: "讯飞星火 Lite",             badge: "免费" },
+  zai:         { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "¥0.1/1M" },
+  openrouter:  { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
+  doubao:      { model: "openrouter/bytedance/doubao-lite-32k",        label: "豆包 Lite",                 badge: "¥0.3/1M" },
+  minimax:     { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "¥0.15/1M" },
+  deepseek:    { model: "openrouter/deepseek/deepseek-chat",           label: "DeepSeek V3",               badge: "¥1/1M" },
+  qwen:        { model: "openrouter/qwen/qwen-plus",                   label: "通义千问 Plus",             badge: "¥0.5/1M" },
+  moonshot:    { model: "openrouter/moonshot-ai/moonshot-v1-8k",       label: "月之暗面 v1-8k",            badge: "¥12/1M" },
+  openai:      { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "$0.15/1M" },
+  anthropic:   { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "$0.25/1M" },
+};
+
 // ── Shell command audit ────────────────────────────────────────────────────
 
 /**
@@ -288,7 +304,16 @@ export function ChatPage() {
 
   /** Local Ollama models available for selection. */
   const [localModels, setLocalModels]       = useState<OllamaModel[]>([]);
-  /** null = auto (OpenClaw decides); string = specific local Ollama model name */
+  /**
+   * selectedModel encoding:
+   *   null              — auto (OpenClaw gateway decides, cheapest cloud by default)
+   *   "cloud:<model>"   — cloud model override, e.g. "cloud:zai/glm-4-flash"
+   *                       → keeps gateway URL, passes model field to stream_chat
+   *   "<name>"          — local Ollama model name (no prefix)
+   *                       → bypasses gateway, routes directly to localhost:11434
+   *
+   * Cleared when the gateway restarts (gateway-restarted event).
+   */
   const [selectedModel, setSelectedModel]   = useState<string | null>(null);
   const [showModelPicker, setShowModelPicker] = useState(false);
 
@@ -427,6 +452,18 @@ export function ChatPage() {
     return () => clearInterval(id);
   }, []);
 
+  // When the OpenClaw gateway restarts, clear any manual model override so the
+  // next message goes through the gateway's freshly-applied default (cheapest cloud).
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    listen<void>("gateway-restarted", () => {
+      if (mountedRef.current) {
+        setSelectedModel(null);
+      }
+    }).then((fn) => { unlisten = fn; });
+    return () => unlisten?.();
+  }, []);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -548,11 +585,24 @@ export function ChatPage() {
       // Smart routing — resolve effective instance before any state updates.
       let effectiveInstanceId = selectedId;
       let effectiveGatewayUrl = gatewayUrl;
-      // Model override: null = auto (let OpenClaw / gateway decide), string = local Ollama model.
-      let effectiveModel: string | null = selectedModel;
+      // Model override: null = auto; "cloud:<m>" = cloud override; plain string = local Ollama.
+      let effectiveModel: string | null = null;
 
-      if (effectiveModel) {
+      if (selectedModel?.startsWith("cloud:")) {
+        // User explicitly chose a cloud model — keep the gateway URL, pass model as override.
+        effectiveModel = selectedModel.slice(6); // strip "cloud:" prefix
+        if (mountedRef.current) {
+          const label = effectiveModel.split("/").slice(1).join("/") || effectiveModel;
+          setRoutedTo(`云端 · ${label}`);
+          if (routedToTimerRef.current) clearTimeout(routedToTimerRef.current);
+          routedToTimerRef.current = setTimeout(() => {
+            routedToTimerRef.current = null;
+            if (mountedRef.current) setRoutedTo(null);
+          }, 4000);
+        }
+      } else if (selectedModel) {
         // User explicitly selected a local Ollama model — bypass the OpenClaw gateway.
+        effectiveModel = selectedModel;
         effectiveGatewayUrl = "http://localhost:11434";
         effectiveInstanceId = "ollama-local";
         if (mountedRef.current) {
@@ -1141,26 +1191,37 @@ export function ChatPage() {
             <div className="relative flex-shrink-0">
               <button
                 onClick={() => setShowModelPicker((v) => !v)}
-                title={selectedModel ? `本地模型：${selectedModel}` : "模型：自动（OpenClaw）"}
+                title={
+                  selectedModel?.startsWith("cloud:")
+                    ? `云端模型：${selectedModel.slice(6)}`
+                    : selectedModel
+                    ? `本地模型：${selectedModel}`
+                    : "模型：自动（OpenClaw）"
+                }
                 className={`h-10 flex items-center gap-1.5 px-2.5 rounded-xl text-xs font-medium transition-colors border ${
                   selectedModel
                     ? "border-primary/50 bg-primary/8 text-primary"
                     : "border-border bg-muted/30 text-muted-foreground hover:text-foreground hover:border-border/80"
                 }`}
               >
-                {selectedModel ? <Cpu size={13} /> : <Bot size={13} />}
-                <span className="max-w-[80px] truncate hidden sm:block">
-                  {selectedModel ? selectedModel.split(":")[0] : "自动"}
+                {selectedModel?.startsWith("cloud:") ? <Sparkles size={13} /> : selectedModel ? <Cpu size={13} /> : <Bot size={13} />}
+                <span className="max-w-[100px] truncate hidden sm:block">
+                  {selectedModel?.startsWith("cloud:")
+                    ? (selectedModel.slice(6).split("/").slice(1).join("/") || selectedModel.slice(6))
+                    : selectedModel
+                    ? selectedModel.split(":")[0]
+                    : "自动"}
                 </span>
                 <ChevronDown size={10} className={`transition-transform ${showModelPicker ? "rotate-180" : ""}`} />
               </button>
 
               {showModelPicker && (
-                <div className="absolute bottom-full mb-1.5 left-0 w-56 rounded-xl overflow-hidden z-50"
+                <div className="absolute bottom-full mb-1.5 left-0 w-64 rounded-xl overflow-hidden z-50 max-h-80 overflow-y-auto"
                   style={{ border: "1px solid rgba(6,182,212,0.2)", background: "white", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
-                  <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50">
+                  <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 sticky top-0 bg-white">
                     选择模型
                   </div>
+
                   {/* Auto option */}
                   <button
                     onClick={() => { setSelectedModel(null); setShowModelPicker(false); }}
@@ -1171,42 +1232,80 @@ export function ChatPage() {
                     }}
                   >
                     <Bot size={13} className="text-muted-foreground flex-shrink-0" />
-                    <div>
+                    <div className="flex-1 min-w-0">
                       <p className="font-medium">自动</p>
-                      <p className="text-[10px] text-muted-foreground">由 OpenClaw 网关决策</p>
+                      <p className="text-[10px] text-muted-foreground">由 OpenClaw 网关决策（默认最省）</p>
                     </div>
+                    {!selectedModel && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
                   </button>
+
+                  {/* Cloud models — only show configured providers */}
+                  {configuredProviders.filter((p) => PROVIDER_CLOUD_MODELS[p]).length > 0 && (
+                    <>
+                      <div className="px-3 py-1 text-[10px] text-muted-foreground bg-muted/30 border-y border-border/40">
+                        云端模型（本次对话生效）
+                      </div>
+                      {configuredProviders
+                        .filter((p) => PROVIDER_CLOUD_MODELS[p])
+                        .map((p) => {
+                          const info = PROVIDER_CLOUD_MODELS[p]!;
+                          const key = `cloud:${info.model}`;
+                          const isActive = selectedModel === key;
+                          return (
+                            <button
+                              key={p}
+                              onClick={() => { setSelectedModel(key); setShowModelPicker(false); }}
+                              className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-slate-50 transition-colors"
+                              style={{
+                                background: isActive ? "rgba(6,182,212,0.06)" : "transparent",
+                                borderLeft: isActive ? "2px solid hsl(var(--primary))" : "2px solid transparent",
+                              }}
+                            >
+                              <Sparkles size={13} className="text-amber-500 flex-shrink-0" />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate">{info.label}</p>
+                                <p className="text-[10px] text-muted-foreground">{info.badge}</p>
+                              </div>
+                              {isActive && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                            </button>
+                          );
+                        })}
+                    </>
+                  )}
+
                   {/* Local Ollama models */}
                   {localModels.length > 0 && (
                     <>
                       <div className="px-3 py-1 text-[10px] text-muted-foreground bg-muted/30 border-y border-border/40">
-                        本地模型（Ollama）
+                        本地模型（Ollama · 无需联网）
                       </div>
-                      {localModels.map((m) => (
-                        <button
-                          key={m.name}
-                          onClick={() => { setSelectedModel(m.name); setShowModelPicker(false); }}
-                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-slate-50 transition-colors"
-                          style={{
-                            background: selectedModel === m.name ? "rgba(6,182,212,0.06)" : "transparent",
-                            borderLeft: selectedModel === m.name ? "2px solid hsl(var(--primary))" : "2px solid transparent",
-                          }}
-                        >
-                          <Cpu size={13} className="text-primary flex-shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium truncate">{m.name}</p>
-                            <p className="text-[10px] text-muted-foreground">本地运行 · 无需联网</p>
-                          </div>
-                          {selectedModel === m.name && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
-                          )}
-                        </button>
-                      ))}
+                      {localModels.map((m) => {
+                        const isActive = selectedModel === m.name;
+                        return (
+                          <button
+                            key={m.name}
+                            onClick={() => { setSelectedModel(m.name); setShowModelPicker(false); }}
+                            className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-slate-50 transition-colors"
+                            style={{
+                              background: isActive ? "rgba(6,182,212,0.06)" : "transparent",
+                              borderLeft: isActive ? "2px solid hsl(var(--primary))" : "2px solid transparent",
+                            }}
+                          >
+                            <Cpu size={13} className="text-primary flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{m.name}</p>
+                              <p className="text-[10px] text-muted-foreground">本地运行</p>
+                            </div>
+                            {isActive && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                          </button>
+                        );
+                      })}
                     </>
                   )}
-                  {localModels.length === 0 && (
+
+                  {configuredProviders.filter((p) => PROVIDER_CLOUD_MODELS[p]).length === 0 && localModels.length === 0 && (
                     <div className="px-3 py-2.5 text-[11px] text-muted-foreground">
-                      暂无本地模型，前往「本地」页下载
+                      暂无可选模型，前往「设置」配置 API Key 或「本地」下载模型
                     </div>
                   )}
                 </div>
