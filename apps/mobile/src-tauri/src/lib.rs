@@ -3,6 +3,7 @@ mod connectors;
 mod gateway;
 mod mcp;
 mod secure_store;
+mod ssh_deploy;
 mod token_log;
 mod types;
 
@@ -40,6 +41,9 @@ pub fn run() {
             secure_store::wipe_secure_store,
             // MCP security scanner
             mcp::scan_mcp_server,
+            // SSH remote deployment
+            ssh_deploy::ssh_test_connection,
+            ssh_deploy::ssh_deploy,
         ])
         .run(tauri::generate_context!())
         .expect("ClawNo.11 Mobile failed to start");

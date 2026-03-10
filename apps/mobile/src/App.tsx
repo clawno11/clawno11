@@ -12,6 +12,7 @@ import { RagPage } from "./pages/RagPage.tsx";
 import { McpPage } from "./pages/McpPage.tsx";
 import { RouterPage } from "./pages/RouterPage.tsx";
 import { SecurityPage } from "./pages/SecurityPage.tsx";
+import { DeployPage } from "./pages/DeployPage.tsx";
 import { useAiConfigStore } from "./store/aiConfig.ts";
 
 // ── Error boundary ──────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ function AppContent() {
             <Route path="/mcp"      element={<McpPage />} />
             <Route path="/router"   element={<RouterPage />} />
             <Route path="/security" element={<SecurityPage />} />
+            <Route path="/deploy"   element={<DeployPage />} />
           </Routes>
         </PageErrorBoundary>
       </main>

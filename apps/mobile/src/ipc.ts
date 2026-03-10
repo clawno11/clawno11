@@ -75,3 +75,23 @@ export const wipeSecureStore = () =>
 
 export const scanMcpServer = (endpoint: string, transport: string) =>
   invoke<McpScanResult>("scan_mcp_server", { endpoint, transport });
+
+// ── SSH remote deployment ─────────────────────────────────────────────────
+
+/** Test SSH connection. Returns remote `uname -a` string on success. */
+export const sshTestConnection = (
+  host: string,
+  sshPort: number,
+  username: string,
+  password: string,
+) => invoke<string>("ssh_test_connection", { host, sshPort, username, password });
+
+/** Deploy OpenClaw on a remote server via SSH. Emits `deploy-progress` events.
+ *  Returns the gateway URL (e.g. "http://1.2.3.4:18789") on success. */
+export const sshDeploy = (
+  host: string,
+  sshPort: number,
+  username: string,
+  password: string,
+  openclawPort: number,
+) => invoke<string>("ssh_deploy", { host, sshPort, username, password, openclawPort });

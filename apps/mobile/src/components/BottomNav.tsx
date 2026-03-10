@@ -31,7 +31,8 @@ export function BottomNav() {
       {items.map((item) => {
         const Icon = item.icon;
         const isActive = currentPath === item.path ||
-          (item.path === "/more" && ["/tokens", "/rag", "/mcp", "/router", "/security"].includes(currentPath));
+          (item.path === "/more" && ["/tokens", "/rag", "/mcp", "/router", "/security"].includes(currentPath)) ||
+          (item.path === "/connect" && currentPath === "/deploy");
 
         return (
           <button

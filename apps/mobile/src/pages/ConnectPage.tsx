@@ -9,9 +9,10 @@ import { useState, useEffect, useCallback } from "react";
 import {
   Network, ExternalLink, Wifi, WifiOff, Plus, CheckCircle2,
   AlertTriangle, Loader, ChevronDown, ChevronUp, Info, Zap,
-  QrCode, ClipboardPaste,
+  QrCode, ClipboardPaste, Server, ChevronRight,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { getTailscaleStatus, probeGatewayUrl, type TailscaleStatus } from "../ipc";
 import { useInstanceStore, type ClawInstance } from "../store/instances";
 import { TopBar } from "../components/TopBar";
@@ -359,6 +360,7 @@ function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
 
 export function ConnectPage() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const { addOrUpdate } = useInstanceStore();
 
   const [method, setMethod]         = useState<ConnectMethod>("xedge");
@@ -713,6 +715,25 @@ export function ConnectPage() {
               </div>
             </div>
           </section>
+
+          {/* ── Deploy a new server via SSH ── */}
+          <button
+            onClick={() => navigate("/deploy")}
+            className="touch-btn w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-colors"
+            style={{ border: "1px solid rgba(6,182,212,0.2)", background: "rgba(6,182,212,0.03)" }}
+          >
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: "rgba(6,182,212,0.1)" }}>
+              <Server size={17} style={{ color: "hsl(var(--primary))" }} />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm text-[hsl(var(--foreground))]">部署新服务器</p>
+              <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-0.5">
+                通过 SSH 在 VPS 上一键安装 OpenClaw
+              </p>
+            </div>
+            <ChevronRight size={16} className="text-[hsl(var(--muted-foreground))] flex-shrink-0" />
+          </button>
         </div>
       </div>
     </div>
