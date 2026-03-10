@@ -482,7 +482,15 @@ export function DeployPage() {
       );
 
       try {
-        const res = await stepFns[i]!();
+        let res = await stepFns[i]!();
+
+        // "node-installed-restart-required" means the binary is present but the
+        // current process PATH doesn't see it yet. Retry once immediately — the
+        // next call will find it via node_version_direct() (full-path scan).
+        if (!res.ok && res.detail === "node-installed-restart-required") {
+          await new Promise((r) => setTimeout(r, 800));
+          res = await stepFns[i]!();
+        }
 
         if (res.ok) {
           updateStep(i, { status: "done", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
