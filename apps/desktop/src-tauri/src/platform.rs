@@ -93,25 +93,41 @@ pub fn augmented_path() -> String {
     ];
 
     #[cfg(not(target_os = "windows"))]
-    let extra: Vec<String> = vec![
-        // nvm: cover v18–v24 LTS paths statically (dynamic $(...) not supported in env vars).
-        format!("{home}/.nvm/versions/node/v24/bin"),
-        format!("{home}/.nvm/versions/node/v23/bin"),
-        format!("{home}/.nvm/versions/node/v22/bin"),
-        format!("{home}/.nvm/versions/node/v20/bin"),
-        format!("{home}/.nvm/versions/node/v18/bin"),
-        // Volta (cross-platform version manager)
-        format!("{home}/.volta/bin"),
-        // fnm (Fast Node Manager)
-        format!("{home}/.fnm/current/bin"),
-        // Standard system binary locations
-        "/usr/local/bin".to_string(),
-        "/usr/bin".to_string(),
-        // Global npm packages
-        format!("{home}/.npm-global/bin"),
-        format!("{home}/.local/bin"),
-        format!("{local}/clawno-npm-global/bin"),
-    ];
+    let extra: Vec<String> = {
+        let mut v: Vec<String> = vec![
+            // Volta (cross-platform version manager)
+            format!("{home}/.volta/bin"),
+            // fnm (Fast Node Manager)
+            format!("{home}/.fnm/current/bin"),
+            // Standard system binary locations
+            "/opt/homebrew/bin".to_string(),
+            "/usr/local/bin".to_string(),
+            "/usr/bin".to_string(),
+            // Global npm packages
+            format!("{home}/.npm-global/bin"),
+            format!("{home}/.local/bin"),
+            format!("{local}/clawno-npm-global/bin"),
+        ];
+        // nvm: dynamically scan all installed versions (e.g. v24.12.0, v22.5.1)
+        // so we don't miss any patch/minor version.
+        let nvm_dir = format!("{home}/.nvm/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            let mut versions: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let name = e.file_name();
+                    let s = name.to_string_lossy().to_string();
+                    if s.starts_with('v') { Some(s) } else { None }
+                })
+                .collect();
+            // Sort descending so newest version appears first in PATH.
+            versions.sort_by(|a, b| b.cmp(a));
+            for ver in versions {
+                v.insert(0, format!("{nvm_dir}/{ver}/bin"));
+            }
+        }
+        v
+    };
 
     let current = std::env::var("PATH").unwrap_or_default();
 
