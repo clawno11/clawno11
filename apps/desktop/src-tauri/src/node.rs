@@ -185,6 +185,107 @@ fn node_version_direct() -> String {
     String::new()
 }
 
+/// Search well-known directories for the `openclaw` / `openclaw.cmd` binary.
+/// Mirrors the same locations that npm installs to, including nvm-managed paths.
+/// Returns the bin directory that contains the binary (not the binary path itself).
+pub fn scan_openclaw_bin_dir() -> Option<String> {
+    let home  = crate::platform::user_home();
+    let local = data_local();
+
+    #[cfg(target_os = "windows")]
+    {
+        let roaming = crate::platform::data_roaming();
+        let candidates = vec![
+            format!("{roaming}\\npm"),
+            format!("{local}\\clawno-npm-global\\bin"),
+            format!("{local}\\Programs\\nodejs"),
+            r"C:\Program Files\nodejs".to_string(),
+        ];
+        for dir in &candidates {
+            if std::path::Path::new(&path_join(dir, "openclaw.cmd")).exists() {
+                return Some(dir.clone());
+            }
+        }
+        None
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let mut candidates = vec![
+            "/opt/homebrew/bin".to_string(),
+            "/usr/local/bin".to_string(),
+            "/usr/bin".to_string(),
+            format!("{home}/.npm-global/bin"),
+            format!("{local}/clawno-npm-global/bin"),
+        ];
+        // nvm: scan all installed node versions for the openclaw binary
+        let nvm_dir = format!("{home}/.nvm/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            let mut versions: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.starts_with('v') { Some(format!("{nvm_dir}/{s}/bin")) } else { None }
+                })
+                .collect();
+            versions.sort_by(|a, b| b.cmp(a)); // newest first
+            for ver_bin in versions { candidates.insert(0, ver_bin); }
+        }
+        for dir in &candidates {
+            if std::path::Path::new(&path_join(dir, "openclaw")).exists() {
+                return Some(dir.clone());
+            }
+        }
+        None
+    }
+}
+
+/// Search well-known npm global lib paths for `openclaw/openclaw.mjs`.
+/// Used as fallback when `npm root -g` fails due to shell PATH isolation.
+pub fn scan_openclaw_mjs() -> Option<String> {
+    let home  = crate::platform::user_home();
+    let local = data_local();
+
+    let mut candidates: Vec<String> = vec![
+        format!("{local}/clawno-npm-global/lib/node_modules/openclaw/openclaw.mjs"),
+    ];
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        // nvm: scan all node versions
+        let nvm_dir = format!("{home}/.nvm/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            let mut versions: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.starts_with('v') {
+                        Some(format!("{nvm_dir}/{s}/lib/node_modules/openclaw/openclaw.mjs"))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            versions.sort_by(|a, b| b.cmp(a));
+            for p in versions { candidates.insert(0, p); }
+        }
+        candidates.push(format!("{home}/.npm-global/lib/node_modules/openclaw/openclaw.mjs"));
+        candidates.push("/opt/homebrew/lib/node_modules/openclaw/openclaw.mjs".to_string());
+        candidates.push("/usr/local/lib/node_modules/openclaw/openclaw.mjs".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let roaming = crate::platform::data_roaming();
+        candidates.push(format!("{roaming}\\npm\\node_modules\\openclaw\\openclaw.mjs"));
+        candidates.push(format!("{local}\\Programs\\nodejs\\node_modules\\openclaw\\openclaw.mjs"));
+        candidates.push(r"C:\Program Files\nodejs\node_modules\openclaw\openclaw.mjs".to_string());
+    }
+
+    let _ = home; // suppress unused warning on Windows
+    candidates.into_iter().find(|p| std::path::Path::new(p).exists())
+}
+
 /// Search well-known directories for an existing `node.exe` / `node` binary.
 pub fn scan_node_paths() -> Option<String> {
     let home  = crate::platform::user_home();
@@ -452,29 +553,47 @@ pub async fn deploy_step_check_node() -> StepResult {
 
 #[tauri::command]
 pub async fn deploy_step_install_openclaw() -> StepResult {
+    // ── 1. Already installed? Check via shell then filesystem scan ───────────
     let ver = shell_output("openclaw --version");
     let sv = openclaw_semver(&ver);
     if !sv.is_empty() { return StepResult::ok(format!("already-installed:{}", sv)); }
 
+    // Filesystem scan: openclaw might be installed but not in shell PATH (macOS sandbox)
+    if let Some(bin_dir) = scan_openclaw_bin_dir() {
+        // Inject dir into process PATH so subsequent steps can find openclaw via shell
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let current = std::env::var("PATH").unwrap_or_default();
+        if !current.contains(&bin_dir) {
+            std::env::set_var("PATH", format!("{}{}{}", bin_dir, sep, current));
+        }
+        return StepResult::ok("already-installed:found-via-scan".to_string());
+    }
+
+    // ── 2. Not installed — run npm install ───────────────────────────────────
     let (ok, detail, fixes) = npm_install_with_fallback("openclaw");
     if !ok { return StepResult::err_fixed(detail, fixes); }
 
+    // ── 3. Verify install: shell first, filesystem scan as fallback ──────────
     let ver2 = shell_output("openclaw --version");
     let sv2 = openclaw_semver(&ver2);
-    if sv2.is_empty() {
-        let local = data_local();
-        let bin = path_join(&path_join(&local, "clawno-npm-global"), "bin");
-        let has_cmd = std::path::Path::new(&path_join(&bin, "openclaw.cmd")).exists()
-            || std::path::Path::new(&path_join(&bin, "openclaw")).exists();
-        if has_cmd {
-            return StepResult::ok_fixed("installed-user-prefix".to_string(), fixes);
-        }
-        return StepResult::err_fixed(
-            "installed-but-not-found: restart app and retry".to_string(),
-            fixes,
-        );
+    if !sv2.is_empty() {
+        return StepResult::ok_fixed(format!("installed:{}", sv2), fixes);
     }
-    StepResult::ok_fixed(format!("installed:{}", sv2), fixes)
+
+    // shell_output failed (PATH isolation) — scan filesystem directly
+    if let Some(bin_dir) = scan_openclaw_bin_dir() {
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let current = std::env::var("PATH").unwrap_or_default();
+        if !current.contains(&bin_dir) {
+            std::env::set_var("PATH", format!("{}{}{}", bin_dir, sep, current));
+        }
+        return StepResult::ok_fixed("installed-found-via-scan".to_string(), fixes);
+    }
+
+    StepResult::err_fixed(
+        "openclaw-not-found-after-install: check npm permissions".to_string(),
+        fixes,
+    )
 }
 
 /// Read which AI providers already have a key configured in OpenClaw.

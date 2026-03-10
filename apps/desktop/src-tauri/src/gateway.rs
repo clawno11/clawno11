@@ -157,24 +157,35 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
     let ui_port = port + 2;
     let mut fixes: Vec<String> = Vec::new();
 
-    // Locate openclaw.mjs
-    let npm_root = shell_output("npm root -g").trim().to_string();
-    if npm_root.is_empty() {
-        return StepResult::err("npm-root-not-found: restart app and retry".to_string());
-    }
-    let mjs = path_join(&path_join(&npm_root, "openclaw"), "openclaw.mjs");
-    let mjs = if std::path::Path::new(&mjs).exists() {
-        mjs
-    } else {
-        let local = data_local();
-        let alt = path_join(
-            &path_join(&path_join(&local, "clawno-npm-global"), "lib"),
-            &path_join(&path_join("node_modules", "openclaw"), "openclaw.mjs"),
-        );
-        if !std::path::Path::new(&alt).exists() {
-            return StepResult::err(format!("openclaw-mjs-not-found: {mjs}"));
+    // Locate openclaw.mjs — try shell first, then filesystem scan (macOS PATH isolation)
+    let mjs = {
+        let from_shell = {
+            let npm_root = shell_output("npm root -g").trim().to_string();
+            if !npm_root.is_empty() {
+                let p = path_join(&path_join(&npm_root, "openclaw"), "openclaw.mjs");
+                if std::path::Path::new(&p).exists() { Some(p) } else { None }
+            } else {
+                None
+            }
+        };
+        match from_shell {
+            Some(p) => p,
+            None => {
+                // Shell PATH isolation fallback: scan known install locations
+                match crate::node::scan_openclaw_mjs() {
+                    Some(p) => {
+                        fixes.push("openclaw-mjs-found-via-scan".to_string());
+                        p
+                    }
+                    None => {
+                        return StepResult::err_fixed(
+                            "openclaw-mjs-not-found: reinstall openclaw via the deploy steps".to_string(),
+                            fixes,
+                        );
+                    }
+                }
+            }
         }
-        alt
     };
 
     let wrapper_path = match write_cjs_wrapper(&mjs, port, &mut fixes) {
