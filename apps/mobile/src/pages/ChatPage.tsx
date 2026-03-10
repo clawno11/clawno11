@@ -42,6 +42,22 @@ import { TopBar } from "../components/TopBar";
 
 const MAX_CONTEXT_CHARS = 32_000;
 
+/** Provider ID → cheapest available model (mirrors deploy.rs provider_cheapest_model). */
+const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string; badge: string }> = {
+  siliconflow: { model: "openrouter/meta-llama/llama-3.1-8b-instruct", label: "SiliconFlow Llama 3.1 8B", badge: "免费" },
+  hunyuan:     { model: "openrouter/tencent/hunyuan-lite",             label: "混元 Lite",                 badge: "免费" },
+  spark:       { model: "openrouter/iflytek/spark-lite",               label: "讯飞星火 Lite",             badge: "免费" },
+  zai:         { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "¥0.1/1M" },
+  openrouter:  { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
+  doubao:      { model: "openrouter/bytedance/doubao-lite-32k",        label: "豆包 Lite",                 badge: "¥0.3/1M" },
+  minimax:     { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "¥0.15/1M" },
+  deepseek:    { model: "openrouter/deepseek/deepseek-chat",           label: "DeepSeek V3",               badge: "¥1/1M" },
+  qwen:        { model: "openrouter/qwen/qwen-plus",                   label: "通义千问 Plus",             badge: "¥0.5/1M" },
+  moonshot:    { model: "openrouter/moonshot-ai/moonshot-v1-8k",       label: "月之暗面 v1-8k",            badge: "¥12/1M" },
+  openai:      { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "$0.15/1M" },
+  anthropic:   { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "$0.25/1M" },
+};
+
 function extractShellCommands(text: string): string[] {
   const commands: string[] = [];
   const re = /```(?:bash|sh|shell|cmd|powershell|ps1|zsh|fish|python)\r?\n([\s\S]*?)```/gi;
@@ -245,6 +261,13 @@ export function ChatPage() {
   const [showPrompts, setShowPrompts]  = useState(false);
   const [prompts, setPrompts]          = useState<PromptTemplate[]>(() => getAllPrompts());
   const [activeModelInfo, setActiveModelInfo] = useState<{ provider: string; model: string } | null>(null);
+  /**
+   * selectedModel encoding (mobile — cloud only, no local Ollama):
+   *   null              — auto (gateway default)
+   *   "cloud:<model>"   — explicit cloud model override for this session
+   */
+  const [selectedModel, setSelectedModel]   = useState<string | null>(null);
+  const [showModelPicker, setShowModelPicker] = useState(false);
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const inputRef    = useRef<HTMLTextAreaElement>(null);
@@ -383,7 +406,20 @@ export function ChatPage() {
 
       let effectiveInstanceId = selectedId;
       let effectiveGatewayUrl = gatewayUrl;
-      if (routingEnabled) {
+      // Cloud model override: "cloud:<model>" → pass model field to gateway.
+      let effectiveModel: string | null = null;
+      if (selectedModel?.startsWith("cloud:")) {
+        effectiveModel = selectedModel.slice(6);
+        if (mountedRef.current) {
+          const label = effectiveModel.split("/").slice(1).join("/") || effectiveModel;
+          setRoutedTo(`云端 · ${label}`);
+          if (routedToTimerRef.current) clearTimeout(routedToTimerRef.current);
+          routedToTimerRef.current = setTimeout(() => {
+            routedToTimerRef.current = null;
+            if (mountedRef.current) setRoutedTo(null);
+          }, 4000);
+        }
+      } else if (routingEnabled) {
         const matched = matchRule(rawContent, listRules());
         if (matched?.instanceId && matched.instanceId !== selectedId) {
           const target = instances.find((i) => i.id === matched.instanceId);
@@ -505,6 +541,7 @@ export function ChatPage() {
           gatewayUrl: effectiveGatewayUrl,
           messages: contextMsgs,
           reqId,
+          model: effectiveModel,
         }).catch((e: unknown) => {
           if (cancelRef.current || !mountedRef.current) return;
           unlistenChunk();
@@ -755,6 +792,92 @@ export function ChatPage() {
             <GitBranch size={10} />
             {t("router.switch")}
           </button>
+
+          {/* Cloud model picker button */}
+          <div className="relative">
+            <button
+              onClick={() => setShowModelPicker((v) => !v)}
+              className={`touch-btn flex items-center gap-1 text-[10px] px-2 py-1 rounded-full border transition-colors ${
+                selectedModel
+                  ? "border-[hsl(var(--primary))]/50 text-[hsl(var(--primary))] bg-[hsl(var(--primary))]/8"
+                  : "border-[hsl(var(--border))] text-[hsl(var(--muted-foreground))]"
+              }`}
+            >
+              {selectedModel ? <Sparkles size={10} /> : <Bot size={10} />}
+              <span className="max-w-[60px] truncate">
+                {selectedModel
+                  ? (selectedModel.slice(6).split("/").slice(1).join("/") || selectedModel.slice(6))
+                  : "自动"}
+              </span>
+              <ChevronDown size={8} className={`transition-transform ${showModelPicker ? "rotate-180" : ""}`} />
+            </button>
+
+            {showModelPicker && (
+              <div className="absolute bottom-full mb-1.5 left-0 w-60 rounded-2xl overflow-hidden z-50 max-h-72 overflow-y-auto"
+                style={{ border: "1px solid rgba(6,182,212,0.2)", background: "white", boxShadow: "0 8px 24px rgba(0,0,0,0.14)" }}>
+                <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 sticky top-0 bg-white">
+                  选择模型
+                </div>
+
+                {/* Auto option */}
+                <button
+                  onClick={() => { setSelectedModel(null); setShowModelPicker(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-slate-50 transition-colors active:bg-slate-100"
+                  style={{
+                    background: !selectedModel ? "rgba(6,182,212,0.06)" : "transparent",
+                    borderLeft: !selectedModel ? "2px solid hsl(var(--primary))" : "2px solid transparent",
+                  }}
+                >
+                  <Bot size={13} className="text-muted-foreground flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium">自动</p>
+                    <p className="text-[10px] text-muted-foreground">由 OpenClaw 网关决策</p>
+                  </div>
+                  {!selectedModel && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                </button>
+
+                {/* Configured cloud models */}
+                {configuredProviders.filter((p) => PROVIDER_CLOUD_MODELS[p]).length > 0 && (
+                  <>
+                    <div className="px-3 py-1 text-[10px] text-muted-foreground bg-muted/30 border-y border-border/40">
+                      云端模型（本次对话生效）
+                    </div>
+                    {configuredProviders
+                      .filter((p) => PROVIDER_CLOUD_MODELS[p])
+                      .map((p) => {
+                        const info = PROVIDER_CLOUD_MODELS[p]!;
+                        const key = `cloud:${info.model}`;
+                        const isActive = selectedModel === key;
+                        return (
+                          <button
+                            key={p}
+                            onClick={() => { setSelectedModel(key); setShowModelPicker(false); }}
+                            className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-slate-50 transition-colors active:bg-slate-100"
+                            style={{
+                              background: isActive ? "rgba(6,182,212,0.06)" : "transparent",
+                              borderLeft: isActive ? "2px solid hsl(var(--primary))" : "2px solid transparent",
+                            }}
+                          >
+                            <Sparkles size={13} className="text-amber-500 flex-shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate">{info.label}</p>
+                              <p className="text-[10px] text-muted-foreground">{info.badge}</p>
+                            </div>
+                            {isActive && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
+                          </button>
+                        );
+                      })}
+                  </>
+                )}
+
+                {configuredProviders.filter((p) => PROVIDER_CLOUD_MODELS[p]).length === 0 && (
+                  <div className="px-3 py-2.5 text-[11px] text-muted-foreground">
+                    暂无可选模型，前往「设置」配置 API Key
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           <button
             onClick={() => setShowPrompts((v) => !v)}

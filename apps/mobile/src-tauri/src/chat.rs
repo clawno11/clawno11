@@ -15,14 +15,16 @@ pub async fn stream_chat(
     gateway_url: String,
     messages: Vec<Value>,
     req_id: String,
+    model: Option<String>,
 ) -> Result<(), String> {
     let url = format!(
         "{}/v1/chat/completions",
         gateway_url.trim_end_matches('/')
     );
 
+    let model_field = model.unwrap_or_else(|| "main".to_string());
     let body = serde_json::json!({
-        "model": "main",
+        "model": model_field,
         "messages": messages,
         "stream": true,
     });
