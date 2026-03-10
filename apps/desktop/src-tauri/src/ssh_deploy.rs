@@ -211,13 +211,14 @@ if command -v fnm >/dev/null 2>&1; then
     fi
 fi
 
-# Fallback: system package managers (require sudo)
+# Fallback: system package managers (require passwordless sudo — non-interactive SSH)
+# sudo -n fails immediately if a password is required (no TTY in SSH session)
 if command -v apt-get >/dev/null 2>&1; then
-    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - > /dev/null 2>&1
-    sudo apt-get install -y nodejs > /dev/null 2>&1
+    curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -n -E bash - > /dev/null 2>&1 || true
+    sudo -n apt-get install -y nodejs > /dev/null 2>&1 || true
 elif command -v yum >/dev/null 2>&1; then
-    curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo bash - > /dev/null 2>&1
-    sudo yum install -y nodejs > /dev/null 2>&1
+    curl -fsSL https://rpm.nodesource.com/setup_lts.x | sudo -n bash - > /dev/null 2>&1 || true
+    sudo -n yum install -y nodejs > /dev/null 2>&1 || true
 fi
 
 if command -v node >/dev/null 2>&1; then
