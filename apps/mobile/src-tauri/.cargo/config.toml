@@ -1,0 +1,11 @@
+# Fix: libsqlite3-sys (and other C crates) failing to compile for x86_64 iOS Simulator
+#
+# Problem: Xcode's build script sets SDKROOT and CFLAGS_x86_64_apple_ios to the
+# iPhoneOS (device) SDK, but x86_64 is a Simulator-only architecture. The iPhoneOS
+# SDK does not support x86_64 and throws "Unsupported architecture" errors.
+#
+# Fix: Force CFLAGS for the x86_64-apple-ios target to use the iPhoneSimulator SDK.
+# "iPhoneSimulator.sdk" (no version suffix) is a symlink to the active Simulator SDK.
+
+[env]
+CFLAGS_x86_64_apple_ios = { value = "-isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator.sdk -mios-simulator-version-min=16.0", force = true }
