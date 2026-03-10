@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "ai.clawno11.mobile",
   "build": {
-    "beforeDevCommand": "pnpm run dev",
+    "beforeDevCommand": "pnpm --filter @clawno/openclaw-client build && pnpm --filter @clawno/mobile run dev",
     "devUrl": "http://localhost:1421",
-    "beforeBuildCommand": "pnpm build",
+    "beforeBuildCommand": "pnpm --filter @clawno/openclaw-client build && pnpm build",
     "frontendDist": "../dist"
   },
   "app": {
