@@ -482,7 +482,7 @@ export function DeployPage() {
       );
 
       try {
-        const res = await stepFns[i]();
+        const res = await stepFns[i]!();
 
         if (res.ok) {
           updateStep(i, { status: "done", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
@@ -572,8 +572,8 @@ export function DeployPage() {
       host: sshHost.trim(),
       port: sshPort,
       username: sshUser.trim() || "root",
-      password:    sshAuthMethod === "password" ? sshPassword   : undefined,
-      privateKey:  sshAuthMethod === "key"      ? sshPrivateKey : undefined,
+      ...(sshAuthMethod === "password" && sshPassword ? { password: sshPassword } : {}),
+      ...(sshAuthMethod === "key" && sshPrivateKey ? { privateKey: sshPrivateKey } : {}),
       gatewayPort: sshGatewayPort,
     };
     setIsTestingConn(true);
@@ -602,8 +602,8 @@ export function DeployPage() {
       host: sshHost.trim(),
       port: sshPort,
       username: sshUser.trim() || "root",
-      password: sshAuthMethod === "password" ? sshPassword : undefined,
-      privateKey: sshAuthMethod === "key" ? sshPrivateKey : undefined,
+      ...(sshAuthMethod === "password" && sshPassword ? { password: sshPassword } : {}),
+      ...(sshAuthMethod === "key" && sshPrivateKey ? { privateKey: sshPrivateKey } : {}),
       gatewayPort: sshGatewayPort,
     };
 

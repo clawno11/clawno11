@@ -112,7 +112,7 @@ export function detectPii(text: string): PiiMatch[] {
         placeholder = valueToPlaceholder.get(key)!;
       } else {
         counters[rule.type] = (counters[rule.type] ?? 0) + 1;
-        placeholder = rule.placeholder(counters[rule.type]);
+        placeholder = rule.placeholder(counters[rule.type]!);
         valueToPlaceholder.set(key, placeholder);
       }
 

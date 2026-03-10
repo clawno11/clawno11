@@ -19,13 +19,13 @@ import { Sidebar } from "./components/Sidebar.tsx";
 interface EBState { error: Error | null }
 
 class PageErrorBoundary extends Component<{ children: ReactNode }, EBState> {
-  state: EBState = { error: null };
+  override state: EBState = { error: null };
 
   static getDerivedStateFromError(error: Error): EBState {
     return { error };
   }
 
-  render() {
+  override render() {
     if (this.state.error) {
       return (
         <div className="flex flex-col items-center justify-center h-full gap-4 p-8 text-center">

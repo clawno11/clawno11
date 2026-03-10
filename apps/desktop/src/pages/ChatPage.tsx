@@ -621,7 +621,7 @@ export function ChatPage() {
           if (target) {
             effectiveInstanceId = target.id;
             effectiveGatewayUrl = target.httpUrl;
-            effectiveModel = target.model ?? null;
+            effectiveModel = null;
             if (mountedRef.current) {
               setRoutedTo(target.name);
               if (routedToTimerRef.current) clearTimeout(routedToTimerRef.current);

@@ -1028,7 +1028,7 @@ function NetworkAccessPanel({ port, onEvent }: NetworkAccessPanelProps) {
           label={t("security.netAccessMode.subnet")}
           desc={subnetDesc}
           badge={t("security.netAccessActive")}
-          warning={!lanInfo ? t("security.netAccessNoLan") : undefined}
+          {...(!lanInfo ? { warning: t("security.netAccessNoLan") } : {})}
           onClick={() => applyMode("subnet")}
           applying={applying || !lanInfo}
         />

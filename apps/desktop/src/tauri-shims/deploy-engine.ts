@@ -7,15 +7,48 @@
  * can remain largely unchanged.
  */
 import { invoke } from "@tauri-apps/api/core";
-import type {
-  LocalDeployOptions,
-  LocalDeployResult,
-  RemoteDeployOptions,
-  RemoteDeployResult,
-  ServiceInfo,
-} from "@clawno/deploy-engine";
 
-export type { LocalDeployOptions, LocalDeployResult, RemoteDeployOptions, RemoteDeployResult, ServiceInfo };
+export interface LocalDeployOptions {
+  configDir?: string;
+  port?: number;
+}
+
+export interface LocalDeployResult {
+  success: boolean;
+  pid?: number;
+  port: number;
+  configDir: string;
+  error?: string;
+}
+
+export interface RemoteDeployOptions {
+  ssh: {
+    host: string;
+    port?: number;
+    username: string;
+    password?: string;
+    privateKey?: string;
+    passphrase?: string;
+  };
+  gatewayPort?: number;
+  useDocker?: boolean;
+}
+
+export interface RemoteDeployResult {
+  success: boolean;
+  host: string;
+  gatewayPort: number;
+  gatewayUrl: string;
+  error?: string;
+}
+
+export interface ServiceInfo {
+  name: string;
+  status: "running" | "stopped" | "error" | "unknown";
+  pid?: number;
+  uptime?: number;
+  restarts?: number;
+}
 
 export class LocalDeployer {
   constructor(private options: LocalDeployOptions = {}) {}
