@@ -37,9 +37,10 @@ function BarChart({ data }: { data: HourlyUsage[] }) {
 
   const max = Math.max(...data.map((d) => d.totalTokens), 1);
 
-  const now = Math.floor(Date.now() / 1000);
+  const msPerHour = 3_600_000;
+  const now = Date.now(); // milliseconds, matching tokenLog.ts
   const slots: Array<{ ts: number; val: number }> = Array.from({ length: 24 }, (_, i) => {
-    const slotHour = Math.floor((now - (23 - i) * 3600) / 3600) * 3600;
+    const slotHour = Math.floor((now - (23 - i) * msPerHour) / msPerHour) * msPerHour;
     return {
       ts: slotHour,
       val: data.find((d) => d.hour === slotHour)?.totalTokens ?? 0,
@@ -393,22 +394,12 @@ export function TokenPage() {
             {t("tokens.desc")}
           </p>
         </div>
-        <div className="flex items-center gap-3">
-          {lastRefresh && (
-            <span className="text-xs text-muted-foreground flex items-center gap-1">
-              <Clock size={11} />
-              {lastRefresh.toLocaleTimeString()}
-            </span>
-          )}
-          <button
-            onClick={load}
-            disabled={loading}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-border text-sm hover:bg-muted/60 transition-colors disabled:opacity-50"
-          >
-            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
-            {loading ? t("tokens.loading") : t("tokens.refresh")}
-          </button>
-        </div>
+        {lastRefresh && (
+          <span className="text-xs text-muted-foreground flex items-center gap-1">
+            <Clock size={11} />
+            {lastRefresh.toLocaleTimeString()}
+          </span>
+        )}
       </div>
 
       {/* ── Anomaly alert ── */}

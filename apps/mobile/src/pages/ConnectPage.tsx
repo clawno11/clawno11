@@ -603,7 +603,7 @@ export function ConnectPage() {
                 style={{ color: activeMethod.color }}
               >
                 <Info size={13} />
-                {t("connect.tailscaleGuide")}
+                {t("connect.xedgeGuide")}
                 {showXedgeGuide ? <ChevronUp size={12} className="ml-auto" /> : <ChevronDown size={12} className="ml-auto" />}
               </button>
 
@@ -727,9 +727,9 @@ export function ConnectPage() {
               <Server size={17} style={{ color: "hsl(var(--primary))" }} />
             </div>
             <div className="flex-1 min-w-0">
-              <p className="font-semibold text-sm text-[hsl(var(--foreground))]">部署新服务器</p>
+              <p className="font-semibold text-sm text-[hsl(var(--foreground))]">{t("connect.deployNewServer")}</p>
               <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-0.5">
-                通过 SSH 在 VPS 上一键安装 OpenClaw
+                {t("connect.deployNewServerDesc")}
               </p>
             </div>
             <ChevronRight size={16} className="text-[hsl(var(--muted-foreground))] flex-shrink-0" />

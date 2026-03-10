@@ -28,29 +28,23 @@ fn scan_stdio_endpoint(endpoint: &str) -> (String, Vec<String>) {
     let lower = endpoint.to_lowercase();
     let mut factors: Vec<String> = Vec::new();
 
-    for op in SHELL_OPERATORS {
-        if lower.contains(op) {
-            factors.push(format!("shell_operator:{}", op.trim()));
-        }
-    }
-    for tool in NETWORK_TOOLS {
-        if lower.contains(tool) {
-            factors.push(format!("network_tool:{}", tool.trim()));
-        }
-    }
-    for path in SENSITIVE_PATHS {
-        if lower.contains(&path.to_lowercase()) {
-            factors.push(format!("sensitive_path:{}", path));
-        }
+    // Deduplicated factor keys match the frontend i18n `mcp.factors.*` keys.
+    let has_shell = SHELL_OPERATORS.iter().any(|op| lower.contains(op));
+    if has_shell {
+        factors.push("shell_invocation".to_string());
     }
 
-    let risk = if factors.iter().any(|f| f.starts_with("shell_operator")) {
-        "danger"
-    } else if !factors.is_empty() {
-        "caution"
-    } else {
-        "safe"
-    };
+    let has_network = NETWORK_TOOLS.iter().any(|tool| lower.contains(tool));
+    if has_network {
+        factors.push("remote_server".to_string());
+    }
+
+    let has_sensitive = SENSITIVE_PATHS.iter().any(|path| lower.contains(&path.to_lowercase()));
+    if has_sensitive {
+        factors.push("sensitive_path".to_string());
+    }
+
+    let risk = if has_shell { "danger" } else if !factors.is_empty() { "caution" } else { "safe" };
 
     (risk.to_string(), factors)
 }
@@ -63,12 +57,12 @@ async fn scan_http_endpoint(endpoint: &str) -> (String, Vec<String>, bool) {
         factors.push("no_tls".to_string());
     }
 
-    // Remote endpoint check (not localhost)
+    // Remote endpoint check (not localhost) — key matches frontend i18n `mcp.factors.remote_server`.
     let is_local = endpoint.contains("localhost")
         || endpoint.contains("127.0.0.1")
         || endpoint.contains("::1");
     if !is_local {
-        factors.push("remote_endpoint".to_string());
+        factors.push("remote_server".to_string());
     }
 
     // Reachability probe
@@ -84,7 +78,7 @@ async fn scan_http_endpoint(endpoint: &str) -> (String, Vec<String>, bool) {
 
     let reachable = client.get(endpoint).send().await.is_ok();
 
-    let risk = if factors.contains(&"remote_endpoint".to_string())
+    let risk = if factors.contains(&"remote_server".to_string())
         && factors.contains(&"no_tls".to_string())
     {
         "danger"

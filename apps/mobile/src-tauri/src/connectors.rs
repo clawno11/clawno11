@@ -11,23 +11,25 @@
 use crate::types::TailscaleStatus;
 use std::net::UdpSocket;
 
-/// Detect if Tailscale VPN is active on this device by checking local network interface.
+/// Detect if Tailscale (or a compatible VPN such as xEdge) is active on this device.
 ///
 /// Uses the UDP "connect trick": bind a UDP socket and connect to an external address.
-/// The OS picks the source interface — if it's 100.x.x.x, Tailscale is routing traffic.
+/// The OS picks the outbound source interface without sending any packet.
+/// If the resulting local IP is in the Tailscale CGNAT range (100.64.0.0/10), the VPN
+/// is active.
+///
+/// We only probe 100.100.100.100 (Tailscale MagicDNS) because:
+///   - A route to that address only exists when Tailscale/xEdge is running.
+///   - Using a public address (e.g. 8.8.8.8) as fallback is incorrect — when Tailscale
+///     does *not* do full-traffic routing the OS picks the default WAN interface, whose
+///     IP is never in the 100.64/10 range, so the check always fails and adds confusion.
 fn detect_tailscale_ip() -> Option<String> {
-    // Try multiple well-known addresses to trigger interface selection
-    for target in &[
-        "100.100.100.100:80",  // Tailscale MagicDNS
-        "8.8.8.8:80",         // Google DNS fallback
-    ] {
-        if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
-            if socket.connect(target).is_ok() {
-                if let Ok(addr) = socket.local_addr() {
-                    let ip = addr.ip().to_string();
-                    if is_tailscale_ip(&ip) {
-                        return Some(ip);
-                    }
+    if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("100.100.100.100:80").is_ok() {
+            if let Ok(addr) = socket.local_addr() {
+                let ip = addr.ip().to_string();
+                if is_tailscale_ip(&ip) {
+                    return Some(ip);
                 }
             }
         }

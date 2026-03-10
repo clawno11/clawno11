@@ -4,7 +4,7 @@
  * User enters VPS SSH credentials → app SSHes in, installs Node.js + pm2 +
  * openclaw, starts the service, and auto-adds it as a connected instance.
  */
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Terminal, Server, Wifi, CheckCircle2, XCircle, Loader,
   ChevronRight, Eye, EyeOff, ArrowLeft,
@@ -31,26 +31,30 @@ interface LogLine {
   type: "info" | "success" | "error";
 }
 
-// ── Step display info ─────────────────────────────────────────────────────────
-
-const STEP_LABELS: Record<string, string> = {
-  connecting:           "连接服务器",
-  connected:            "SSH 认证",
-  "node-ok":            "Node.js 就绪",
-  "installing-node":    "安装 Node.js",
-  "installing-packages":"安装 pm2 & openclaw",
-  "starting-service":   "启动服务",
-  firewall:             "防火墙配置",
-  verifying:            "验证服务",
-  done:                 "部署完成",
-};
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function DeployPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { add } = useInstanceStore();
+  const { addOrUpdate } = useInstanceStore();
+
+  // Step labels are resolved at render time via i18n so they update with locale changes.
+  const stepLabel = useCallback((step: string): string => {
+    const key = `deploy.ssh.step.${({
+      connecting:            "connecting",
+      connected:             "connected",
+      "node-ok":             "nodeOk",
+      "installing-node":     "installingNode",
+      "installing-packages": "installingPackages",
+      "starting-service":    "startingService",
+      firewall:              "firewall",
+      verifying:             "verifying",
+      done:                  "done",
+    } as Record<string, string>)[step] ?? step}`;
+    const label = t(key);
+    // If translation key is not found, fall back to the raw step string.
+    return label.startsWith("deploy.ssh.step.") ? step : label;
+  }, [t]);
 
   // Form
   const [host, setHost]             = useState("");
@@ -92,10 +96,12 @@ export function DeployPage() {
   const userTrimmed     = username.trim();
   const portNum         = parseInt(sshPort, 10) || 22;
   const ocPortNum       = parseInt(openclawPort, 10) || 18789;
-  const derivedName     = instanceName.trim() || hostTrimmed || "远程服务器";
+  const derivedName     = instanceName.trim() || hostTrimmed || t("deploy.ssh.title");
 
   const canTest    = hostTrimmed && userTrimmed && password && phase === "form";
-  const canDeploy  = canTest && (testResult !== null || testError !== null);
+  // Only allow deploy after a successful test — a failed test means the server
+  // is unreachable and deploy would immediately fail anyway.
+  const canDeploy  = canTest && testResult !== null;
 
   // ── Test connection ─────────────────────────────────────────────────────────
 
@@ -127,7 +133,7 @@ export function DeployPage() {
     const unlisten = await listen<DeployProgress>("deploy-progress", (ev) => {
       const p = ev.payload;
       setProgress(p.progress);
-      setCurrentStep(STEP_LABELS[p.step] ?? p.step);
+      setCurrentStep(stepLabel(p.step));
       if (p.error) {
         appendLog(`✗ ${p.message}`, "error");
       } else if (p.progress === 100) {
@@ -145,18 +151,21 @@ export function DeployPage() {
       setGatewayUrl(url);
 
       // Add to instances store
-      add({
-        id:      crypto.randomUUID(),
-        name:    derivedName,
-        httpUrl: url,
-        port:    ocPortNum,
-        health:  "unknown",
-        type:    "remote",
+      addOrUpdate({
+        id:         crypto.randomUUID(),
+        name:       derivedName,
+        kind:       "remote",
+        gatewayUrl: url.replace(/^http/, "ws"),
+        uiUrl:      url,
+        httpUrl:    url,
+        port:       ocPortNum,
+        deployedAt: Date.now(),
+        health:     "unknown",
       });
 
       setPhase("done");
     } catch (e) {
-      appendLog(`✗ 部署中止: ${String(e)}`, "error");
+      appendLog(`✗ ${t("deploy.ssh.aborted")}: ${String(e)}`, "error");
       setPhase("failed");
     } finally {
       unlisten();
@@ -169,8 +178,8 @@ export function DeployPage() {
   return (
     <div className="flex flex-col h-full">
       <TopBar
-        title="部署服务器"
-        subtitle="通过 SSH 一键部署 OpenClaw"
+        title={t("deploy.ssh.title")}
+        subtitle={t("deploy.ssh.subtitle")}
         left={
           <button
             onClick={() => navigate(-1)}
@@ -187,19 +196,19 @@ export function DeployPage() {
         <section className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
           <div className="px-4 py-3 border-b border-[hsl(var(--border))]"
             style={{ background: "rgba(6,182,212,0.04)" }}>
-            <p className="font-semibold text-sm text-[hsl(var(--primary))]">服务器 SSH 凭据</p>
+            <p className="font-semibold text-sm text-[hsl(var(--primary))]">{t("deploy.ssh.credentials")}</p>
           </div>
           <div className="p-4 space-y-3">
             {/* Host */}
             <div>
               <label className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-                IP 地址 / 域名
+                {t("deploy.ssh.host")}
               </label>
               <input
                 type="text"
                 value={host}
                 onChange={(e) => setHost(e.target.value)}
-                placeholder="192.168.1.100 或 myserver.com"
+                placeholder="192.168.1.100"
                 disabled={phase !== "form"}
                 className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
               />
@@ -209,7 +218,7 @@ export function DeployPage() {
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-                  SSH 端口
+                  {t("deploy.ssh.port")}
                 </label>
                 <input
                   type="number"
@@ -221,7 +230,7 @@ export function DeployPage() {
               </div>
               <div className="flex-1">
                 <label className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-                  用户名
+                  {t("deploy.ssh.username")}
                 </label>
                 <input
                   type="text"
@@ -236,14 +245,14 @@ export function DeployPage() {
             {/* Password */}
             <div>
               <label className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-                SSH 密码
+                {t("deploy.ssh.password")}
               </label>
               <div className="mt-1 relative">
                 <input
                   type={showPass ? "text" : "password"}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="SSH 登录密码"
+                  placeholder={t("deploy.ssh.passwordPlaceholder")}
                   disabled={phase !== "form"}
                   className="w-full px-3 py-2.5 pr-10 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                 />
@@ -261,7 +270,7 @@ export function DeployPage() {
             <div className="flex gap-2">
               <div className="flex-1">
                 <label className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-                  服务端口
+                  {t("deploy.ssh.servicePort")}
                 </label>
                 <input
                   type="number"
@@ -273,13 +282,13 @@ export function DeployPage() {
               </div>
               <div className="flex-1">
                 <label className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
-                  实例名称（可选）
+                  {t("deploy.ssh.instanceName")}
                 </label>
                 <input
                   type="text"
                   value={instanceName}
                   onChange={(e) => setInstanceName(e.target.value)}
-                  placeholder={hostTrimmed || "远程服务器"}
+                  placeholder={hostTrimmed || t("deploy.ssh.title")}
                   disabled={phase !== "form"}
                   className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                 />
@@ -294,7 +303,7 @@ export function DeployPage() {
             style={{ background: "rgba(16,185,129,0.08)", border: "1px solid rgba(16,185,129,0.25)" }}>
             <CheckCircle2 size={14} className="flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold mb-0.5">连接成功</p>
+              <p className="font-semibold mb-0.5">{t("deploy.ssh.testSuccess")}</p>
               <p className="font-mono opacity-80 leading-relaxed break-all">{testResult}</p>
             </div>
           </div>
@@ -304,7 +313,7 @@ export function DeployPage() {
             style={{ background: "rgba(239,68,68,0.08)", border: "1px solid rgba(239,68,68,0.2)" }}>
             <XCircle size={14} className="flex-shrink-0 mt-0.5" />
             <div>
-              <p className="font-semibold mb-0.5">连接失败</p>
+              <p className="font-semibold mb-0.5">{t("deploy.ssh.testFailed")}</p>
               <p className="opacity-80 break-all">{testError}</p>
             </div>
           </div>
@@ -319,7 +328,8 @@ export function DeployPage() {
               className="touch-btn w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-semibold border transition-colors disabled:opacity-40"
               style={{ borderColor: "rgba(6,182,212,0.4)", color: "hsl(var(--primary))" }}
             >
-              <Wifi size={16} /> 测试连接
+              {phase === "testing" ? <Loader size={16} className="animate-spin" /> : <Wifi size={16} />}
+              {t("deploy.ssh.testBtn")}
             </button>
             <button
               onClick={handleDeploy}
@@ -327,10 +337,10 @@ export function DeployPage() {
               className="touch-btn w-full flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold text-white transition-colors disabled:opacity-40"
               style={{ background: canDeploy ? "hsl(var(--primary))" : "hsl(var(--muted))", boxShadow: canDeploy ? "0 0 20px rgba(6,182,212,0.4)" : "none" }}
             >
-              <Server size={16} /> 一键部署 OpenClaw <ChevronRight size={14} />
+              <Server size={16} /> {t("deploy.ssh.deployBtn")} <ChevronRight size={14} />
             </button>
             <p className="text-center text-[11px] text-[hsl(var(--muted-foreground))] px-4">
-              部署将在服务器上安装 Node.js、pm2 和 openclaw，并自动启动服务
+              {t("deploy.ssh.deployHint")}
             </p>
           </div>
         )}
@@ -344,7 +354,7 @@ export function DeployPage() {
                 ? <Loader size={14} className="animate-spin text-[hsl(var(--primary))]" />
                 : <XCircle size={14} className="text-red-500" />}
               <p className="font-semibold text-sm" style={{ color: phase === "failed" ? "#ef4444" : "hsl(var(--primary))" }}>
-                {phase === "deploying" ? (currentStep || "部署中...") : "部署失败"}
+                {phase === "deploying" ? (currentStep || t("deploy.ssh.deploying")) : t("deploy.ssh.deployFailed")}
               </p>
               {phase === "deploying" && (
                 <span className="ml-auto text-[11px] font-mono text-[hsl(var(--muted-foreground))]">{progress}%</span>
@@ -367,7 +377,7 @@ export function DeployPage() {
               className="p-3 max-h-52 overflow-y-auto font-mono text-[11px] space-y-1 bg-[#0f172a]"
             >
               {log.length === 0 && (
-                <p className="text-slate-500">正在初始化...</p>
+                <p className="text-slate-500">{t("deploy.ssh.initializing")}</p>
               )}
               {log.map((line) => (
                 <p key={line.id} className={
@@ -386,7 +396,7 @@ export function DeployPage() {
                   onClick={() => { setPhase("form"); setLog([]); setProgress(0); }}
                   className="touch-btn w-full py-2.5 rounded-xl text-sm font-semibold text-[hsl(var(--muted-foreground))] border border-[hsl(var(--border))]"
                 >
-                  返回修改
+                  {t("deploy.ssh.backBtn")}
                 </button>
               </div>
             )}
@@ -403,9 +413,9 @@ export function DeployPage() {
                 <CheckCircle2 size={28} className="text-green-500" />
               </div>
               <div>
-                <p className="font-bold text-base text-green-700 mb-1">部署成功！</p>
+                <p className="font-bold text-base text-green-700 mb-1">{t("deploy.ssh.successTitle")}</p>
                 <p className="text-xs text-[hsl(var(--muted-foreground))]">
-                  OpenClaw 已在你的服务器上运行
+                  {t("deploy.ssh.successDesc")}
                 </p>
                 <p className="mt-1 font-mono text-xs text-green-700 break-all">{gatewayUrl}</p>
               </div>
@@ -432,13 +442,13 @@ export function DeployPage() {
                   className="touch-btn w-full flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold text-white"
                   style={{ background: "hsl(var(--primary))", boxShadow: "0 0 16px rgba(6,182,212,0.35)" }}
                 >
-                  <Terminal size={15} /> 立即开始聊天
+                  <Terminal size={15} /> {t("deploy.ssh.startChat")}
                 </button>
                 <button
                   onClick={() => navigate("/")}
                   className="touch-btn w-full flex items-center justify-center gap-2 py-2.5 rounded-2xl text-sm font-semibold text-[hsl(var(--muted-foreground))] border border-[hsl(var(--border))]"
                 >
-                  <Server size={14} /> 查看实例列表
+                  <Server size={14} /> {t("deploy.ssh.viewInstances")}
                 </button>
               </div>
             </div>

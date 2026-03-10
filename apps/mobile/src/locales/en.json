@@ -29,6 +29,9 @@
     "downloadTailscale": "Download Tailscale",
     "tailscalePrivacyNote": "Tailscale establishes end-to-end encrypted tunnels. Tailscale's servers cannot read your traffic.",
     "tailscaleGuide": "Setup guide",
+    "xedgeGuide": "Setup guide",
+    "deployNewServer": "Deploy New Server",
+    "deployNewServerDesc": "One-click OpenClaw install on a VPS via SSH",
     "guideStep1": "Install and start Tailscale on your server (the machine running openclaw)",
     "guideStep2": "Install the Tailscale app on your phone and sign in to the same account",
     "guideStep3": "Check your server's Tailscale IP (100.x.x.x) in the desktop ClawNo.11 Connectors page",
@@ -180,6 +183,43 @@
       "running": "Running",
       "ok": "Done",
       "failed": "Failed"
+    },
+    "ssh": {
+      "title": "Deploy Server",
+      "subtitle": "One-click OpenClaw deploy via SSH",
+      "credentials": "Server SSH Credentials",
+      "host": "IP Address / Domain",
+      "port": "SSH Port",
+      "username": "Username",
+      "password": "SSH Password",
+      "passwordPlaceholder": "SSH login password",
+      "servicePort": "Service Port",
+      "instanceName": "Instance Name (optional)",
+      "testBtn": "Test Connection",
+      "testSuccess": "Connection successful",
+      "testFailed": "Connection failed",
+      "deployBtn": "One-Click Deploy OpenClaw",
+      "deployHint": "Will install Node.js, pm2, and openclaw on the server and start the service automatically",
+      "deploying": "Deploying...",
+      "deployFailed": "Deploy Failed",
+      "initializing": "Initializing...",
+      "backBtn": "Go Back",
+      "successTitle": "Deployed!",
+      "successDesc": "OpenClaw is running on your server",
+      "startChat": "Start Chatting Now",
+      "viewInstances": "View Instances",
+      "aborted": "Deployment aborted",
+      "step": {
+        "connecting": "Connecting to server",
+        "connected": "SSH authentication",
+        "nodeOk": "Node.js ready",
+        "installingNode": "Installing Node.js",
+        "installingPackages": "Installing pm2 & openclaw",
+        "startingService": "Starting service",
+        "firewall": "Firewall config",
+        "verifying": "Verifying service",
+        "done": "Deploy complete"
+      }
     }
   },
   "chat": {
@@ -249,6 +289,8 @@
     "clearEvents": "Clear Log",
     "clearEventsBtn": "Clear",
     "clearingEvents": "Clearing…",
+    "clearEventsConfirm": "Clear all security event records?",
+    "eventsClearedDetail": "Security event log cleared (mobile)",
     "mobileSubtitle": "Security Event Log (read-only)",
     "totalEvents": "Total Events",
     "severityInfo": "Info",
@@ -475,6 +517,13 @@
       "privacyNote": "Note: Tailscale uses a coordination server to establish an encrypted tunnel. Traffic content is end-to-end encrypted and Tailscale cannot read it.",
       "startHint": "Tailscale is installed. Please open the Tailscale client, sign in, and refresh."
     }
+  },
+  "model": {
+    "pickerTitle": "Select Model",
+    "auto": "Auto",
+    "autoDesc": "Decided by the OpenClaw gateway",
+    "cloudGroup": "Cloud models (this session only)",
+    "noModels": "No models configured. Go to Settings to add an API Key."
   },
   "prompts": {
     "toggle": "Quick Prompts",

@@ -54,11 +54,11 @@ export function SecurityPage() {
   useEffect(() => { load(); }, [load]);
 
   const handleClear = async () => {
-    if (!window.confirm("确认清除所有安全事件记录？")) return;
+    if (!window.confirm(t("security.clearEventsConfirm"))) return;
     setClearing(true);
     try {
       await clearSecurityEvents();
-      await logSecurityEvent("events_cleared", "安全事件日志已清除（移动端）", "info");
+      await logSecurityEvent("events_cleared", t("security.eventsClearedDetail"), "info");
       setEvents([]);
     } finally {
       setClearing(false);

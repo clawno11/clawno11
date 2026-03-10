@@ -42,20 +42,17 @@ import { TopBar } from "../components/TopBar";
 
 const MAX_CONTEXT_CHARS = 32_000;
 
-/** Provider ID → cheapest available model (mirrors deploy.rs provider_cheapest_model). */
+/**
+ * Provider ID → cheapest available model.
+ * Keys MUST match the provider IDs used in SettingsPage AI_PROVIDERS
+ * and stored by aiConfigStore (secureAiConfig prefix "ai_key_configured:").
+ */
 const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string; badge: string }> = {
-  siliconflow: { model: "openrouter/meta-llama/llama-3.1-8b-instruct", label: "SiliconFlow Llama 3.1 8B", badge: "免费" },
-  hunyuan:     { model: "openrouter/tencent/hunyuan-lite",             label: "混元 Lite",                 badge: "免费" },
-  spark:       { model: "openrouter/iflytek/spark-lite",               label: "讯飞星火 Lite",             badge: "免费" },
-  zai:         { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "¥0.1/1M" },
-  openrouter:  { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
-  doubao:      { model: "openrouter/bytedance/doubao-lite-32k",        label: "豆包 Lite",                 badge: "¥0.3/1M" },
-  minimax:     { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "¥0.15/1M" },
-  deepseek:    { model: "openrouter/deepseek/deepseek-chat",           label: "DeepSeek V3",               badge: "¥1/1M" },
-  qwen:        { model: "openrouter/qwen/qwen-plus",                   label: "通义千问 Plus",             badge: "¥0.5/1M" },
-  moonshot:    { model: "openrouter/moonshot-ai/moonshot-v1-8k",       label: "月之暗面 v1-8k",            badge: "¥12/1M" },
-  openai:      { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "$0.15/1M" },
-  anthropic:   { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "$0.25/1M" },
+  zhipu:      { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "¥0.1/1M" },
+  openrouter: { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
+  minimax:    { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "¥0.15/1M" },
+  openai:     { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "$0.15/1M" },
+  anthropic:  { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "$0.25/1M" },
 };
 
 function extractShellCommands(text: string): string[] {
@@ -523,7 +520,6 @@ export function ChatPage() {
               }
             }
             setIsStreaming(false);
-            isSendingRef.current = false;
           },
         );
 
@@ -534,7 +530,6 @@ export function ChatPage() {
             setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)));
             setIsStreaming(false);
           }
-          isSendingRef.current = false;
         }, { once: true });
 
         invoke("stream_chat", {
@@ -552,7 +547,6 @@ export function ChatPage() {
             ),
           );
           setIsStreaming(false);
-          isSendingRef.current = false;
         });
 
         return;
@@ -573,6 +567,7 @@ export function ChatPage() {
   }, [
     input, isStreaming, piiEnabled, selectedId, gatewayUrl, routingEnabled,
     ragEnabled, ragDocCount, currentSessionId, messages, instances, t,
+    activeModelInfo, selectedModel,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Empty state ─────────────────────────────────────────────────────────
@@ -649,6 +644,7 @@ export function ChatPage() {
                   setShowPicker(false);
                   setMessages([]);
                   persistSession(null);
+                  setSelectedModel(null);
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-3 text-left border-b border-[hsl(var(--border))]/50 last:border-0 active:bg-[hsl(var(--muted))]/30"
                 style={{ background: inst.id === selectedId ? "rgba(6,182,212,0.06)" : "transparent" }}
@@ -807,7 +803,7 @@ export function ChatPage() {
               <span className="max-w-[60px] truncate">
                 {selectedModel
                   ? (selectedModel.slice(6).split("/").slice(1).join("/") || selectedModel.slice(6))
-                  : "自动"}
+                  : t("model.auto")}
               </span>
               <ChevronDown size={8} className={`transition-transform ${showModelPicker ? "rotate-180" : ""}`} />
             </button>
@@ -816,7 +812,7 @@ export function ChatPage() {
               <div className="absolute bottom-full mb-1.5 left-0 w-60 rounded-2xl overflow-hidden z-50 max-h-72 overflow-y-auto"
                 style={{ border: "1px solid rgba(6,182,212,0.2)", background: "white", boxShadow: "0 8px 24px rgba(0,0,0,0.14)" }}>
                 <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 sticky top-0 bg-white">
-                  选择模型
+                  {t("model.pickerTitle")}
                 </div>
 
                 {/* Auto option */}
@@ -830,8 +826,8 @@ export function ChatPage() {
                 >
                   <Bot size={13} className="text-muted-foreground flex-shrink-0" />
                   <div className="flex-1 min-w-0">
-                    <p className="font-medium">自动</p>
-                    <p className="text-[10px] text-muted-foreground">由 OpenClaw 网关决策</p>
+                    <p className="font-medium">{t("model.auto")}</p>
+                    <p className="text-[10px] text-muted-foreground">{t("model.autoDesc")}</p>
                   </div>
                   {!selectedModel && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
                 </button>
@@ -840,7 +836,7 @@ export function ChatPage() {
                 {configuredProviders.filter((p) => PROVIDER_CLOUD_MODELS[p]).length > 0 && (
                   <>
                     <div className="px-3 py-1 text-[10px] text-muted-foreground bg-muted/30 border-y border-border/40">
-                      云端模型（本次对话生效）
+                      {t("model.cloudGroup")}
                     </div>
                     {configuredProviders
                       .filter((p) => PROVIDER_CLOUD_MODELS[p])
@@ -872,7 +868,7 @@ export function ChatPage() {
 
                 {configuredProviders.filter((p) => PROVIDER_CLOUD_MODELS[p]).length === 0 && (
                   <div className="px-3 py-2.5 text-[11px] text-muted-foreground">
-                    暂无可选模型，前往「设置」配置 API Key
+                    {t("model.noModels")}
                   </div>
                 )}
               </div>

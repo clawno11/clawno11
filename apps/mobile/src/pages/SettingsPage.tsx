@@ -117,9 +117,11 @@ type ProviderId = typeof AI_PROVIDERS[number]["id"];
 function ProviderKeyRow({
   provider,
   onSaved,
+  onDeleted,
 }: {
   provider: typeof AI_PROVIDERS[number];
   onSaved: (id: ProviderId) => void;
+  onDeleted: (id: ProviderId) => void;
 }) {
   const { t } = useTranslation();
   const [existing, setExisting]   = useState<string | null>(null);
@@ -160,6 +162,7 @@ function ProviderKeyRow({
       await secureApiKeys.delete(provider.id);
       setExisting(null);
       setInput("");
+      onDeleted(provider.id as ProviderId);
     } finally {
       setDeleting(false);
     }
@@ -269,11 +272,15 @@ function ProviderKeyRow({
 
 function ApiKeyPanel() {
   const { t } = useTranslation();
-  const { markConfigured } = useAiConfigStore();
+  const { markConfigured, unmark } = useAiConfigStore();
 
   const handleSaved = useCallback(async (id: ProviderId) => {
     await markConfigured(id);
   }, [markConfigured]);
+
+  const handleDeleted = useCallback(async (id: ProviderId) => {
+    await unmark(id);
+  }, [unmark]);
 
   return (
     <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
@@ -285,7 +292,7 @@ function ApiKeyPanel() {
         </p>
       </div>
       {AI_PROVIDERS.map((p) => (
-        <ProviderKeyRow key={p.id} provider={p} onSaved={handleSaved} />
+        <ProviderKeyRow key={p.id} provider={p} onSaved={handleSaved} onDeleted={handleDeleted} />
       ))}
     </div>
   );
@@ -437,7 +444,12 @@ function BudgetEditor() {
 function ToggleRow({ storageKey, label, desc, defaultOn }: {
   storageKey: string; label: string; desc: string; defaultOn: boolean;
 }) {
-  const [enabled, setEnabled] = useState(() => localStorage.getItem(storageKey) !== "false" && defaultOn);
+  const [enabled, setEnabled] = useState(() => {
+    const stored = localStorage.getItem(storageKey);
+    // No stored value → use the default; otherwise honour the explicit saved value.
+    if (stored === null) return defaultOn;
+    return stored !== "false";
+  });
   return (
     <div className="flex items-center gap-3 px-4 py-3 border-b border-[hsl(var(--border))]/50 last:border-0">
       <div className="flex-1 min-w-0">
@@ -471,7 +483,7 @@ export function SettingsPage() {
   }, []);
 
   const handlePurge = async () => {
-        if (!window.confirm(t("settings.purgeConfirm"))) return;
+    if (!window.confirm(t("settings.purgeConfirm"))) return;
     setPurging(true);
     try {
       await purgeOldRecords(30);
@@ -483,7 +495,7 @@ export function SettingsPage() {
   };
 
   const handleWipe = async () => {
-        if (!window.confirm(t("settings.wipeConfirm"))) return;
+    if (!window.confirm(t("settings.wipeConfirm"))) return;
     setWiping(true);
     try {
       await secureStore.wipeAll();
