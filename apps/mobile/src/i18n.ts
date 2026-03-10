@@ -8,7 +8,7 @@ i18n.use(initReactI18next).init({
     zh: { translation: zh },
     en: { translation: en },
   },
-  lng: localStorage.getItem("clawno-lang") ?? "zh",
+  lng: localStorage.getItem("clawno-lang") ?? (navigator.language.startsWith("zh") ? "zh" : "en"),
   fallbackLng: "zh",
   interpolation: { escapeValue: false },
 });
