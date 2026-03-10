@@ -121,7 +121,19 @@ fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
 ///   a) All cloud providers fail (offline / network error / auth issue)
 ///   b) User explicitly requests local model in the chat input
 ///   c) User asks for local model in the ClawNo.11 chat
-fn auto_select_active_model(fixes: &mut Vec<String>) {
+/// Automatically select the best active model based on what's configured.
+///
+/// Routing priority (in order):
+///   1st — Cheapest configured cloud provider (free-tier first)
+///   2nd — Local Ollama (fallback — activates when cloud is unreachable/offline)
+///
+/// Call this:
+///   • After first deployment (`deploy_step_onboard`)
+///   • After every gateway restart (`restart_local_service`)
+///
+/// On restart, any session-level model override the user set in chat is
+/// cleared, returning to this default priority.
+pub fn auto_select_active_model(fixes: &mut Vec<String>) {
     // Parse configured providers from `openclaw models status --json`.
     let status_out = crate::platform::shell_output("openclaw models status --json");
     let configured: Vec<String> = serde_json::from_str::<serde_json::Value>(&status_out)
@@ -138,40 +150,49 @@ fn auto_select_active_model(fixes: &mut Vec<String>) {
         })
         .unwrap_or_default();
 
-    // Priority order: prefer domestic/free-tier providers first for new users.
-    let cloud_priority = [
-        "zai", "openai", "anthropic", "openrouter", "minimax",
-        "deepseek", "moonshot", "qwen", "doubao", "hunyuan",
-        "spark", "baichuan", "stepfun", "lingyi", "siliconflow",
+    // Priority order: free-tier first, then cheapest-paid, then standard/premium.
+    // This ensures the user's wallet is protected by default.
+    let cheapest_priority = [
+        "siliconflow", "hunyuan", "spark",                      // free tier
+        "zai", "openrouter",                                     // ultra cheap / free models
+        "doubao", "minimax", "qwen", "deepseek",                 // cheap paid
+        "moonshot", "lingyi", "baichuan", "stepfun",             // mid-range
+        "openai", "anthropic",                                   // premium
     ];
 
-    // Find the first configured cloud provider.
-    let best = cloud_priority.iter().find(|&&p| configured.contains(&p.to_string()));
+    // Find the first configured cloud provider and set its cheapest model as primary.
+    let best = cheapest_priority.iter().find(|&&p| configured.contains(&p.to_string()));
 
     if let Some(provider) = best {
-        if let Some(model) = provider_default_model(provider) {
+        if let Some(model) = provider_cheapest_model(provider) {
             let (ok, _) = run_silent(&format!("openclaw models set {}", model));
             if ok {
                 fixes.push(format!("cloud-model-active:{}", model));
             }
-            // Also add to fallback chain so it retries on transient errors.
+            // Also register in fallback chain for transient error retry.
             let _ = run_silent(&format!("openclaw models fallbacks add {}", model));
         }
     } else {
-        // No cloud providers configured — Ollama becomes the temporary primary
-        // so the user gets at least some response until they add a cloud key.
-        // We only do this when Ollama has at least one model installed.
-        let ollama_models_out = crate::platform::shell_output(
-            "curl -s http://localhost:11434/api/tags"
-        );
-        let has_ollama = serde_json::from_str::<serde_json::Value>(&ollama_models_out)
+        // No cloud providers configured yet.
+        // Check if Ollama has a local model and make it the temporary primary.
+        let ollama_out = crate::platform::shell_output("curl -s http://localhost:11434/api/tags");
+        let first_ollama = serde_json::from_str::<serde_json::Value>(&ollama_out)
             .ok()
-            .and_then(|v| v.get("models").and_then(|m| m.as_array()).map(|a| !a.is_empty()))
-            .unwrap_or(false);
+            .and_then(|v| {
+                v.get("models")
+                 .and_then(|m| m.as_array())
+                 .and_then(|a| a.first())
+                 .and_then(|m| m.get("name"))
+                 .and_then(|n| n.as_str())
+                 .map(String::from)
+            });
 
-        if has_ollama {
-            fixes.push("no-cloud-keys-ollama-primary-temp".to_string());
-            // Don't explicitly set a model here — let OpenClaw use whatever was last set.
+        if let Some(ollama_model) = first_ollama {
+            let model_str = format!("ollama/{}", ollama_model);
+            let (ok, _) = run_silent(&format!("openclaw models set {}", model_str));
+            if ok {
+                fixes.push(format!("no-cloud-keys-ollama-active:{}", ollama_model));
+            }
         } else {
             fixes.push("no-cloud-keys-no-ollama-models".to_string());
         }
@@ -264,6 +285,35 @@ pub async fn get_remote_service_info(
 }
 
 // ── AI provider key configuration ─────────────────────────────────────────────
+
+/// Map a provider ID to its **cheapest / free-tier** model.
+///
+/// Used by `auto_select_active_model` to pick the lowest-cost default so
+/// users aren't surprised by unexpected charges after first deployment.
+/// Priority: free → cheapest-paid → standard.
+pub fn provider_cheapest_model(provider: &str) -> Option<&'static str> {
+    match provider {
+        // ── Free-tier / ultra-cheap (top priority) ───────────────────────────
+        "siliconflow"  => Some("openrouter/meta-llama/llama-3.1-8b-instruct"), // free
+        "hunyuan"      => Some("openrouter/tencent/hunyuan-lite"),              // free
+        "spark"        => Some("openrouter/iflytek/spark-lite"),                // free
+        "zai"          => Some("zai/glm-4-flash"),                              // ¥0.1/1M
+        "openrouter"   => Some("openrouter/meta-llama/llama-3.2-3b-instruct"), // free
+        // ── Cheap paid ───────────────────────────────────────────────────────
+        "doubao"       => Some("openrouter/bytedance/doubao-lite-32k"),         // ¥0.3/1M
+        "minimax"      => Some("minimax/MiniMax-M2"),                           // ¥0.15/1M
+        "deepseek"     => Some("openrouter/deepseek/deepseek-chat"),            // ¥1/1M
+        "qwen"         => Some("openrouter/qwen/qwen-plus"),                    // ¥0.5/1M
+        "moonshot"     => Some("openrouter/moonshot-ai/moonshot-v1-8k"),        // ¥12/1M
+        "lingyi"       => Some("openrouter/01-ai/yi-large"),
+        "baichuan"     => Some("openrouter/baichuan-inc/baichuan2-turbo"),
+        "stepfun"      => Some("openrouter/stepfun-inc/step-2-16k"),
+        // ── Standard / premium ───────────────────────────────────────────────
+        "openai"       => Some("openai/gpt-4o-mini"),                           // cheaper than 4o
+        "anthropic"    => Some("anthropic/claude-haiku-3"),
+        _              => None,
+    }
+}
 
 /// Map a provider ID to the model string used in `openclaw models set <model>`.
 ///

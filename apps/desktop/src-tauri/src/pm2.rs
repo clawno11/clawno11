@@ -188,6 +188,11 @@ pub async fn stop_local_service() {
 
 #[tauri::command]
 pub async fn restart_local_service() {
+    // Reset active model to default priority BEFORE restarting so the gateway
+    // picks up the correct config on startup. Any session-level model override
+    // the user set in chat is intentionally cleared here.
+    let mut fixes = Vec::new();
+    crate::deploy::auto_select_active_model(&mut fixes);
     run_pm2(&["restart", "openclaw"]);
 }
 
