@@ -16,6 +16,7 @@ export class OpenClawClient {
   private baseUrl: string;
   private apiKey?: string;
   private timeout: number;
+  private fetchFn: typeof fetch;
 
   constructor(options: OpenClawClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/$/, "");
@@ -23,6 +24,9 @@ export class OpenClawClient {
       this.apiKey = options.apiKey;
     }
     this.timeout = options.timeout ?? 30_000;
+    // Fall back to globalThis.fetch so the client works in Node/browser/test
+    // environments without a custom fetch implementation.
+    this.fetchFn = options.fetchFn ?? ((...args) => globalThis.fetch(...args));
   }
 
   private buildHeaders(): Record<string, string> {
@@ -40,7 +44,7 @@ export class OpenClawClient {
     const timer = setTimeout(() => controller.abort(), this.timeout);
 
     try {
-      const res = await fetch(`${this.baseUrl}${path}`, {
+      const res = await this.fetchFn(`${this.baseUrl}${path}`, {
         ...init,
         headers: {
           ...this.buildHeaders(),
@@ -100,12 +104,23 @@ export class OpenClawClient {
     onChunk: StreamChunkCallback,
     onDone: StreamDoneCallback,
     onError: StreamErrorCallback,
+    options?: { signal?: AbortSignal },
   ): Promise<void> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeout * 10);
 
+    // Forward an external abort signal so callers (e.g. a "Stop" button) can
+    // cancel the underlying fetch request, not just discard incoming chunks.
+    if (options?.signal) {
+      if (options.signal.aborted) {
+        controller.abort();
+      } else {
+        options.signal.addEventListener("abort", () => controller.abort(), { once: true });
+      }
+    }
+
     try {
-      const res = await fetch(`${this.baseUrl}/v1/chat/completions`, {
+      const res = await this.fetchFn(`${this.baseUrl}/v1/chat/completions`, {
         method: "POST",
         headers: this.buildHeaders(),
         body: JSON.stringify({ ...request, stream: true }),

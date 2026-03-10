@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Send, Bot, User, ChevronDown, Wifi, WifiOff, RefreshCw,
   ShieldCheck, ShieldOff, BookOpen, History, Plus, Search,
-  Trash2, X, MessageSquare, Sparkles, ChevronUp, GitBranch, Square, AlertCircle,
+  Trash2, X, MessageSquare, Sparkles, ChevronUp, GitBranch, Square, AlertCircle, Cpu,
 } from "lucide-react";
 import type { ChatMessage } from "@clawno/openclaw-client";
 import { invoke } from "@tauri-apps/api/core";
@@ -11,7 +11,7 @@ import { useInstanceStore, type ClawInstance } from "../store/instances";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { recordTokenUsage } from "../store/tokenLog";
-import { getMainAgentModel, listConfiguredProviders } from "../ipc";
+import { getMainAgentModel, listConfiguredProviders, ollamaListLocalModels, type OllamaModel } from "../ipc";
 import { useAiConfigStore } from "../store/aiConfig";
 import { redactPii, type PiiMatch } from "../store/piiFilter";
 import { buildRagContext, documentCount } from "../store/ragStore";
@@ -286,6 +286,12 @@ export function ChatPage() {
   const [routingEnabled, setRoutingEnabled] = useState(() => localStorage.getItem("clawno-routing") !== "false");
   const [routedTo, setRoutedTo]             = useState<string | null>(null);
 
+  /** Local Ollama models available for selection. */
+  const [localModels, setLocalModels]       = useState<OllamaModel[]>([]);
+  /** null = auto (OpenClaw decides); string = specific local Ollama model name */
+  const [selectedModel, setSelectedModel]   = useState<string | null>(null);
+  const [showModelPicker, setShowModelPicker] = useState(false);
+
   const [showPrompts, setShowPrompts] = useState(false);
   const [prompts, setPrompts]         = useState<PromptTemplate[]>(() => getAllPrompts());
   const [addingPrompt, setAddingPrompt] = useState(false);
@@ -413,6 +419,14 @@ export function ChatPage() {
     return () => { cancelled = true; };
   }, [selectedId, instances, configuredProviders]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Refresh local Ollama model list on mount and periodically.
+  useEffect(() => {
+    const load = () => ollamaListLocalModels().then(setLocalModels).catch(() => {});
+    load();
+    const id = setInterval(load, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -534,7 +548,22 @@ export function ChatPage() {
       // Smart routing — resolve effective instance before any state updates.
       let effectiveInstanceId = selectedId;
       let effectiveGatewayUrl = gatewayUrl;
-      if (routingEnabled) {
+      // Model override: null = auto (let OpenClaw / gateway decide), string = local Ollama model.
+      let effectiveModel: string | null = selectedModel;
+
+      if (effectiveModel) {
+        // User explicitly selected a local Ollama model — bypass the OpenClaw gateway.
+        effectiveGatewayUrl = "http://localhost:11434";
+        effectiveInstanceId = "ollama-local";
+        if (mountedRef.current) {
+          setRoutedTo(`本地 · ${effectiveModel}`);
+          if (routedToTimerRef.current) clearTimeout(routedToTimerRef.current);
+          routedToTimerRef.current = setTimeout(() => {
+            routedToTimerRef.current = null;
+            if (mountedRef.current) setRoutedTo(null);
+          }, 4000);
+        }
+      } else if (routingEnabled) {
         const rules   = listRules();
         const matched = matchRule(rawContent, rules);
         if (matched?.instanceId && matched.instanceId !== selectedId) {
@@ -542,6 +571,7 @@ export function ChatPage() {
           if (target) {
             effectiveInstanceId = target.id;
             effectiveGatewayUrl = target.httpUrl;
+            effectiveModel = target.model ?? null;
             if (mountedRef.current) {
               setRoutedTo(target.name);
               if (routedToTimerRef.current) clearTimeout(routedToTimerRef.current);
@@ -714,6 +744,7 @@ export function ChatPage() {
           gatewayUrl: effectiveGatewayUrl,
           messages: contextMsgs,
           reqId,
+          model: effectiveModel,
         }).catch((e: unknown) => {
           if (cancelRef.current || !mountedRef.current) return;
           unlistenChunk();
@@ -750,7 +781,7 @@ export function ChatPage() {
     }
   }, [
     input, isStreaming, piiEnabled, selectedId, gatewayUrl, routingEnabled,
-    ragEnabled, ragDocCount, currentSessionId, instances, t,
+    ragEnabled, ragDocCount, currentSessionId, instances, t, selectedModel,
   ]);
 
   // ── Empty state ───────────────────────────────────────────────────────────
@@ -1104,8 +1135,84 @@ export function ChatPage() {
             </div>
           )}
 
-          {/* Multiline input + action button */}
+          {/* Model selector + input + send */}
           <div className="flex gap-2 items-end">
+            {/* Local model picker */}
+            <div className="relative flex-shrink-0">
+              <button
+                onClick={() => setShowModelPicker((v) => !v)}
+                title={selectedModel ? `本地模型：${selectedModel}` : "模型：自动（OpenClaw）"}
+                className={`h-10 flex items-center gap-1.5 px-2.5 rounded-xl text-xs font-medium transition-colors border ${
+                  selectedModel
+                    ? "border-primary/50 bg-primary/8 text-primary"
+                    : "border-border bg-muted/30 text-muted-foreground hover:text-foreground hover:border-border/80"
+                }`}
+              >
+                {selectedModel ? <Cpu size={13} /> : <Bot size={13} />}
+                <span className="max-w-[80px] truncate hidden sm:block">
+                  {selectedModel ? selectedModel.split(":")[0] : "自动"}
+                </span>
+                <ChevronDown size={10} className={`transition-transform ${showModelPicker ? "rotate-180" : ""}`} />
+              </button>
+
+              {showModelPicker && (
+                <div className="absolute bottom-full mb-1.5 left-0 w-56 rounded-xl overflow-hidden z-50"
+                  style={{ border: "1px solid rgba(6,182,212,0.2)", background: "white", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" }}>
+                  <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50">
+                    选择模型
+                  </div>
+                  {/* Auto option */}
+                  <button
+                    onClick={() => { setSelectedModel(null); setShowModelPicker(false); }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-slate-50 transition-colors"
+                    style={{
+                      background: !selectedModel ? "rgba(6,182,212,0.06)" : "transparent",
+                      borderLeft: !selectedModel ? "2px solid hsl(var(--primary))" : "2px solid transparent",
+                    }}
+                  >
+                    <Bot size={13} className="text-muted-foreground flex-shrink-0" />
+                    <div>
+                      <p className="font-medium">自动</p>
+                      <p className="text-[10px] text-muted-foreground">由 OpenClaw 网关决策</p>
+                    </div>
+                  </button>
+                  {/* Local Ollama models */}
+                  {localModels.length > 0 && (
+                    <>
+                      <div className="px-3 py-1 text-[10px] text-muted-foreground bg-muted/30 border-y border-border/40">
+                        本地模型（Ollama）
+                      </div>
+                      {localModels.map((m) => (
+                        <button
+                          key={m.name}
+                          onClick={() => { setSelectedModel(m.name); setShowModelPicker(false); }}
+                          className="w-full flex items-center gap-2 px-3 py-2.5 text-left text-xs hover:bg-slate-50 transition-colors"
+                          style={{
+                            background: selectedModel === m.name ? "rgba(6,182,212,0.06)" : "transparent",
+                            borderLeft: selectedModel === m.name ? "2px solid hsl(var(--primary))" : "2px solid transparent",
+                          }}
+                        >
+                          <Cpu size={13} className="text-primary flex-shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium truncate">{m.name}</p>
+                            <p className="text-[10px] text-muted-foreground">本地运行 · 无需联网</p>
+                          </div>
+                          {selectedModel === m.name && (
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+                          )}
+                        </button>
+                      ))}
+                    </>
+                  )}
+                  {localModels.length === 0 && (
+                    <div className="px-3 py-2.5 text-[11px] text-muted-foreground">
+                      暂无本地模型，前往「本地」页下载
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <textarea
               ref={textareaRef}
               value={input}
@@ -1155,6 +1262,7 @@ export function ChatPage() {
         </div>
 
         {showPicker && <div className="fixed inset-0 z-40" onClick={() => setShowPicker(false)} />}
+        {showModelPicker && <div className="fixed inset-0 z-40" onClick={() => setShowModelPicker(false)} />}
       </div>
     </div>
   );

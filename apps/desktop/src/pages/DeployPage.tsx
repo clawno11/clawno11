@@ -7,6 +7,7 @@ import {
   getBrowserUrl, openInBrowser, checkDeployStatus, updateOpenclaw,
   deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
   deployRemoteOnboard, deployRemoteStartGateway,
+  ollamaEnsureInstalled,
   type StepResult, type DeployStatus, type SshArgs,
 } from "../ipc";
 import i18n from "../i18n";
@@ -387,6 +388,7 @@ export function DeployPage() {
     message: string;
     inst?: ClawInstance;
   } | null>(null);
+  const [ollamaPhase, setOllamaPhase] = useState<"idle" | "installing" | "ok" | "fail">("idle");
   const [activeIdx, setActiveIdx]     = useState<number>(-1);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const addOrUpdate = useInstanceStore((s) => s.addOrUpdate);
@@ -537,6 +539,11 @@ export function DeployPage() {
           };
           addOrUpdate(inst);
           setFinalResult({ success: true, serviceStarted: true, message: t("deploy.success"), inst });
+          // Silently install Ollama engine in background — non-blocking
+          setOllamaPhase("installing");
+          ollamaEnsureInstalled()
+            .then((r) => setOllamaPhase(r.ok ? "ok" : "fail"))
+            .catch(() => setOllamaPhase("fail"));
         }
       },
       (i, result) => {
@@ -651,6 +658,7 @@ export function DeployPage() {
   const reset = () => {
     setSteps([]); setFinalResult(null); setActiveIdx(-1);
     setAiApiKey(""); setAiConfigResult(null);
+    setOllamaPhase("idle");
     // Keep SSH form values so user can retry without re-entering credentials
   };
 
@@ -1332,6 +1340,26 @@ export function DeployPage() {
               <p className="text-xs text-muted-foreground mt-1.5">
                 {`ssh ${sshUser}@${sshHost}`}
               </p>
+            </div>
+          )}
+
+          {/* Ollama engine background install status */}
+          {finalResult.success && finalResult.serviceStarted && mode === "local" && ollamaPhase !== "idle" && (
+            <div className={`mb-3 flex items-center gap-2 px-4 py-2.5 rounded-xl border text-sm ${
+              ollamaPhase === "installing"
+                ? "border-border bg-muted/30 text-muted-foreground"
+                : ollamaPhase === "ok"
+                ? "border-green-200 bg-green-50 dark:bg-green-950/20 text-green-700 dark:text-green-400"
+                : "border-amber-200 bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400"
+            }`}>
+              {ollamaPhase === "installing" && <Loader size={14} className="animate-spin flex-shrink-0" />}
+              {ollamaPhase === "ok"         && <CheckCircle size={14} className="flex-shrink-0" />}
+              {ollamaPhase === "fail"       && <Info size={14} className="flex-shrink-0" />}
+              <span className="text-xs">
+                {ollamaPhase === "installing" && "正在后台安装本地模型引擎（Ollama）…"}
+                {ollamaPhase === "ok"         && "本地模型引擎已就绪，无需 API Key 即可使用"}
+                {ollamaPhase === "fail"       && "本地模型引擎安装遇到问题，可前往「本地」页手动安装"}
+              </span>
             </div>
           )}
 

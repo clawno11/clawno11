@@ -1,0 +1,73 @@
+ClawNo.11
+Copyright 2026 Clawno Team
+
+This product includes software developed by third parties under various open-source licenses.
+
+================================================================================
+TAURI (Apache 2.0)
+Copyright 2019-2024 Tauri Programme within The Commons Conservancy
+https://tauri.app
+================================================================================
+
+================================================================================
+REACT (MIT)
+Copyright (c) Meta Platforms, Inc. and affiliates.
+https://react.dev
+================================================================================
+
+================================================================================
+ZUSTAND (MIT)
+Copyright (c) 2019 Paul Henschel
+https://github.com/pmndrs/zustand
+================================================================================
+
+================================================================================
+LUCIDE-REACT (ISC)
+Copyright (c) 2020 Lucide Contributors
+https://lucide.dev
+================================================================================
+
+================================================================================
+TAILWIND CSS (MIT)
+Copyright (c) Tailwind Labs, Inc.
+https://tailwindcss.com
+================================================================================
+
+================================================================================
+I18NEXT / REACT-I18NEXT (MIT)
+Copyright (c) 2022 i18next
+https://www.i18next.com
+================================================================================
+
+================================================================================
+REACT ROUTER (MIT)
+Copyright (c) React Training LLC 2015-2019, Remix Software Inc. 2019-2023
+https://reactrouter.com
+================================================================================
+
+================================================================================
+TOKIO (MIT)
+Copyright (c) 2019 Tokio Contributors
+https://tokio.rs
+================================================================================
+
+================================================================================
+SERDE / SERDE_JSON (MIT / Apache 2.0)
+Copyright (c) 2014 The Rust Project Developers
+https://serde.rs
+================================================================================
+
+================================================================================
+RUSSH (Apache 2.0)
+Copyright (c) 2021 Méthode SPRL
+https://github.com/warp-tech/russh
+================================================================================
+
+================================================================================
+REQWEST (MIT / Apache 2.0)
+Copyright (c) 2016 Sean McArthur
+https://github.com/seanmonstar/reqwest
+================================================================================
+
+For a complete list of Rust crate licenses, see apps/desktop/src-tauri/Cargo.lock.
+For a complete list of npm package licenses, see pnpm-lock.yaml.

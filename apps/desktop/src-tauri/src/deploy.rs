@@ -27,9 +27,90 @@ const VALID_PROVIDERS: &[&str] = &[
     "anthropic", "openai", "openrouter", "zai", "minimax", "deepseek",
     "moonshot", "qwen", "doubao", "hunyuan", "spark", "baichuan",
     "stepfun", "lingyi", "siliconflow",
+    "ollama",  // local engine — uses placeholder key "ollama-local"
 ];
 
 // ── Onboard ───────────────────────────────────────────────────────────────────
+
+/// Configure Ollama as a provider in the OpenClaw gateway.
+/// OpenClaw discovers Ollama via the OLLAMA_API_KEY environment variable.
+/// We set it persistently ("ollama-local" is the conventional placeholder)
+/// so the gateway picks it up on next start without any manual user action.
+fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
+    // ── 1. Persist OLLAMA_API_KEY so the gateway sees it on every restart ──
+    #[cfg(target_os = "windows")]
+    let env_ok = {
+        // setx writes to the user-level registry (persists across reboots).
+        let (ok, _) = run_silent("setx OLLAMA_API_KEY \"ollama-local\"");
+        ok
+    };
+    #[cfg(not(target_os = "windows"))]
+    let env_ok = {
+        // Append to shell rc files so it survives new terminal sessions.
+        let line = "\nexport OLLAMA_API_KEY=\"ollama-local\"\n";
+        let home = user_home();
+        let mut wrote = false;
+        for rc in &[".zshrc", ".bashrc", ".profile"] {
+            let path = format!("{}/{}", home, rc);
+            if std::path::Path::new(&path).exists() {
+                if let Ok(existing) = std::fs::read_to_string(&path) {
+                    if !existing.contains("OLLAMA_API_KEY") {
+                        let _ = std::fs::OpenOptions::new()
+                            .append(true)
+                            .open(&path)
+                            .and_then(|mut f| { use std::io::Write; f.write_all(line.as_bytes()) });
+                        wrote = true;
+                    } else {
+                        wrote = true; // already set
+                    }
+                }
+            }
+        }
+        wrote
+    };
+
+    if env_ok {
+        fixes.push("ollama-env-key-set".to_string());
+    } else {
+        fixes.push("ollama-env-key-skipped-non-fatal".to_string());
+    }
+
+    // ── 2. Also try CLI paste-token (works even if env var approach differs) ──
+    let cmd_str = "openclaw models auth paste-token --provider ollama";
+    #[cfg(target_os = "windows")]
+    let mut c = {
+        let mut b = Command::new("cmd");
+        b.args(["/C", cmd_str]);
+        b.creation_flags(CREATE_NO_WINDOW);
+        b
+    };
+    #[cfg(not(target_os = "windows"))]
+    let mut c = {
+        let mut b = Command::new("sh");
+        b.args(["-c", cmd_str]);
+        b
+    };
+    c.env("PATH", augmented_path())
+     .env("OLLAMA_API_KEY", "ollama-local")
+     .stdin(std::process::Stdio::piped())
+     .stdout(std::process::Stdio::piped())
+     .stderr(std::process::Stdio::piped());
+
+    let result = (|| -> Result<bool, String> {
+        let mut child = c.spawn().map_err(|e| format!("spawn:{e}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            use std::io::Write;
+            stdin.write_all(b"ollama-local").map_err(|e| format!("stdin:{e}"))?;
+        }
+        Ok(child.wait_with_output().map(|o| o.status.success()).unwrap_or(false))
+    })();
+
+    match result {
+        Ok(true)  => fixes.push("ollama-gateway-configured".to_string()),
+        Ok(false) => fixes.push("ollama-gateway-skipped-non-fatal".to_string()),
+        Err(e)    => fixes.push(format!("ollama-gateway-error:{}", e)),
+    }
+}
 
 #[tauri::command]
 pub async fn deploy_step_onboard() -> StepResult {
@@ -40,6 +121,9 @@ pub async fn deploy_step_onboard() -> StepResult {
     let combined = format!("{stdout} {stderr}").to_lowercase();
 
     if ok || combined.contains("already") || combined.contains("skip") {
+        // Auto-configure Ollama with placeholder key so local models are available
+        // in the gateway without any manual setup from the user.
+        configure_ollama_in_gateway(&mut fixes);
         return StepResult::ok_fixed("config-initialized".to_string(), fixes);
     }
 
@@ -53,7 +137,10 @@ pub async fn deploy_step_onboard() -> StepResult {
         #[cfg(not(target_os = "windows"))]
         let onboard_cmd = format!("OPENCLAW_STATE_DIR=\"{alt_dir}\" openclaw onboard --yes");
         let (ok2, _, _) = shell_result(&onboard_cmd);
-        if ok2 { return StepResult::ok_fixed("config-initialized-alt-dir".to_string(), fixes); }
+        if ok2 {
+            configure_ollama_in_gateway(&mut fixes);
+            return StepResult::ok_fixed("config-initialized-alt-dir".to_string(), fixes);
+        }
     }
 
     if combined.contains("parse") || combined.contains("invalid") || combined.contains("unexpected token") {
@@ -62,7 +149,10 @@ pub async fn deploy_step_onboard() -> StepResult {
             fixes.push(format!("backup-corrupt-config:{home_claw}.bak"));
         }
         let (ok3, _, stderr3) = shell_result("openclaw onboard --yes");
-        if ok3 { return StepResult::ok_fixed("config-reset-and-initialized".to_string(), fixes); }
+        if ok3 {
+            configure_ollama_in_gateway(&mut fixes);
+            return StepResult::ok_fixed("config-reset-and-initialized".to_string(), fixes);
+        }
         return StepResult::err_fixed(format!("config-reset-failed: {}", first_line(&stderr3)), fixes);
     }
 

@@ -15,6 +15,7 @@ pub mod mcp;            // MCP server security scanner
 pub mod rag;            // local RAG: text ingestion helper
 pub mod token_log;      // SQLite schema migrations
 pub mod chat;           // streaming chat proxy (SSE → Tauri events)
+pub mod ollama;         // local Ollama model engine (install / pull / manage)
 
 use tauri::Manager;
 
@@ -130,6 +131,13 @@ pub fn run() {
             rag::read_text_file,
             // ── Chat proxy ───────────────────────────────────────────────────
             chat::stream_chat,
+            // ── Ollama local model engine ─────────────────────────────────────
+            ollama::ollama_check_status,
+            ollama::ollama_ensure_installed,
+            ollama::ollama_start_server,
+            ollama::ollama_list_local_models,
+            ollama::ollama_delete_model,
+            ollama::ollama_pull_model,
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {

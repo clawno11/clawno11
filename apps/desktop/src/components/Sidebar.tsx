@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
-import { LayoutDashboard, Rocket, MessageSquare, ShieldCheck, Activity, Plug, BookOpen, Puzzle, GitBranch, Settings } from "lucide-react";
+import { LayoutDashboard, Rocket, MessageSquare, ShieldCheck, Activity, Plug, BookOpen, Puzzle, GitBranch, Cpu, Settings } from "lucide-react";
 import { useTokenAnomalyStore } from "../store/tokenAnomalyStore";
 
 function NavItem({
@@ -69,8 +69,9 @@ export function Sidebar() {
     { to: "/connectors", icon: Plug,            label: t("nav.connectors") },
     { to: "/rag",        icon: BookOpen,        label: t("nav.rag")        },
     { to: "/mcp",        icon: Puzzle,          label: t("nav.mcp")        },
-    { to: "/router",     icon: GitBranch,       label: t("nav.router")     },
-    { to: "/settings",   icon: Settings,        label: t("nav.settings")   },
+    { to: "/router",       icon: GitBranch, label: t("nav.router")      },
+    { to: "/local-models", icon: Cpu,       label: t("nav.localModels") },
+    { to: "/settings",     icon: Settings,  label: t("nav.settings")    },
   ];
 
   return (

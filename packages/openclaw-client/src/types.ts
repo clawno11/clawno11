@@ -78,6 +78,8 @@ export interface OpenClawClientOptions {
   baseUrl: string;
   apiKey?: string;
   timeout?: number;
+  /** Custom fetch implementation (e.g. Tauri HTTP plugin) to bypass CORS. */
+  fetchFn?: typeof fetch;
 }
 
 export type StreamChunkCallback = (chunk: ChatCompletionChunk) => void;

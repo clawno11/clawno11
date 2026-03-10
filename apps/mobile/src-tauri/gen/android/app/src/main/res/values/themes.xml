@@ -1,0 +1,12 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- Base application theme. -->
+    <style name="Theme.clawno_mobile" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Edge-to-edge: transparent system bars -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <!-- Light status bar icons (dark icons on light background) -->
+        <item name="android:windowLightStatusBar">true</item>
+        <!-- Keep background white -->
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

@@ -1,0 +1,80 @@
+name: Release Build
+
+# 触发条件：推送 v* 标签时（如 git tag v0.1.0 && git push --tags）
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-desktop:
+    strategy:
+      matrix:
+        include:
+          - platform: windows-latest
+            target: x86_64-pc-windows-msvc
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # ── 关键步骤：从 GitHub Secrets 注入推广 ID ──────────────────────────────
+      # 在 GitHub → Settings → Secrets and variables → Actions 中添加以下 secrets:
+      #   VITE_AFFILIATE_ALIYUN       阿里云云大使 userCode
+      #   VITE_AFFILIATE_TENCENT      腾讯云 CPS cps_key
+      #   VITE_AFFILIATE_DIGITALOCEAN DigitalOcean refcode
+      #   VITE_AFFILIATE_VULTR        Vultr ref（纯数字）
+      #   VITE_AFFILIATE_LINODE       Linode/Akamai ref
+      - name: Inject affiliate IDs
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          cat > .env.production << 'EOF'
+          VITE_AFFILIATE_ALIYUN=${{ secrets.VITE_AFFILIATE_ALIYUN }}
+          VITE_AFFILIATE_TENCENT=${{ secrets.VITE_AFFILIATE_TENCENT }}
+          VITE_AFFILIATE_DIGITALOCEAN=${{ secrets.VITE_AFFILIATE_DIGITALOCEAN }}
+          VITE_AFFILIATE_VULTR=${{ secrets.VITE_AFFILIATE_VULTR }}
+          VITE_AFFILIATE_LINODE=${{ secrets.VITE_AFFILIATE_LINODE }}
+          EOF
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: apps/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "ClawNo.11 ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}

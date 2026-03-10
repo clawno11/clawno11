@@ -1,0 +1,469 @@
+/// Node.js and openclaw npm-package management.
+///
+/// Handles detection, version checking, automatic installation/upgrade of
+/// Node.js, and global installation of the `openclaw` CLI package.
+
+use crate::platform::{
+    data_local, first_line,
+    shell_ok, shell_output, shell_result, path_join,
+};
+use crate::types::StepResult;
+
+// ── npm error classification ─────────────────────────────────────────────────
+
+#[derive(Debug, PartialEq)]
+pub enum NpmError {
+    PermissionDenied,
+    NetworkTimeout,
+    CacheCorrupted,
+    SslError,
+    DiskFull,
+    Unknown,
+}
+
+pub fn classify_npm_error(stderr: &str, stdout: &str) -> NpmError {
+    let c = format!("{} {}", stderr, stdout).to_lowercase();
+    if c.contains("enospc") || c.contains("no space left") {
+        NpmError::DiskFull
+    } else if c.contains("eacces") || c.contains("eperm")
+           || c.contains("permission denied") || c.contains("access denied") {
+        NpmError::PermissionDenied
+    } else if c.contains("etimedout") || c.contains("econnreset")
+           || c.contains("econnrefused") || c.contains("enotfound")
+           || c.contains("fetch failed") {
+        NpmError::NetworkTimeout
+    } else if c.contains("enotempty") || c.contains("eexist")
+           || c.contains("integrity") || c.contains("checksum") {
+        NpmError::CacheCorrupted
+    } else if c.contains("cert") || c.contains("ssl") || c.contains("certificate") {
+        NpmError::SslError
+    } else {
+        NpmError::Unknown
+    }
+}
+
+// ── npm install with automatic fallbacks ────────────────────────────────────
+
+pub fn npm_install_with_fallback(pkg: &str) -> (bool, String, Vec<String>) {
+    let mut fixes: Vec<String> = Vec::new();
+
+    let (ok, stdout, stderr) = shell_result(&format!("npm install -g {pkg}"));
+    if ok {
+        return (true, format!("{pkg} installed"), fixes);
+    }
+
+    match classify_npm_error(&stderr, &stdout) {
+        NpmError::NetworkTimeout => {
+            fixes.push("switch-npmmirror".to_string());
+            let (ok2, _, stderr2) = shell_result(&format!(
+                "npm install -g {pkg} --registry https://registry.npmmirror.com"
+            ));
+            if ok2 { return (true, format!("{pkg} installed via npmmirror"), fixes); }
+            if classify_npm_error(&stderr2, "") == NpmError::PermissionDenied {
+                return npm_install_user_prefix(pkg, fixes);
+            }
+            (false, format!("network-failed: {}", first_line(&stderr2)), fixes)
+        }
+        NpmError::PermissionDenied => npm_install_user_prefix(pkg, fixes),
+        NpmError::CacheCorrupted => {
+            fixes.push("clean-npm-cache".to_string());
+            shell_ok("npm cache clean --force");
+            let (ok2, _, stderr2) = shell_result(&format!("npm install -g {pkg}"));
+            if ok2 { return (true, format!("{pkg} installed after cache clean"), fixes); }
+            (false, format!("cache-clean-failed: {}", first_line(&stderr2)), fixes)
+        }
+        NpmError::SslError => {
+            fixes.push("disable-ssl-temporarily".to_string());
+            shell_ok("npm config set strict-ssl false");
+            let (ok2, _, stderr2) = shell_result(&format!("npm install -g {pkg}"));
+            shell_ok("npm config set strict-ssl true");
+            if ok2 { return (true, format!("{pkg} installed after ssl fix"), fixes); }
+            (false, format!("ssl-fix-failed: {}", first_line(&stderr2)), fixes)
+        }
+        NpmError::DiskFull => {
+            // wmic is Windows-only and deprecated on Win11 — use PowerShell as fallback.
+            // On Unix report the error without the Windows-specific size query.
+            #[cfg(target_os = "windows")]
+            let detail = {
+                let free = shell_output(
+                    "powershell -NoProfile -Command \"(Get-PSDrive C).Free\""
+                );
+                let free_mb = free.trim().parse::<u64>().map(|b| b / 1_048_576).unwrap_or_else(|_| {
+                    // Fallback to wmic for older Windows versions
+                    let wmic = shell_output("wmic logicaldisk where DeviceID='C:' get FreeSpace /value");
+                    wmic.lines()
+                        .find(|l| l.contains('='))
+                        .and_then(|l| l.split('=').nth(1))
+                        .and_then(|v| v.trim().parse::<u64>().ok())
+                        .map(|b| b / 1_048_576).unwrap_or(0)
+                });
+                format!("disk-full: only {free_mb}MB free on C:")
+            };
+            #[cfg(not(target_os = "windows"))]
+            let detail = "disk-full: no space left on device".to_string();
+            (false, detail, fixes)
+        }
+        NpmError::Unknown => {
+            fixes.push("switch-npmmirror".to_string());
+            let (ok2, _, stderr2) = shell_result(&format!(
+                "npm install -g {pkg} --registry https://registry.npmmirror.com"
+            ));
+            if ok2 { return (true, format!("{pkg} installed via npmmirror"), fixes); }
+            fixes.push("clean-npm-cache".to_string());
+            shell_ok("npm cache clean --force");
+            let (ok3, _, stderr3) = shell_result(&format!("npm install -g {pkg}"));
+            if ok3 { return (true, format!("{pkg} installed after cache clean"), fixes); }
+            // Last resort: corporate MITM proxies often cause SSL errors that surface as unknown errors.
+            fixes.push("disable-ssl-temporarily".to_string());
+            shell_ok("npm config set strict-ssl false");
+            let (ok4, _, stderr4) = shell_result(&format!("npm install -g {pkg}"));
+            shell_ok("npm config set strict-ssl true");
+            if ok4 { return (true, format!("{pkg} installed after ssl fix"), fixes); }
+            let msg = if !stderr4.is_empty() { &stderr4 } else if !stderr3.is_empty() { &stderr3 } else { &stderr2 };
+            (false, format!("install-failed: {}", first_line(msg)), fixes)
+        }
+    }
+}
+
+fn npm_install_user_prefix(pkg: &str, mut fixes: Vec<String>) -> (bool, String, Vec<String>) {
+    let local = data_local();
+    let prefix = path_join(&local, "clawno-npm-global");
+    let prefix_bin = path_join(&prefix, "bin");
+    fixes.push(format!("user-prefix-install:{}", prefix_bin));
+    let _ = std::fs::create_dir_all(&prefix_bin);
+    let (ok, _, stderr) = shell_result(&format!("npm install -g {pkg} --prefix \"{prefix}\""));
+    if !ok {
+        return (false, format!("user-prefix-failed: {}", first_line(&stderr)), fixes);
+    }
+    let current = std::env::var("PATH").unwrap_or_default();
+    if !current.contains(&prefix_bin) {
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        std::env::set_var("PATH", format!("{}{}{}", prefix_bin, sep, current));
+    }
+    (true, format!("{pkg} installed to user prefix"), fixes)
+}
+
+// ── Node.js scan / install ───────────────────────────────────────────────────
+
+/// Parse the major version number from a `v24.0.0` style string.
+pub fn node_major(ver: &str) -> u32 {
+    ver.trim_start_matches('v')
+        .split('.')
+        .next()
+        .unwrap_or("0")
+        .parse()
+        .unwrap_or(0)
+}
+
+/// Search well-known directories for an existing `node.exe` / `node` binary.
+pub fn scan_node_paths() -> Option<String> {
+    let home  = crate::platform::user_home();
+    let local = data_local();
+
+    #[cfg(target_os = "windows")]
+    let candidates = vec![
+        format!("{local}\\Programs\\nodejs"),
+        r"C:\Program Files\nodejs".to_string(),
+        r"C:\Program Files (x86)\nodejs".to_string(),
+        format!("{local}\\nvm\\current"),
+        format!("{home}\\AppData\\Local\\nvm\\current"),
+        r"C:\nvm\nodejs".to_string(),
+        format!("{local}\\fnm"),
+        format!("{local}\\Volta\\bin"),
+        format!("{home}\\.volta\\bin"),
+        r"C:\ProgramData\chocolatey\lib\nodejs\tools".to_string(),
+        r"C:\ProgramData\chocolatey\bin".to_string(),
+        format!("{home}\\scoop\\apps\\nodejs\\current"),
+        format!("{home}\\scoop\\shims"),
+    ];
+
+    #[cfg(not(target_os = "windows"))]
+    let candidates = vec![
+        format!("{home}/.volta/bin"),
+        format!("{home}/.nvm/current/bin"),
+        format!("{home}/.fnm/current/bin"),
+        "/usr/local/bin".to_string(),
+        "/usr/bin".to_string(),
+    ];
+
+    #[cfg(target_os = "windows")]
+    let exe = "node.exe";
+    #[cfg(not(target_os = "windows"))]
+    let exe = "node";
+
+    for dir in &candidates {
+        if std::path::Path::new(&path_join(dir, exe)).exists() {
+            return Some(dir.clone());
+        }
+    }
+    None
+}
+
+fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
+    if !shell_output("nvm version").is_empty() {
+        fixes.push(format!("nvm-upgrade:{}", current_ver));
+        shell_ok("nvm install 22");
+        shell_ok("nvm use 22");
+        let ver = shell_output("node --version");
+        if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+    }
+    if !shell_output("fnm --version").is_empty() {
+        fixes.push(format!("fnm-upgrade:{}", current_ver));
+        shell_ok("fnm install 22");
+        shell_ok("fnm default 22");
+        let ver = shell_output("node --version");
+        if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+    }
+    install_node_auto(fixes)
+}
+
+fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
+    // Windows: try winget first
+    #[cfg(target_os = "windows")]
+    {
+        if shell_output("winget --version").is_empty() {
+            return StepResult::err(
+                "node-not-found: please install Node.js >= 22 from https://nodejs.org".to_string(),
+            );
+        }
+        fixes.push("winget-install-node-lts".to_string());
+        let (ok, _, stderr) = shell_result(
+            "winget install OpenJS.NodeJS.LTS -e --silent --accept-package-agreements --accept-source-agreements",
+        );
+        if !ok {
+            return StepResult::err_fixed(
+                format!("winget-failed: {} | visit https://nodejs.org", first_line(&stderr)),
+                fixes,
+            );
+        }
+        let ver = shell_output("node --version");
+        if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+        return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
+    }
+
+    // macOS/Linux: guide user
+    #[cfg(not(target_os = "windows"))]
+    {
+        StepResult::err_fixed(
+            "node-not-found: install Node.js >= 22 via https://nodejs.org or your package manager".to_string(),
+            fixes,
+        )
+    }
+}
+
+// ── openclaw CLI ─────────────────────────────────────────────────────────────
+
+fn openclaw_semver(raw: &str) -> String {
+    raw.lines()
+        .find(|l| {
+            let t = l.trim();
+            t.contains('.') && t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+        })
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+// ── Tauri commands ───────────────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn deploy_step_check_node() -> StepResult {
+    let mut fixes: Vec<String> = Vec::new();
+
+    let ver = shell_output("node --version");
+    if !ver.is_empty() && node_major(&ver) >= 22 { return StepResult::ok(ver); }
+
+    if ver.is_empty() {
+        if let Some(node_dir) = scan_node_paths() {
+            fixes.push(format!("found-node-at:{}", node_dir));
+            let current = std::env::var("PATH").unwrap_or_default();
+            let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+            std::env::set_var("PATH", format!("{}{}{}", node_dir, sep, current));
+            let ver2 = shell_output("node --version");
+            if !ver2.is_empty() && node_major(&ver2) >= 22 {
+                return StepResult::ok_fixed(ver2, fixes);
+            }
+            if !ver2.is_empty() { return upgrade_node(&ver2, fixes); }
+        }
+        return install_node_auto(fixes);
+    }
+    upgrade_node(&ver, fixes)
+}
+
+#[tauri::command]
+pub async fn deploy_step_install_openclaw() -> StepResult {
+    let ver = shell_output("openclaw --version");
+    let sv = openclaw_semver(&ver);
+    if !sv.is_empty() { return StepResult::ok(format!("already-installed:{}", sv)); }
+
+    let (ok, detail, fixes) = npm_install_with_fallback("openclaw");
+    if !ok { return StepResult::err_fixed(detail, fixes); }
+
+    let ver2 = shell_output("openclaw --version");
+    let sv2 = openclaw_semver(&ver2);
+    if sv2.is_empty() {
+        let local = data_local();
+        let bin = path_join(&path_join(&local, "clawno-npm-global"), "bin");
+        let has_cmd = std::path::Path::new(&path_join(&bin, "openclaw.cmd")).exists()
+            || std::path::Path::new(&path_join(&bin, "openclaw")).exists();
+        if has_cmd {
+            return StepResult::ok_fixed("installed-user-prefix".to_string(), fixes);
+        }
+        return StepResult::err_fixed(
+            "installed-but-not-found: restart app and retry".to_string(),
+            fixes,
+        );
+    }
+    StepResult::ok_fixed(format!("installed:{}", sv2), fixes)
+}
+
+/// Read which AI providers already have a key configured in OpenClaw.
+///
+/// Runs `openclaw models status --json` and parses the JSON field:
+///   `auth.providers[].provider`
+///
+/// Returns an empty list on any error (non-fatal — UI falls back gracefully).
+#[tauri::command]
+pub async fn list_configured_providers() -> Vec<String> {
+    let out = shell_output("openclaw models status --json");
+    if out.is_empty() {
+        return vec![];
+    }
+
+    // Parse JSON and navigate auth.providers[].provider
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&out) else {
+        return vec![];
+    };
+
+    json.get("auth")
+        .and_then(|a| a.get("providers"))
+        .and_then(|p| p.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|entry| {
+                    entry.get("provider")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.to_string())
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Quick pre-deploy status check: is openclaw installed? is the service running?
+/// This runs fast (no npm download) and is called when the Deploy page loads.
+#[tauri::command]
+pub async fn check_deploy_status() -> crate::types::DeployStatus {
+    let ver = shell_output("openclaw --version");
+    let sv = openclaw_semver(&ver);
+    let openclaw_installed = !sv.is_empty();
+
+    let jlist = crate::pm2::pm2_jlist();
+    let service_running =
+        jlist.contains("\"openclaw\"") && jlist.contains("\"online\"");
+
+    crate::types::DeployStatus {
+        openclaw_installed,
+        openclaw_version: sv,
+        service_running,
+    }
+}
+
+/// Force-reinstall openclaw to the latest published version.
+///
+/// Update strategy (tried in order):
+///   1. `openclaw update` — OpenClaw's own self-update command (knows about
+///      channels/releases that pre-date npm publication).
+///   2. `npm install -g openclaw@latest --force` — always re-downloads even
+///      if npm thinks the installed version is current.
+///
+/// Uses the same fallback chain as the initial install (mirrors, user-prefix).
+#[tauri::command]
+pub async fn update_openclaw() -> StepResult {
+    let mut fixes: Vec<String> = Vec::new();
+
+    // Step 1: try OpenClaw's own self-update command.
+    // This reaches OpenClaw's release channel directly, so it can install a
+    // version that is not yet published to the npm registry.
+    let (self_update_ok, self_update_out, _) = shell_result("openclaw update");
+    if self_update_ok {
+        fixes.push("self-update-ok".to_string());
+    } else {
+        // `openclaw update` either doesn't exist or reported a non-fatal status.
+        // Keep going — npm install is the definitive fallback.
+        fixes.push(format!(
+            "self-update-skipped:{}",
+            first_line(&self_update_out).chars().take(60).collect::<String>()
+        ));
+    }
+
+    // Step 2: npm install --force so npm never skips the download when it
+    // incorrectly thinks the installed version matches the registry version.
+    // Passing "openclaw@latest --force" appends --force to every npm command
+    // in npm_install_with_fallback (primary, mirror, and user-prefix variants).
+    let (ok, detail, npm_fixes) = npm_install_with_fallback("openclaw@latest --force");
+    fixes.extend(npm_fixes);
+    if !ok {
+        return StepResult::err_fixed(detail, fixes);
+    }
+
+    let ver2 = shell_output("openclaw --version");
+    let sv2 = openclaw_semver(&ver2);
+    StepResult::ok_fixed(format!("installed:{}", sv2), fixes)
+}
+
+// ── Unit tests ───────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn node_major_parses_standard_version() {
+        assert_eq!(node_major("v22.0.0"), 22);
+        assert_eq!(node_major("v20.11.1"), 20);
+        assert_eq!(node_major("v18.0.0"), 18);
+    }
+
+    #[test]
+    fn node_major_without_v_prefix() {
+        assert_eq!(node_major("24.0.0"), 24);
+    }
+
+    #[test]
+    fn node_major_invalid_returns_zero() {
+        assert_eq!(node_major(""), 0);
+        assert_eq!(node_major("not-a-version"), 0);
+    }
+
+    #[test]
+    fn classify_permission_denied() {
+        assert_eq!(classify_npm_error("Error: EACCES permission denied", ""), NpmError::PermissionDenied);
+    }
+
+    #[test]
+    fn classify_network_timeout() {
+        assert_eq!(classify_npm_error("ETIMEDOUT connect", ""), NpmError::NetworkTimeout);
+    }
+
+    #[test]
+    fn classify_disk_full() {
+        assert_eq!(classify_npm_error("ENOSPC no space left on device", ""), NpmError::DiskFull);
+    }
+
+    #[test]
+    fn classify_ssl_error() {
+        assert_eq!(classify_npm_error("SSL certificate problem", ""), NpmError::SslError);
+    }
+
+    #[test]
+    fn classify_unknown_fallback() {
+        assert_eq!(classify_npm_error("some random error", ""), NpmError::Unknown);
+    }
+
+    #[test]
+    fn openclaw_semver_parses() {
+        let raw = "openclaw/1.2.3 linux-x64 node-v22.0.0\n1.2.3";
+        assert_eq!(openclaw_semver(raw), "1.2.3");
+    }
+}

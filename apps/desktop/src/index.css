@@ -4,63 +4,147 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
-  }
+    /* ── 内容区浅色主题 ── */
+    --background:     220 20% 97%;
+    --foreground:     222 50% 10%;
+    --card:           0 0% 100%;
+    --card-foreground: 222 50% 10%;
+    --popover:        0 0% 100%;
+    --popover-foreground: 222 50% 10%;
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
+    /* 主色：电气青 */
+    --primary:        187 85% 40%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary:      210 30% 94%;
+    --secondary-foreground: 222 40% 15%;
+    --muted:          210 25% 93%;
+    --muted-foreground: 215 18% 48%;
+    --accent:         187 50% 92%;
+    --accent-foreground: 187 85% 28%;
+    --destructive:    0 80% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border:         214 25% 88%;
+    --input:          214 25% 88%;
+    --ring:           187 85% 40%;
+    --radius:         0.6rem;
+
+    /* ── 侧边栏专属变量（暗色）── */
+    --sidebar-bg:       224 40% 8%;
+    --sidebar-border:   224 35% 14%;
+    --sidebar-text:     220 20% 55%;
+    --sidebar-active-bg: 187 85% 40%;
+    --sidebar-hover-bg: 224 35% 13%;
+    --sidebar-logo-glow: 187 85% 40%;
   }
 }
 
 @layer base {
-  * {
-    @apply border-border;
+  * { @apply border-border; }
+
+  html, body {
+    height: 100%;
+    overflow: hidden;
   }
+
+  #root {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
   body {
     @apply bg-background text-foreground;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                 "Microsoft YaHei", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
   }
+
+  /* 数字/代码用等宽字体，更有科技感 */
+  .font-mono {
+    font-family: "SF Mono", "Cascadia Code", "Fira Code", Consolas, monospace;
+  }
+}
+
+/* ── 侧边栏辉光动画 ── */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 6px 1px hsl(187 85% 40% / 0.4); }
+  50%       { box-shadow: 0 0 14px 3px hsl(187 85% 40% / 0.7); }
+}
+.logo-glow {
+  animation: glow-pulse 3s ease-in-out infinite;
+}
+
+/* ── 在线状态呼吸灯 ── */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.8); }
+}
+.status-online-dot {
+  animation: status-pulse 2s ease-in-out infinite;
+}
+
+/* ── 卡片进场动画 ── */
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.card-enter {
+  animation: slide-up 0.25s ease-out;
 }
 
 /* Tauri drag region */
 [data-tauri-drag-region] {
   -webkit-app-region: drag;
   user-select: none;
+}
+
+/* ── 自定义滚动条（科技感细线条）── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: hsl(187 85% 40% / 0.3);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover { background: hsl(187 85% 40% / 0.55); }
+
+/* ── 页面路由切换淡入 ── */
+@keyframes page-fade {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-fade 0.2s ease-out;
+}
+
+/* ── 表单输入框统一聚焦圈 ── */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px hsl(187 85% 40% / 0.25);
+}
+
+/* ── 卡片悬停浮起 ── */
+.card-hover {
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.card-hover:hover {
+  box-shadow: 0 4px 20px rgba(6, 182, 212, 0.12);
+  transform: translateY(-1px);
+}
+
+/* ── 按钮点击弹性 ── */
+button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* ── 侧边栏导航激活指示线 ── */
+.sidebar-active-indicator {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 2px 0 0 2px;
+  background: hsl(var(--sidebar-active-bg));
 }

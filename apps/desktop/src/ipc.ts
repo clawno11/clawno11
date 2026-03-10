@@ -219,3 +219,34 @@ export const toggleOpenClawPlugin   = (id: string, enable: boolean)  => invoke<s
 // ── RAG commands ────────────────────────────────────────────────────────────
 
 export const readTextFile           = (path: string)             => invoke<string>("read_text_file", { path });
+
+// ── Ollama local model engine ────────────────────────────────────────────────
+
+export interface OllamaStatus {
+  installed: boolean;
+  running: boolean;
+  version: string | null;
+}
+
+export interface OllamaModel {
+  name: string;
+  /** File size in bytes */
+  size: number;
+  modified_at: string;
+}
+
+export interface OllamaPullProgress {
+  model: string;
+  status: string;
+  /** 0–100 */
+  percent: number;
+  done: boolean;
+  error: string | null;
+}
+
+export const ollamaCheckStatus        = ()                   => invoke<OllamaStatus>("ollama_check_status");
+export const ollamaEnsureInstalled    = ()                   => invoke<StepResult>("ollama_ensure_installed");
+export const ollamaStartServer        = ()                   => invoke<StepResult>("ollama_start_server");
+export const ollamaListLocalModels    = ()                   => invoke<OllamaModel[]>("ollama_list_local_models");
+export const ollamaDeleteModel        = (name: string)       => invoke<StepResult>("ollama_delete_model", { name });
+export const ollamaPullModel          = (name: string)       => invoke<StepResult>("ollama_pull_model", { name });

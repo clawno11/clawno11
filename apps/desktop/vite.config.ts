@@ -12,7 +12,15 @@ export default defineConfig({
       // cannot be bundled for the browser renderer. The renderer communicates
       // with the deploy logic via Tauri IPC commands instead.
       "@clawno/deploy-engine": path.resolve(__dirname, "./src/tauri-shims/deploy-engine.ts"),
+      // Point to TS source so Vite bundles it as ESM (avoids "exports is not
+      // defined" that occurs when the CJS dist is loaded in a browser context).
+      "@clawno/openclaw-client": path.resolve(__dirname, "../../packages/openclaw-client/src/index.ts"),
     },
+  },
+  optimizeDeps: {
+    // Ensure eventsource-parser (ESM-only dep of openclaw-client) is
+    // pre-bundled so the dev server can handle it without CJS/ESM conflicts.
+    include: ["eventsource-parser"],
   },
   // Tauri dev server settings
   clearScreen: false,

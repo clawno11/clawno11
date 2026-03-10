@@ -16,6 +16,9 @@ target
 .env
 .env.local
 .env.*.local
+# Production secrets (affiliate IDs etc.) — never commit real IDs
+.env.production
+.env.production.local
 
 # Logs
 *.log
@@ -47,3 +50,34 @@ web-build
 
 # Tauri
 apps/desktop/src-tauri/target
+apps/mobile/src-tauri/target
+
+# Android build outputs (generated, not committed)
+apps/mobile/src-tauri/gen/android/app/build/
+apps/mobile/src-tauri/gen/android/.gradle/
+apps/mobile/src-tauri/gen/android/buildSrc/.gradle/
+apps/mobile/src-tauri/gen/android/buildSrc/build/
+apps/mobile/src-tauri/gen/android/buildSrc/.kotlin/
+
+# Android signing secrets (NEVER commit these)
+apps/mobile/src-tauri/gen/android/keystore.properties
+apps/mobile/src-tauri/gen/android/*.keystore
+apps/mobile/src-tauri/gen/android/*.jks
+
+# Vite dist
+apps/mobile/dist/
+apps/desktop/dist/
+
+# APK build artifacts
+_apk_extract/
+_apk_x86_64.zip
+_apk_x86_64_out/
+
+# Android/iOS bug reports
+bugreport-*.zip
+apps/mobile/bugreport-*.zip
+
+# Compiled JS artifacts in src (tsc noEmit should prevent these, but just in case)
+apps/mobile/src/**/*.js
+apps/mobile/src/**/*.js.map
+apps/mobile/vite.config.js
