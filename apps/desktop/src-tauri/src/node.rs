@@ -277,15 +277,16 @@ fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
                 "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
             );
             shell_ok(&cmd);
-            // augmented_path() rescans ~/.nvm/versions dynamically on next shell call
-            let ver = shell_output("node --version");
+            // Use direct binary scan — shell PATH is unreliable in Tauri sandbox on macOS
+            let ver = node_version_direct();
             if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
         }
         if !shell_output("fnm --version").is_empty() {
             fixes.push(format!("fnm-upgrade:{}", current_ver));
             shell_ok("fnm install 22");
             shell_ok("fnm default 22");
-            let ver = shell_output("node --version");
+            // Use direct binary scan after fnm install as well
+            let ver = node_version_direct();
             if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
         }
     }
