@@ -454,11 +454,14 @@ pub async fn ollama_pull_model(app: AppHandle, name: String) -> StepResult {
     StepResult::ok(format!("pulled:{}", name))
 }
 
-/// Tell OpenClaw gateway to use this Ollama model as its active default.
+/// Register an Ollama model in the OpenClaw fallback chain.
 ///
-/// Runs `openclaw models set ollama/<model_name>` so that subsequent chat
-/// requests are routed to the locally-running Ollama instance.
-/// Also registers the model in the fallback chain for resilience.
+/// Ollama is treated as a fallback-only provider: it is never set as the
+/// primary active model here. The cloud API (ZAI, OpenRouter, etc.) always
+/// takes priority when online. Ollama activates automatically when:
+///   1. The device is offline (all cloud providers fail).
+///   2. The user explicitly selects it in the chat input.
+///   3. The user requests it inside the ClawNo.11 chat.
 #[tauri::command]
 pub fn set_ollama_model(model_name: String) -> StepResult {
     if model_name.trim().is_empty() {
@@ -471,17 +474,14 @@ pub fn set_ollama_model(model_name: String) -> StepResult {
 
     let model_str = format!("ollama/{}", model_name);
 
-    // Set as active model.
-    let set_cmd = format!("openclaw models set {}", model_str);
-    let (set_ok, set_out, set_err) = shell_result(&set_cmd);
-    if !set_ok {
-        let detail = format!("{}{}", set_out, set_err);
-        return StepResult::err(format!("set-model-failed:{}", detail.trim().chars().take(120).collect::<String>()));
+    // Add to the fallback chain only — never override the active primary model.
+    // Cloud API stays primary; Ollama kicks in when cloud is unreachable.
+    let fb_cmd = format!("openclaw models fallbacks add {}", model_str);
+    let (fb_ok, fb_out, fb_err) = shell_result(&fb_cmd);
+    if !fb_ok {
+        let detail = format!("{}{}", fb_out, fb_err);
+        return StepResult::err(format!("fallback-add-failed:{}", detail.trim().chars().take(120).collect::<String>()));
     }
 
-    // Add to fallback chain so it is retried automatically.
-    let fb_cmd = format!("openclaw models fallbacks add {}", model_str);
-    let _ = shell_result(&fb_cmd);
-
-    StepResult::ok(format!("ollama-model-set:{}", model_name))
+    StepResult::ok(format!("ollama-model-added-to-fallback:{}", model_name))
 }

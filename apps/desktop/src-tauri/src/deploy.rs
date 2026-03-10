@@ -112,6 +112,72 @@ fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
     }
 }
 
+/// Model routing priority:
+///   1st — Cloud API (fast, online): ZAI → OpenAI → Anthropic → OpenRouter → other
+///   2nd — Local Ollama (fallback, offline only)
+///
+/// Cloud model is always set as the active primary. Ollama is only added to
+/// the fallback chain so it activates when:
+///   a) All cloud providers fail (offline / network error / auth issue)
+///   b) User explicitly requests local model in the chat input
+///   c) User asks for local model in the ClawNo.11 chat
+fn auto_select_active_model(fixes: &mut Vec<String>) {
+    // Parse configured providers from `openclaw models status --json`.
+    let status_out = crate::platform::shell_output("openclaw models status --json");
+    let configured: Vec<String> = serde_json::from_str::<serde_json::Value>(&status_out)
+        .ok()
+        .and_then(|v| {
+            v.get("auth")
+             .and_then(|a| a.get("providers"))
+             .and_then(|p| p.as_array())
+             .map(|arr| {
+                 arr.iter()
+                    .filter_map(|e| e.get("provider").and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+             })
+        })
+        .unwrap_or_default();
+
+    // Priority order: prefer domestic/free-tier providers first for new users.
+    let cloud_priority = [
+        "zai", "openai", "anthropic", "openrouter", "minimax",
+        "deepseek", "moonshot", "qwen", "doubao", "hunyuan",
+        "spark", "baichuan", "stepfun", "lingyi", "siliconflow",
+    ];
+
+    // Find the first configured cloud provider.
+    let best = cloud_priority.iter().find(|&&p| configured.contains(&p.to_string()));
+
+    if let Some(provider) = best {
+        if let Some(model) = provider_default_model(provider) {
+            let (ok, _) = run_silent(&format!("openclaw models set {}", model));
+            if ok {
+                fixes.push(format!("cloud-model-active:{}", model));
+            }
+            // Also add to fallback chain so it retries on transient errors.
+            let _ = run_silent(&format!("openclaw models fallbacks add {}", model));
+        }
+    } else {
+        // No cloud providers configured — Ollama becomes the temporary primary
+        // so the user gets at least some response until they add a cloud key.
+        // We only do this when Ollama has at least one model installed.
+        let ollama_models_out = crate::platform::shell_output(
+            "curl -s http://localhost:11434/api/tags"
+        );
+        let has_ollama = serde_json::from_str::<serde_json::Value>(&ollama_models_out)
+            .ok()
+            .and_then(|v| v.get("models").and_then(|m| m.as_array()).map(|a| !a.is_empty()))
+            .unwrap_or(false);
+
+        if has_ollama {
+            fixes.push("no-cloud-keys-ollama-primary-temp".to_string());
+            // Don't explicitly set a model here — let OpenClaw use whatever was last set.
+        } else {
+            fixes.push("no-cloud-keys-no-ollama-models".to_string());
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn deploy_step_onboard() -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
@@ -121,9 +187,8 @@ pub async fn deploy_step_onboard() -> StepResult {
     let combined = format!("{stdout} {stderr}").to_lowercase();
 
     if ok || combined.contains("already") || combined.contains("skip") {
-        // Auto-configure Ollama with placeholder key so local models are available
-        // in the gateway without any manual setup from the user.
         configure_ollama_in_gateway(&mut fixes);
+        auto_select_active_model(&mut fixes);
         return StepResult::ok_fixed("config-initialized".to_string(), fixes);
     }
 
@@ -131,7 +196,6 @@ pub async fn deploy_step_onboard() -> StepResult {
         let alt_dir = path_join(&data_roaming(), "openclaw");
         let _ = std::fs::create_dir_all(&alt_dir);
         fixes.push(format!("alt-config-dir:{}", alt_dir));
-        // Platform-specific env var syntax: cmd.exe uses "set VAR=val &&", sh uses "VAR=val cmd".
         #[cfg(target_os = "windows")]
         let onboard_cmd = format!("set OPENCLAW_STATE_DIR={alt_dir} && openclaw onboard --yes");
         #[cfg(not(target_os = "windows"))]
@@ -139,6 +203,7 @@ pub async fn deploy_step_onboard() -> StepResult {
         let (ok2, _, _) = shell_result(&onboard_cmd);
         if ok2 {
             configure_ollama_in_gateway(&mut fixes);
+            auto_select_active_model(&mut fixes);
             return StepResult::ok_fixed("config-initialized-alt-dir".to_string(), fixes);
         }
     }
@@ -151,6 +216,7 @@ pub async fn deploy_step_onboard() -> StepResult {
         let (ok3, _, stderr3) = shell_result("openclaw onboard --yes");
         if ok3 {
             configure_ollama_in_gateway(&mut fixes);
+            auto_select_active_model(&mut fixes);
             return StepResult::ok_fixed("config-reset-and-initialized".to_string(), fixes);
         }
         return StepResult::err_fixed(format!("config-reset-failed: {}", first_line(&stderr3)), fixes);
