@@ -23,13 +23,11 @@
     <string>_https._tcp</string>
   </array>
 
-  <!-- ── 允许 HTTP 明文连接（内网网关通常不带 TLS）────────────  -->
+  <!-- ── 允许 HTTP 明文连接 ────────────────────────────────── -->
   <key>NSAppTransportSecurity</key>
   <dict>
-    <!-- 禁止全局明文，只对特定 IP/域名开放 -->
     <key>NSAllowsArbitraryLoads</key>
-    <false/>
-    <!-- 允许对局域网地址发起 HTTP（127.x, 192.168.x, 10.x, 100.x Tailscale）-->
+    <true/>
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
