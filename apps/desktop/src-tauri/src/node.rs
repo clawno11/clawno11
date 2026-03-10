@@ -178,13 +178,31 @@ pub fn scan_node_paths() -> Option<String> {
     ];
 
     #[cfg(not(target_os = "windows"))]
-    let candidates = vec![
-        format!("{home}/.volta/bin"),
-        format!("{home}/.nvm/current/bin"),
-        format!("{home}/.fnm/current/bin"),
-        "/usr/local/bin".to_string(),
-        "/usr/bin".to_string(),
-    ];
+    let candidates = {
+        let mut v = vec![
+            format!("{home}/.volta/bin"),
+            format!("{home}/.fnm/current/bin"),
+            "/opt/homebrew/bin".to_string(),
+            "/usr/local/bin".to_string(),
+            "/usr/bin".to_string(),
+            format!("{home}/.npm-global/bin"),
+            format!("{home}/.local/bin"),
+        ];
+        // nvm stores versions at ~/.nvm/versions/node/vX.Y.Z/bin — scan all of them
+        let nvm_dir = format!("{home}/.nvm/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+            let mut versions: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.starts_with('v') { Some(format!("{nvm_dir}/{s}/bin")) } else { None }
+                })
+                .collect();
+            versions.sort_by(|a, b| b.cmp(a)); // newest first
+            for ver_bin in versions { v.insert(0, ver_bin); }
+        }
+        v
+    };
 
     #[cfg(target_os = "windows")]
     let exe = "node.exe";
@@ -200,19 +218,46 @@ pub fn scan_node_paths() -> Option<String> {
 }
 
 fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
-    if !shell_output("nvm version").is_empty() {
-        fixes.push(format!("nvm-upgrade:{}", current_ver));
-        shell_ok("nvm install 22");
-        shell_ok("nvm use 22");
-        let ver = shell_output("node --version");
-        if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+    // Windows: nvm-windows is a real binary in PATH
+    #[cfg(target_os = "windows")]
+    {
+        if !shell_output("nvm version").is_empty() {
+            fixes.push(format!("nvm-upgrade:{}", current_ver));
+            shell_ok("nvm install 22");
+            shell_ok("nvm use 22");
+            let ver = shell_output("node --version");
+            if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+        }
+        if !shell_output("fnm --version").is_empty() {
+            fixes.push(format!("fnm-upgrade:{}", current_ver));
+            shell_ok("fnm install 22");
+            shell_ok("fnm default 22");
+            let ver = shell_output("node --version");
+            if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+        }
     }
-    if !shell_output("fnm --version").is_empty() {
-        fixes.push(format!("fnm-upgrade:{}", current_ver));
-        shell_ok("fnm install 22");
-        shell_ok("fnm default 22");
-        let ver = shell_output("node --version");
-        if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+    // macOS/Linux: nvm is a shell function — must source nvm.sh before calling it
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = crate::platform::user_home();
+        let nvm_sh = format!("{home}/.nvm/nvm.sh");
+        if std::path::Path::new(&nvm_sh).exists() {
+            fixes.push(format!("nvm-upgrade:{}", current_ver));
+            let cmd = format!(
+                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
+            );
+            shell_ok(&cmd);
+            // augmented_path() rescans ~/.nvm/versions dynamically on next shell call
+            let ver = shell_output("node --version");
+            if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+        }
+        if !shell_output("fnm --version").is_empty() {
+            fixes.push(format!("fnm-upgrade:{}", current_ver));
+            shell_ok("fnm install 22");
+            shell_ok("fnm default 22");
+            let ver = shell_output("node --version");
+            if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+        }
     }
     install_node_auto(fixes)
 }
@@ -241,9 +286,66 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
         return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
     }
 
-    // macOS/Linux: guide user
+    // macOS/Linux: try Homebrew (macOS), then nvm auto-install, then guide user
     #[cfg(not(target_os = "windows"))]
     {
+        let home = crate::platform::user_home();
+
+        // macOS: try Homebrew
+        #[cfg(target_os = "macos")]
+        if !shell_output("brew --version").is_empty() {
+            fixes.push("brew-install-node".to_string());
+            // Install node (latest LTS is >= 22 as of 2025)
+            let (ok, _, _) = shell_result("brew install node");
+            if ok {
+                let ver = shell_output("node --version");
+                if node_major(&ver) >= 22 {
+                    return StepResult::ok_fixed(ver, fixes);
+                }
+            }
+            // Fallback: install pinned node@22
+            let (ok2, _, _) = shell_result(
+                "brew install node@22 && brew link node@22 --force --overwrite"
+            );
+            if ok2 {
+                // node@22 installs to /opt/homebrew/opt/node@22/bin — add to PATH
+                let brew_bin = shell_output("brew --prefix node@22");
+                if !brew_bin.is_empty() {
+                    let node_bin = format!("{}/bin", brew_bin.trim());
+                    let current = std::env::var("PATH").unwrap_or_default();
+                    std::env::set_var("PATH", format!("{}:{}", node_bin, current));
+                }
+                let ver = shell_output("node --version");
+                if node_major(&ver) >= 22 {
+                    return StepResult::ok_fixed(ver, fixes);
+                }
+            }
+        }
+
+        // Try nvm: install nvm if needed, then install node 22
+        fixes.push("install-via-nvm".to_string());
+        let nvm_sh = format!("{home}/.nvm/nvm.sh");
+        if !std::path::Path::new(&nvm_sh).exists() {
+            shell_ok(
+                "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash",
+            );
+        }
+        if std::path::Path::new(&nvm_sh).exists() {
+            let cmd = format!(
+                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
+            );
+            let (ok, _, _) = shell_result(&cmd);
+            if ok {
+                // augmented_path() dynamically rescans ~/.nvm/versions on next call
+                let ver = shell_output("node --version");
+                if node_major(&ver) >= 22 {
+                    return StepResult::ok_fixed(ver, fixes);
+                }
+                // Installed but PATH not yet updated in this process — require restart
+                return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
+            }
+        }
+
         StepResult::err_fixed(
             "node-not-found: install Node.js >= 22 via https://nodejs.org or your package manager".to_string(),
             fixes,
