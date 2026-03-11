@@ -92,6 +92,22 @@ function detectInjection(text: string): boolean {
   return INJECTION_PATTERNS.some((re) => re.test(text));
 }
 
+function humaniseError(raw: string): string {
+  if (raw.includes("does not support tools"))
+    return "当前模型不支持工具调用，请在桌面端切换模型";
+  if (raw.includes("连接网关失败") || raw.includes("http-connect"))
+    return "网关连接失败，请检查桌面端是否在线";
+  if (raw.includes("stream-read") || raw.includes("数据流"))
+    return "数据流中断，请重试";
+  if (raw.includes("网关返回错误 5") || raw.includes("gateway-http-5"))
+    return "服务器内部错误，请稍后重试";
+  if (raw.includes("429") || raw.includes("过于频繁"))
+    return "请求过于频繁，请稍后再试";
+  if (raw.includes("Unauthorized") || raw.includes("401"))
+    return "认证失败，请重新配对连接";
+  return raw;
+}
+
 function estimateTokens(text: string): number {
   return Math.max(1, Math.round(text.length / 3.5));
 }
@@ -558,9 +574,10 @@ export function ChatPage() {
             if (!mountedRef.current) return;
 
             if (event.payload.error && !cancelRef.current && !accumulatedText) {
+              const friendly = humaniseError(event.payload.error);
               setMessages((prev) =>
                 prev.map((m) =>
-                  m.id === assistantId ? { ...m, content: `${t("chat.error")}${event.payload.error}`, streaming: false } : m,
+                  m.id === assistantId ? { ...m, content: `${t("chat.error")}${friendly}`, streaming: false } : m,
                 ),
               );
               // If the error looks like real AI content, persist it

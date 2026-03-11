@@ -89,6 +89,28 @@ function detectInjection(text: string): boolean {
   return INJECTION_PATTERNS.some((re) => re.test(text));
 }
 
+// ── Error humanisation ────────────────────────────────────────────────────
+
+function humaniseError(raw: string): string {
+  if (raw.includes("does not support tools"))
+    return "当前模型不支持工具调用，系统已尝试自动切换直连模式";
+  if (raw.includes("ollama-direct-error") || raw.includes("ollama-fallback"))
+    return "本地 Ollama 连接失败，请检查 Ollama 是否正在运行";
+  if (raw.includes("openclaw-spawn-error"))
+    return "未找到 openclaw 命令，请确认已完成部署";
+  if (raw.includes("http-connect-error") || raw.includes("http-request-error"))
+    return "网关连接失败，请检查实例是否在线";
+  if (raw.includes("stream-read-error"))
+    return "数据流中断，请重试";
+  if (raw.includes("gateway-http-5"))
+    return "网关内部错误，请稍后重试";
+  if (raw.includes("gateway-http-429"))
+    return "请求过于频繁，请稍后再试";
+  if (raw.includes("Unauthorized") || raw.includes("401"))
+    return "认证失败，请重新配对连接";
+  return raw;
+}
+
 // ── Pure helpers ───────────────────────────────────────────────────────────
 
 /** Rough token estimate: 1 token ≈ 3.5 chars (Chinese-heavy assumption). */
@@ -769,10 +791,11 @@ export function ChatPage() {
             if (!mountedRef.current) return;
 
             if (event.payload.error && !cancelRef.current) {
+              const friendly = humaniseError(event.payload.error);
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId
-                    ? { ...m, content: `${t("chat.error")}${event.payload.error}`, streaming: false }
+                    ? { ...m, content: `${t("chat.error")}${friendly}`, streaming: false }
                     : m,
                 ),
               );

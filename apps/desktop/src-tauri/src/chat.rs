@@ -128,19 +128,24 @@ async fn stream_chat_http(
     let mut chosen_resp: Option<reqwest::Response> = None;
 
     for endpoint in &candidates {
-        let resp = client
-            .post(endpoint)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| format!("http-request-error: {e}"))?;
+        let resp = match client.post(endpoint).json(&body).send().await {
+            Ok(r) => r,
+            Err(e) => {
+                // Self-healing: connection error → retry once after 1s
+                eprintln!("[self-heal] connection error to {endpoint}: {e} — retrying in 1s");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                match client.post(endpoint).json(&body).send().await {
+                    Ok(r) => r,
+                    Err(e2) => return Err(format!("http-request-error: {e2}")),
+                }
+            }
+        };
 
         let status = resp.status().as_u16();
         if status == 404 || status == 405 {
             last_404_msg = format!("http-endpoint-404: {endpoint} returned {status}");
             continue;
         }
-        // Any other status (2xx or non-routing error) — commit to this endpoint.
         chosen_endpoint = Some(endpoint.clone());
         chosen_resp = Some(resp);
         break;
@@ -158,6 +163,30 @@ async fn stream_chat_http(
     if !resp.status().is_success() {
         let status = resp.status().as_u16();
         let text = resp.text().await.unwrap_or_default();
+
+        // ── Self-healing: model doesn't support tools → bypass gateway, call Ollama directly ──
+        if status == 400 && text.contains("does not support tools") {
+            eprintln!("[self-heal] model doesn't support tools — falling back to direct Ollama");
+            return stream_chat_ollama_direct(&app, messages, req_id).await;
+        }
+
+        // ── Self-healing: 5xx / 429 → retry once after delay ──
+        if (status >= 500 || status == 429) && !endpoint.contains("__retried") {
+            let delay = if status == 429 { 3 } else { 1 };
+            eprintln!("[self-heal] gateway {status} — retrying in {delay}s");
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            let retry_url = format!("{endpoint}__retried");
+            let retry_resp = client.post(&retry_url.replace("__retried", ""))
+                .json(&body)
+                .send()
+                .await;
+            if let Ok(r) = retry_resp {
+                if r.status().is_success() {
+                    return parse_sse_stream(app, r, req_id).await;
+                }
+            }
+        }
+
         let error_msg = format!("gateway-http-{status} ({endpoint}): {text}");
         let _ = app.emit(
             "chat-done",
@@ -166,12 +195,19 @@ async fn stream_chat_http(
         return Ok(());
     }
 
+    parse_sse_stream(app, resp, req_id).await
+}
+
+/// Consume an SSE response stream, emitting `chat-chunk` events as tokens arrive
+/// and a final `chat-done` event when the stream completes or errors.
+async fn parse_sse_stream(
+    app: tauri::AppHandle,
+    resp: reqwest::Response,
+    req_id: &str,
+) -> Result<(), String> {
     let mut byte_stream = resp.bytes_stream();
     let mut model: Option<String> = None;
     let mut had_error: Option<String> = None;
-
-    // SSE line buffer — gateway may split one logical SSE message across
-    // multiple TCP chunks, so we accumulate bytes until we see a full line.
     let mut line_buf = String::new();
 
     'outer: while let Some(chunk_result) = byte_stream.next().await {
@@ -187,7 +223,7 @@ async fn stream_chat_http(
                         let line = line_buf.trim().to_string();
                         line_buf.clear();
                         if process_sse_line(&line, &app, req_id, &mut model) {
-                            break 'outer; // [DONE] received
+                            break 'outer;
                         }
                     } else {
                         line_buf.push(ch);
@@ -197,8 +233,6 @@ async fn stream_chat_http(
         }
     }
 
-    // Flush any partial line left in the buffer when the connection closes
-    // without a trailing newline (defensive — well-formed SSE always ends with \n\n).
     if !line_buf.trim().is_empty() {
         process_sse_line(line_buf.trim(), &app, req_id, &mut model);
     }
@@ -208,6 +242,77 @@ async fn stream_chat_http(
         ChatDone { req_id: req_id.to_string(), error: had_error, model },
     );
     Ok(())
+}
+
+// ── Self-healing: direct Ollama fallback ──────────────────────────────────
+
+/// Discover the first available Ollama model by querying the local API.
+async fn discover_ollama_model(client: &reqwest::Client) -> Option<String> {
+    let resp = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body["models"]
+        .as_array()?
+        .first()?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
+/// Self-healing fallback: call Ollama directly at `localhost:11434`, bypassing
+/// the OpenClaw gateway so that no `tools` parameter is injected.
+///
+/// Triggered when the gateway returns 400 "does not support tools" — the model
+/// works fine for plain chat, it just can't handle function-calling.
+async fn stream_chat_ollama_direct(
+    app: &tauri::AppHandle,
+    messages: &serde_json::Value,
+    req_id: &str,
+) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("ollama-direct-error: {e}"))?;
+
+    let model_name = discover_ollama_model(&client)
+        .await
+        .unwrap_or_else(|| "llama3.2".into());
+
+    eprintln!("[self-heal] calling Ollama directly with model={model_name}");
+
+    let body = serde_json::json!({
+        "model": model_name,
+        "messages": messages,
+        "stream": true,
+    });
+
+    let resp = client
+        .post("http://localhost:11434/v1/chat/completions")
+        .json(&body)
+        .send()
+        .await;
+
+    match resp {
+        Err(e) => {
+            eprintln!("[self-heal] Ollama direct also failed: {e} — falling back to CLI");
+            return stream_chat_cli(app.clone(), messages, req_id).await;
+        }
+        Ok(r) if !r.status().is_success() => {
+            let status = r.status().as_u16();
+            let text = r.text().await.unwrap_or_default();
+            eprintln!("[self-heal] Ollama direct {status}: {text} — falling back to CLI");
+            return stream_chat_cli(app.clone(), messages, req_id).await;
+        }
+        Ok(r) => {
+            return parse_sse_stream(app.clone(), r, req_id).await;
+        }
+    }
 }
 
 /// Parse a single SSE line and emit a `chat-chunk` event if it carries text.

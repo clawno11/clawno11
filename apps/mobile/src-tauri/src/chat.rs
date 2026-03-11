@@ -46,16 +46,32 @@ pub async fn stream_chat(
         }
     }
 
-    let response = match request.send().await
-    {
+    // ── Self-healing: retry on connection error ──
+    let response = match request.send().await {
         Ok(r) => r,
         Err(e) => {
-            let err = format!("连接网关失败: {}", e);
-            let _ = app.emit(
-                "chat-done",
-                serde_json::json!({"req_id": req_id, "error": err}),
-            );
-            return Ok(());
+            eprintln!("[self-heal] connection failed: {e} — retrying in 1s");
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let mut retry = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body);
+            if let Some(ref token) = auth_token {
+                if !token.is_empty() {
+                    retry = retry.header("Authorization", format!("Bearer {token}"));
+                }
+            }
+            match retry.send().await {
+                Ok(r) => r,
+                Err(e2) => {
+                    let err = format!("连接网关失败: {}", e2);
+                    let _ = app.emit(
+                        "chat-done",
+                        serde_json::json!({"req_id": req_id, "error": err}),
+                    );
+                    return Ok(());
+                }
+            }
         }
     };
 
@@ -68,6 +84,29 @@ pub async fn stream_chat(
             .chars()
             .take(300)
             .collect::<String>();
+
+        // ── Self-healing: 5xx or 429 → retry once ──
+        if status >= 500 || status == 429 {
+            let delay = if status == 429 { 3 } else { 1 };
+            eprintln!("[self-heal] server returned {status} — retrying in {delay}s");
+            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+            let mut retry = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .json(&body);
+            if let Some(ref token) = auth_token {
+                if !token.is_empty() {
+                    retry = retry.header("Authorization", format!("Bearer {token}"));
+                }
+            }
+            if let Ok(r) = retry.send().await {
+                if r.status().is_success() {
+                    // Use the retry response for SSE parsing below
+                    return parse_mobile_sse_stream(&app, r, &req_id).await;
+                }
+            }
+        }
+
         let err = format!("网关返回错误 {}: {}", status, err_body);
         let _ = app.emit(
             "chat-done",
@@ -76,6 +115,14 @@ pub async fn stream_chat(
         return Ok(());
     }
 
+    parse_mobile_sse_stream(&app, response, &req_id).await
+}
+
+async fn parse_mobile_sse_stream(
+    app: &AppHandle,
+    response: reqwest::Response,
+    req_id: &str,
+) -> Result<(), String> {
     let mut stream = response.bytes_stream();
     let mut buf = String::new();
 
@@ -93,7 +140,6 @@ pub async fn stream_chat(
 
         buf.push_str(&String::from_utf8_lossy(&bytes));
 
-        // Process all complete SSE lines in the buffer
         loop {
             if let Some(pos) = buf.find('\n') {
                 let line = buf[..pos].trim().to_string();
@@ -111,7 +157,6 @@ pub async fn stream_chat(
                     }
 
                     if let Ok(v) = serde_json::from_str::<Value>(data) {
-                        // OpenAI SSE format: choices[0].delta.content
                         if let Some(delta) = v
                             .get("choices")
                             .and_then(|c| c.get(0))
@@ -134,7 +179,6 @@ pub async fn stream_chat(
         }
     }
 
-    // Stream ended without [DONE] token
     let _ = app.emit(
         "chat-done",
         serde_json::json!({"req_id": req_id, "error": null}),

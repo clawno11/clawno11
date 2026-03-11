@@ -149,11 +149,46 @@ async fn chat_handler(
     let model = req.model.clone().unwrap_or_else(|| "main".to_string());
 
     let reply = match run_openclaw_agent(&user_text).await {
-        Ok(raw) => parse_agent_reply(&raw).unwrap_or(raw),
+        Ok(raw) => {
+            let parsed = parse_agent_reply(&raw);
+            match parsed {
+                Ok(text) => text,
+                Err(e) if e.contains("does not support tools") => {
+                    eprintln!("[chat-proxy][self-heal] tools error — trying Ollama direct");
+                    match call_ollama_direct(&req.messages).await {
+                        Ok(text) => text,
+                        Err(e2) => {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                                "error": { "message": format!("self-heal failed: {e2}"), "type": "server_error" }
+                            }))).into_response();
+                        }
+                    }
+                }
+                Err(_) => raw,
+            }
+        }
+        Err(e) if e.contains("does not support tools") => {
+            eprintln!("[chat-proxy][self-heal] CLI tools error — trying Ollama direct");
+            match call_ollama_direct(&req.messages).await {
+                Ok(text) => text,
+                Err(e2) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                        "error": { "message": format!("self-heal failed: {e2}"), "type": "server_error" }
+                    }))).into_response();
+                }
+            }
+        }
         Err(e) => {
-            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                "error": { "message": e, "type": "server_error" }
-            }))).into_response();
+            // Self-healing: generic CLI failure → try Ollama direct as last resort
+            eprintln!("[chat-proxy][self-heal] CLI failed: {e} — trying Ollama direct");
+            match call_ollama_direct(&req.messages).await {
+                Ok(text) => text,
+                Err(_) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                        "error": { "message": e, "type": "server_error" }
+                    }))).into_response();
+                }
+            }
         }
     };
 
@@ -291,6 +326,72 @@ pub fn start_proxy(app: &tauri::AppHandle, _gateway_port: u16) -> u16 {
     });
 
     port
+}
+
+// ── Self-healing: direct Ollama fallback ─────────────────────────────────
+
+async fn call_ollama_direct(messages: &[ChatMessage]) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("ollama-error: {e}"))?;
+
+    let model_name = discover_ollama_model_proxy(&client)
+        .await
+        .unwrap_or_else(|| "llama3.2".into());
+
+    eprintln!("[chat-proxy][self-heal] calling Ollama with model={model_name}");
+
+    let msgs: Vec<serde_json::Value> = messages
+        .iter()
+        .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+        .collect();
+
+    let body = serde_json::json!({
+        "model": model_name,
+        "messages": msgs,
+        "stream": false,
+    });
+
+    let resp = client
+        .post("http://localhost:11434/v1/chat/completions")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("ollama-error: {e}"))?;
+
+    if !resp.status().is_success() {
+        let text = resp.text().await.unwrap_or_default();
+        return Err(format!("ollama-error: {text}"));
+    }
+
+    let json: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("ollama-json-error: {e}"))?;
+
+    json.pointer("/choices/0/message/content")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "ollama-error: no content in response".to_string())
+}
+
+async fn discover_ollama_model_proxy(client: &reqwest::Client) -> Option<String> {
+    let resp = client
+        .get("http://localhost:11434/api/tags")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: serde_json::Value = resp.json().await.ok()?;
+    body["models"]
+        .as_array()?
+        .first()?
+        .get("name")?
+        .as_str()
+        .map(|s| s.to_string())
 }
 
 // ── CLI helpers (reused from chat.rs with slight modifications) ──────────
