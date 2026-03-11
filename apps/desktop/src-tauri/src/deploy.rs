@@ -112,48 +112,116 @@ fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
     }
 }
 
-/// Sync the global auth-profiles.json into every agent directory.
+/// Ensure auth-profiles.json exists in the main agent directory.
 ///
-/// `openclaw models auth paste-token` writes keys to the global store at
-/// `~/.openclaw/auth-profiles.json`, but `openclaw agent --agent main` reads
-/// from `~/.openclaw/agents/main/agent/auth-profiles.json`.
-/// Without this sync, `configure_api_key` would report success ("已配置") but
-/// the chat agent would fail with "No API key found for provider".
+/// `paste-token` may write to a global store that the agent runtime doesn't
+/// read from.  On some openclaw versions the `agents/main/agent/` directory
+/// isn't even created by `onboard`.  This function:
+///   1. Creates the directory tree if missing.
+///   2. Copies auth from WHEREVER it exists (global → agent, or agent → global).
+///   3. If neither exists, does nothing (auth hasn't been configured yet).
 fn sync_auth_to_agents(fixes: &mut Vec<String>) {
     let home = user_home();
-    let openclaw_dir = path_join(&home, ".openclaw");
-    let global_auth = path_join(&openclaw_dir, "auth-profiles.json");
+    let oc = path_join(&home, ".openclaw");
+    let global      = path_join(&oc, "auth-profiles.json");
+    let agent_dir   = path_join(&oc, "agents/main/agent");
+    let agent_auth  = path_join(&agent_dir, "auth-profiles.json");
 
-    if !std::path::Path::new(&global_auth).exists() {
-        // No global auth file yet — nothing to sync
-        return;
-    }
+    let g_exists = std::path::Path::new(&global).exists();
+    let a_exists = std::path::Path::new(&agent_auth).exists();
 
-    let agents_dir = path_join(&openclaw_dir, "agents");
-    let entries = match std::fs::read_dir(&agents_dir) {
-        Ok(e) => e,
-        Err(_) => return, // No agents directory
-    };
+    // Ensure the agent directory tree exists regardless
+    let _ = std::fs::create_dir_all(&agent_dir);
 
-    for entry in entries.flatten() {
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
-        let agent_auth_dir = path_join(
-            &entry.path().to_string_lossy(),
-            "agent",
-        );
-        let _ = std::fs::create_dir_all(&agent_auth_dir);
-        let dest = path_join(&agent_auth_dir, "auth-profiles.json");
-        match std::fs::copy(&global_auth, &dest) {
-            Ok(_) => fixes.push(format!(
-                "auth-synced:{}",
-                entry.file_name().to_string_lossy()
-            )),
-            Err(e) => fixes.push(format!(
-                "auth-sync-failed:{}:{}",
-                entry.file_name().to_string_lossy(), e
-            )),
+    if g_exists && !a_exists {
+        // global → agent
+        if std::fs::copy(&global, &agent_auth).is_ok() {
+            fixes.push("auth-synced:global-to-agent".to_string());
+        }
+    } else if !g_exists && a_exists {
+        // agent → global (so next sync / list_configured_providers sees it)
+        if std::fs::copy(&agent_auth, &global).is_ok() {
+            fixes.push("auth-synced:agent-to-global".to_string());
+        }
+    } else if g_exists && a_exists {
+        // Both exist — pick the one with more content (more providers configured)
+        let g_len = std::fs::metadata(&global).map(|m| m.len()).unwrap_or(0);
+        let a_len = std::fs::metadata(&agent_auth).map(|m| m.len()).unwrap_or(0);
+        if g_len > a_len {
+            let _ = std::fs::copy(&global, &agent_auth);
+            fixes.push("auth-synced:global-larger".to_string());
+        } else if a_len > g_len {
+            let _ = std::fs::copy(&agent_auth, &global);
+            fixes.push("auth-synced:agent-larger".to_string());
         }
     }
+    // Neither exists → nothing to sync yet
+
+    // Also sync to any other agent directories (custom agents)
+    let agents_dir = path_join(&oc, "agents");
+    let source = if std::path::Path::new(&agent_auth).exists() {
+        &agent_auth
+    } else if std::path::Path::new(&global).exists() {
+        &global
+    } else {
+        return;
+    };
+    if let Ok(entries) = std::fs::read_dir(&agents_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == "main" { continue; } // already handled
+            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
+            let dest_dir = path_join(&entry.path().to_string_lossy(), "agent");
+            let _ = std::fs::create_dir_all(&dest_dir);
+            let dest = path_join(&dest_dir, "auth-profiles.json");
+            let _ = std::fs::copy(source, &dest);
+        }
+    }
+}
+
+/// Directly write a provider's API key into the agent auth-profiles.json file.
+/// This is the nuclear option — guarantees the key ends up in the right place
+/// even if `openclaw models auth paste-token` writes to the wrong location
+/// or fails to create the directory.
+fn ensure_auth_in_agent_file(provider: &str, api_key: &str, fixes: &mut Vec<String>) {
+    let home = user_home();
+    let agent_dir  = path_join(&home, ".openclaw/agents/main/agent");
+    let agent_auth = path_join(&agent_dir, "auth-profiles.json");
+
+    let _ = std::fs::create_dir_all(&agent_dir);
+
+    // Read existing file or start fresh
+    let mut doc: serde_json::Value = std::fs::read_to_string(&agent_auth)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({
+            "version": 1,
+            "profiles": {},
+            "lastGood": {}
+        }));
+
+    // Insert the provider key
+    let profile_key = format!("{provider}:manual");
+    if let Some(profiles) = doc.get_mut("profiles").and_then(|p| p.as_object_mut()) {
+        profiles.insert(profile_key.clone(), serde_json::json!({
+            "type": "token",
+            "provider": provider,
+            "token": api_key
+        }));
+    }
+    if let Some(last_good) = doc.get_mut("lastGood").and_then(|l| l.as_object_mut()) {
+        last_good.insert(provider.to_string(), serde_json::json!(profile_key));
+    }
+
+    // Write back
+    match std::fs::write(&agent_auth, serde_json::to_string_pretty(&doc).unwrap_or_default()) {
+        Ok(_) => fixes.push(format!("auth-direct-write:{provider}")),
+        Err(e) => fixes.push(format!("auth-direct-write-failed:{provider}:{e}")),
+    }
+
+    // Also write to global location for consistency
+    let global = path_join(&home, ".openclaw/auth-profiles.json");
+    let _ = std::fs::copy(&agent_auth, &global);
 }
 
 /// Model routing priority:
@@ -464,16 +532,21 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
             if o.status.success() {
                 fixes.push(format!("auth-written:{}", provider));
             } else {
-                return StepResult::err(format!("paste-token-failed:{}", out.trim()));
+                // paste-token failed — we'll fall through to direct write below
+                fixes.push(format!("paste-token-exit-nonzero:{}", out.trim().chars().take(80).collect::<String>()));
             }
         }
-        Err(e) => return StepResult::err(e),
+        Err(e) => {
+            // spawn failed — we'll fall through to direct write below
+            fixes.push(format!("paste-token-spawn-failed:{}", e.chars().take(80).collect::<String>()));
+        }
     }
 
-    // `openclaw models auth paste-token` writes to the GLOBAL auth store
-    // (~/.openclaw/auth-profiles.json), but `openclaw agent` reads from an
-    // AGENT-SPECIFIC store (~/.openclaw/agents/main/agent/auth-profiles.json).
-    // Sync the global file to all agent directories so the key is found at runtime.
+    // GUARANTEE: directly write the key into the agent auth file.
+    // `paste-token` may write to a global location that the agent runtime doesn't
+    // read, or the agents directory may not even exist. This direct write ensures
+    // the key always ends up in the right place — no manual user action needed.
+    ensure_auth_in_agent_file(&provider, &api_key, &mut fixes);
     sync_auth_to_agents(&mut fixes);
 
     if let Some(model) = provider_default_model(&provider) {
