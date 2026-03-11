@@ -719,8 +719,29 @@ export function ChatPage() {
             // Persist to SQLite BEFORE the mount check — the user may have navigated
             // away while the reply was streaming; we still want to save it so it appears
             // when they return to the chat page.
-            if (!event.payload.error && !cancelRef.current && sessionId && accumulatedText) {
-              addMessage(sessionId, "assistant", accumulatedText).catch(console.error);
+            //
+            // Save the assistant response whenever there IS content to save, even if
+            // chat-done carries an error (e.g. SSE stream-read-error after all text
+            // was already delivered, or CLI exit-code mismatch). The user saw the text;
+            // it should persist. Only skip when the user explicitly cancelled.
+            if (!cancelRef.current && sessionId && accumulatedText) {
+              try { await addMessage(sessionId, "assistant", accumulatedText); }
+              catch (e) { console.error("Failed to save assistant message:", e); }
+            }
+
+            // If no streaming text was accumulated but there IS an error message,
+            // and the error looks like it contains actual AI content (e.g. from
+            // unexpected-response or openclaw-exit-error with stdout), persist
+            // the error text so the user sees it after navigating back.
+            if (!cancelRef.current && sessionId && !accumulatedText && event.payload.error) {
+              const errText = event.payload.error;
+              const looksLikeContent = errText.length > 100
+                || errText.includes("payloads")
+                || errText.includes("text");
+              if (looksLikeContent) {
+                try { await addMessage(sessionId, "assistant", `${t("chat.error")}${errText}`); }
+                catch (_) { /* non-fatal */ }
+              }
             }
 
             if (!mountedRef.current) return;
@@ -777,6 +798,10 @@ export function ChatPage() {
         ac.signal.addEventListener("abort", () => {
           unlistenChunk();
           unlistenDone();
+          // Save partial response — the user already saw this text.
+          if (sessionId && accumulatedText) {
+            addMessage(sessionId, "assistant", accumulatedText).catch(console.error);
+          }
           if (mountedRef.current) {
             setMessages((prev) =>
               prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
