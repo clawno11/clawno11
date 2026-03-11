@@ -249,12 +249,31 @@ pub fn scan_openclaw_bin_dir() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         let roaming = crate::platform::data_roaming();
-        let candidates = vec![
+        let mut candidates = vec![
             format!("{roaming}\\npm"),
             format!("{local}\\clawno-npm-global\\bin"),
             format!("{local}\\Programs\\nodejs"),
             r"C:\Program Files\nodejs".to_string(),
         ];
+        // fnm: openclaw.cmd may be in fnm version dirs
+        for fnm_base in &[
+            format!("{local}\\fnm\\node-versions"),
+            format!("{home}\\AppData\\Local\\fnm\\node-versions"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(fnm_base) {
+                let mut fnm_bins: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let s = e.file_name().to_string_lossy().to_string();
+                        if s.starts_with('v') {
+                            Some(format!("{fnm_base}\\{s}\\installation"))
+                        } else { None }
+                    })
+                    .collect();
+                fnm_bins.sort_by(|a, b| b.cmp(a));
+                candidates.extend(fnm_bins);
+            }
+        }
         for dir in &candidates {
             if std::path::Path::new(&path_join(dir, "openclaw.cmd")).exists() {
                 return Some(dir.clone());
@@ -300,6 +319,13 @@ pub fn scan_openclaw_mjs() -> Option<String> {
     let home  = crate::platform::user_home();
     let local = data_local();
 
+    // On Windows npm installs to {prefix}\node_modules\ (no `lib` subdir).
+    // On macOS/Linux it's {prefix}/lib/node_modules/.
+    #[cfg(target_os = "windows")]
+    let mut candidates: Vec<String> = vec![
+        format!("{local}\\clawno-npm-global\\node_modules\\openclaw\\openclaw.mjs"),
+    ];
+    #[cfg(not(target_os = "windows"))]
     let mut candidates: Vec<String> = vec![
         format!("{local}/clawno-npm-global/lib/node_modules/openclaw/openclaw.mjs"),
     ];
@@ -331,9 +357,29 @@ pub fn scan_openclaw_mjs() -> Option<String> {
     #[cfg(target_os = "windows")]
     {
         let roaming = crate::platform::data_roaming();
+        // Standard npm global install locations
         candidates.push(format!("{roaming}\\npm\\node_modules\\openclaw\\openclaw.mjs"));
         candidates.push(format!("{local}\\Programs\\nodejs\\node_modules\\openclaw\\openclaw.mjs"));
         candidates.push(r"C:\Program Files\nodejs\node_modules\openclaw\openclaw.mjs".to_string());
+        // fnm version dirs: {local}\fnm\node-versions\vX.Y.Z\installation\lib\node_modules\
+        for fnm_base in &[
+            format!("{local}\\fnm\\node-versions"),
+            format!("{home}\\.fnm\\node-versions"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(fnm_base) {
+                let mut fnm_mjs: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let s = e.file_name().to_string_lossy().to_string();
+                        if s.starts_with('v') {
+                            Some(format!("{fnm_base}\\{s}\\installation\\node_modules\\openclaw\\openclaw.mjs"))
+                        } else { None }
+                    })
+                    .collect();
+                fnm_mjs.sort_by(|a, b| b.cmp(a));
+                for p in fnm_mjs { candidates.insert(0, p); }
+            }
+        }
     }
 
     let _ = home; // suppress unused warning on Windows
@@ -346,21 +392,48 @@ pub fn scan_node_paths() -> Option<String> {
     let local = data_local();
 
     #[cfg(target_os = "windows")]
-    let candidates = vec![
-        format!("{local}\\Programs\\nodejs"),
-        r"C:\Program Files\nodejs".to_string(),
-        r"C:\Program Files (x86)\nodejs".to_string(),
-        format!("{local}\\nvm\\current"),
-        format!("{home}\\AppData\\Local\\nvm\\current"),
-        r"C:\nvm\nodejs".to_string(),
-        format!("{local}\\fnm"),
-        format!("{local}\\Volta\\bin"),
-        format!("{home}\\.volta\\bin"),
-        r"C:\ProgramData\chocolatey\lib\nodejs\tools".to_string(),
-        r"C:\ProgramData\chocolatey\bin".to_string(),
-        format!("{home}\\scoop\\apps\\nodejs\\current"),
-        format!("{home}\\scoop\\shims"),
-    ];
+    let candidates = {
+        let mut v = vec![
+            format!("{local}\\Programs\\nodejs"),
+            r"C:\Program Files\nodejs".to_string(),
+            r"C:\Program Files (x86)\nodejs".to_string(),
+            // nvm-windows: creates a symlink at %LOCALAPPDATA%\nvm\current
+            format!("{local}\\nvm\\current"),
+            format!("{home}\\AppData\\Local\\nvm\\current"),
+            r"C:\nvm\nodejs".to_string(),
+            // Volta: shim launcher in ~/.volta/bin
+            format!("{local}\\Volta\\bin"),
+            format!("{home}\\.volta\\bin"),
+            // Chocolatey
+            r"C:\ProgramData\chocolatey\lib\nodejs\tools".to_string(),
+            r"C:\ProgramData\chocolatey\bin".to_string(),
+            // Scoop
+            format!("{home}\\scoop\\apps\\nodejs\\current"),
+            format!("{home}\\scoop\\shims"),
+        ];
+        // fnm on Windows: actual node binaries are at
+        // %LOCALAPPDATA%\fnm\node-versions\vX.Y.Z\installation\
+        // NOT at %LOCALAPPDATA%\fnm directly.
+        for fnm_base in &[
+            format!("{local}\\fnm\\node-versions"),
+            format!("{home}\\.fnm\\node-versions"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(fnm_base) {
+                let mut fnm_vers: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let s = e.file_name().to_string_lossy().to_string();
+                        if s.starts_with('v') {
+                            Some(format!("{fnm_base}\\{s}\\installation"))
+                        } else { None }
+                    })
+                    .collect();
+                fnm_vers.sort_by(|a, b| b.cmp(a)); // newest first
+                for dir in fnm_vers { v.insert(0, dir); }
+            }
+        }
+        v
+    };
 
     #[cfg(not(target_os = "windows"))]
     let candidates = {
@@ -467,15 +540,32 @@ fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
             fixes.push(format!("nvm-upgrade:{}", current_ver));
             shell_ok("nvm install 22");
             shell_ok("nvm use 22");
+            // nvm use 22 updates the %LOCALAPPDATA%\nvm\current symlink.
+            // augmented_path() already includes this dir, so shell_output should pick it up.
             let ver = shell_output("node --version");
             if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+            // Fallback: scan nvm dirs directly if shell didn't see the symlink change
+            let ver2 = node_version_direct();
+            if node_major(&ver2) >= 22 { return StepResult::ok_fixed(ver2, fixes); }
         }
         if !shell_output("fnm --version").is_empty() {
             fixes.push(format!("fnm-upgrade:{}", current_ver));
             shell_ok("fnm install 22");
             shell_ok("fnm default 22");
+            // fnm on Windows requires evaluating `fnm env` in the current shell to update
+            // PATH — that's not possible in a subprocess. Instead, scan the fnm version
+            // directories directly and inject the v22 path into the current process.
+            let ver2 = node_version_direct();
+            if node_major(&ver2) >= 22 { return StepResult::ok_fixed(ver2, fixes); }
+        }
+        // Volta: if installed via volta, it manages node automatically
+        if !shell_output("volta --version").is_empty() {
+            fixes.push(format!("volta-upgrade:{}", current_ver));
+            shell_ok("volta install node@22");
             let ver = shell_output("node --version");
             if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+            let ver2 = node_version_direct();
+            if node_major(&ver2) >= 22 { return StepResult::ok_fixed(ver2, fixes); }
         }
     }
     // macOS/Linux: nvm is a shell function — must source nvm.sh before calling it
@@ -539,8 +629,28 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
                 fixes,
             );
         }
+        // winget updates the Windows registry PATH but NOT the current process PATH.
+        // Read the new machine PATH + user PATH from the registry and inject them so
+        // node is immediately usable without requiring an app restart.
+        let new_path = shell_output(
+            "powershell -NoProfile -Command \"\
+             $m=[System.Environment]::GetEnvironmentVariable('PATH','Machine'); \
+             $u=[System.Environment]::GetEnvironmentVariable('PATH','User'); \
+             \"$m;$u\"\""
+        );
+        if !new_path.is_empty() {
+            fixes.push("injected-registry-path".to_string());
+            let current = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{};{}", new_path, current));
+        }
         let ver = shell_output("node --version");
         if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+        // Filesystem scan as final fallback (in case PATH injection missed something)
+        let ver_direct = node_version_direct();
+        if node_major(&ver_direct) >= 22 {
+            fixes.push("found-via-scan-after-winget".to_string());
+            return StepResult::ok_fixed(ver_direct, fixes);
+        }
         return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
     }
 
@@ -622,7 +732,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
         );
         if std::path::Path::new(&nvm_sh).exists() {
             let cmd = format!(
-                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" \
+                "export NVM_DIR=\"{nvm}\" && . \"{nvm_sh}\" \
                  && nvm install 22 >/dev/null 2>&1 \
                  && nvm use 22 >/dev/null 2>&1 \
                  && nvm alias default 22 >/dev/null 2>&1 \

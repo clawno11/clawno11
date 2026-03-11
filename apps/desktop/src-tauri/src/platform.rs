@@ -74,23 +74,47 @@ pub fn augmented_path() -> String {
     let local   = data_local();
 
     #[cfg(target_os = "windows")]
-    let extra: Vec<String> = vec![
-        format!("{roaming}\\npm"),
-        format!("{local}\\Programs\\nodejs"),
-        r"C:\Program Files\nodejs".to_string(),
-        r"C:\Program Files (x86)\nodejs".to_string(),
-        format!("{local}\\nvm\\current"),
-        format!("{home}\\AppData\\Local\\nvm\\current"),
-        r"C:\nvm\nodejs".to_string(),
-        format!("{local}\\fnm"),
-        format!("{local}\\Volta\\bin"),
-        format!("{home}\\.volta\\bin"),
-        r"C:\ProgramData\chocolatey\bin".to_string(),
-        format!("{home}\\scoop\\shims"),
-        r"C:\scoop\shims".to_string(),
-        format!("{roaming}\\npm-global\\bin"),
-        format!("{local}\\clawno-npm-global\\bin"),
-    ];
+    let extra: Vec<String> = {
+        let mut v = vec![
+            format!("{roaming}\\npm"),
+            format!("{local}\\Programs\\nodejs"),
+            r"C:\Program Files\nodejs".to_string(),
+            r"C:\Program Files (x86)\nodejs".to_string(),
+            // nvm-windows symlink
+            format!("{local}\\nvm\\current"),
+            format!("{home}\\AppData\\Local\\nvm\\current"),
+            r"C:\nvm\nodejs".to_string(),
+            // Volta, Chocolatey, Scoop
+            format!("{local}\\Volta\\bin"),
+            format!("{home}\\.volta\\bin"),
+            r"C:\ProgramData\chocolatey\bin".to_string(),
+            format!("{home}\\scoop\\shims"),
+            r"C:\scoop\shims".to_string(),
+            format!("{roaming}\\npm-global\\bin"),
+            format!("{local}\\clawno-npm-global\\bin"),
+        ];
+        // fnm on Windows: actual node binaries live in version subdirectories,
+        // NOT directly in %LOCALAPPDATA%\fnm.
+        for fnm_base in &[
+            format!("{local}\\fnm\\node-versions"),
+            format!("{home}\\.fnm\\node-versions"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(fnm_base) {
+                let mut fnm_vers: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let s = e.file_name().to_string_lossy().to_string();
+                        if s.starts_with('v') {
+                            Some(format!("{fnm_base}\\{s}\\installation"))
+                        } else { None }
+                    })
+                    .collect();
+                fnm_vers.sort_by(|a, b| b.cmp(a)); // newest first (v22 before v20)
+                for dir in fnm_vers { v.insert(0, dir); }
+            }
+        }
+        v
+    };
 
     #[cfg(not(target_os = "windows"))]
     let extra: Vec<String> = {
