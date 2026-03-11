@@ -111,16 +111,63 @@ fn wait_for_port(port: u16, secs: u8) -> bool {
     false
 }
 
+// ── Node.js executable finder ─────────────────────────────────────────────────
+
+/// Find the first `node` / `node.exe` binary in the current process PATH that
+/// is version 22 or newer.  Falls back to the first `node` binary found if none
+/// is ≥ 22.  This is used to embed an explicit path in the CJS gateway wrapper
+/// so the gateway always runs with the correct Node.js version, regardless of
+/// which node version pm2 itself was installed under.
+fn find_node_exe() -> String {
+    #[cfg(target_os = "windows")]
+    let exe_name = "node.exe";
+    #[cfg(not(target_os = "windows"))]
+    let exe_name = "node";
+
+    let path_env = std::env::var("PATH").unwrap_or_default();
+    let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+
+    let mut first_found = String::new();
+    for dir in path_env.split(sep) {
+        let candidate = std::path::Path::new(dir).join(exe_name);
+        if candidate.exists() {
+            let candidate_str = candidate.to_string_lossy().to_string();
+            // Try to run it to verify the version
+            if let Ok(o) = std::process::Command::new(&candidate_str).arg("--version").output() {
+                let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                let major = ver.trim_start_matches('v')
+                    .split('.').next().unwrap_or("0")
+                    .parse::<u32>().unwrap_or(0);
+                if major >= 22 {
+                    return candidate_str;
+                }
+                if first_found.is_empty() {
+                    first_found = candidate_str;
+                }
+            } else if first_found.is_empty() {
+                first_found = candidate_str;
+            }
+        }
+    }
+    // No v22+ found — return whatever we found, or just "node" as last resort
+    if first_found.is_empty() { exe_name.to_string() } else { first_found }
+}
+
 // ── CJS wrapper writer ────────────────────────────────────────────────────────
 
 fn write_cjs_wrapper(mjs: &str, port: u16, fixes: &mut Vec<String>) -> Option<String> {
     let mjs_js = mjs.replace('\\', "\\\\");
+    // Find the v22+ node binary and embed it explicitly.
+    // Using process.execPath would inherit pm2's own node (which may be v20 if pm2
+    // was installed before the nvm upgrade), causing "Node.js v22+ is required" crashes.
+    let node_exe = find_node_exe();
+    let node_exe_js = node_exe.replace('\\', "\\\\");
     let content = format!(
         concat!(
             "'use strict';\n",
             "var cp = require('child_process');\n",
             "var child = cp.spawn(\n",
-            "  process.execPath,\n",
+            "  \"{node_exe}\",\n",
             "  [\"{mjs}\", \"gateway\", \"--port\", \"{port}\",\n",
             "   \"--allow-unconfigured\", \"--force\"],\n",
             "  {{ stdio: 'inherit', windowsHide: true }}\n",
@@ -128,7 +175,7 @@ fn write_cjs_wrapper(mjs: &str, port: u16, fixes: &mut Vec<String>) -> Option<St
             "child.on('exit', function(code) {{ process.exit(code || 0); }});\n",
             "child.on('error', function(err) {{ console.error('[clawno]', err.message); process.exit(1); }});\n"
         ),
-        mjs = mjs_js, port = port,
+        node_exe = node_exe_js, mjs = mjs_js, port = port,
     );
 
     let app_dir = crate::platform::app_data_dir();
