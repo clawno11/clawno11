@@ -112,6 +112,50 @@ fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
     }
 }
 
+/// Sync the global auth-profiles.json into every agent directory.
+///
+/// `openclaw models auth paste-token` writes keys to the global store at
+/// `~/.openclaw/auth-profiles.json`, but `openclaw agent --agent main` reads
+/// from `~/.openclaw/agents/main/agent/auth-profiles.json`.
+/// Without this sync, `configure_api_key` would report success ("已配置") but
+/// the chat agent would fail with "No API key found for provider".
+fn sync_auth_to_agents(fixes: &mut Vec<String>) {
+    let home = user_home();
+    let openclaw_dir = path_join(&home, ".openclaw");
+    let global_auth = path_join(&openclaw_dir, "auth-profiles.json");
+
+    if !std::path::Path::new(&global_auth).exists() {
+        // No global auth file yet — nothing to sync
+        return;
+    }
+
+    let agents_dir = path_join(&openclaw_dir, "agents");
+    let entries = match std::fs::read_dir(&agents_dir) {
+        Ok(e) => e,
+        Err(_) => return, // No agents directory
+    };
+
+    for entry in entries.flatten() {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
+        let agent_auth_dir = path_join(
+            &entry.path().to_string_lossy(),
+            "agent",
+        );
+        let _ = std::fs::create_dir_all(&agent_auth_dir);
+        let dest = path_join(&agent_auth_dir, "auth-profiles.json");
+        match std::fs::copy(&global_auth, &dest) {
+            Ok(_) => fixes.push(format!(
+                "auth-synced:{}",
+                entry.file_name().to_string_lossy()
+            )),
+            Err(e) => fixes.push(format!(
+                "auth-sync-failed:{}:{}",
+                entry.file_name().to_string_lossy(), e
+            )),
+        }
+    }
+}
+
 /// Model routing priority:
 ///   1st — Cloud API (fast, online): ZAI → OpenAI → Anthropic → OpenRouter → other
 ///   2nd — Local Ollama (fallback, offline only)
@@ -209,6 +253,7 @@ pub async fn deploy_step_onboard() -> StepResult {
 
     if ok || combined.contains("already") || combined.contains("skip") {
         configure_ollama_in_gateway(&mut fixes);
+        sync_auth_to_agents(&mut fixes);
         auto_select_active_model(&mut fixes);
         return StepResult::ok_fixed("config-initialized".to_string(), fixes);
     }
@@ -224,6 +269,7 @@ pub async fn deploy_step_onboard() -> StepResult {
         let (ok2, _, _) = shell_result(&onboard_cmd);
         if ok2 {
             configure_ollama_in_gateway(&mut fixes);
+            sync_auth_to_agents(&mut fixes);
             auto_select_active_model(&mut fixes);
             return StepResult::ok_fixed("config-initialized-alt-dir".to_string(), fixes);
         }
@@ -237,6 +283,7 @@ pub async fn deploy_step_onboard() -> StepResult {
         let (ok3, _, stderr3) = shell_result("openclaw onboard --yes");
         if ok3 {
             configure_ollama_in_gateway(&mut fixes);
+            sync_auth_to_agents(&mut fixes);
             auto_select_active_model(&mut fixes);
             return StepResult::ok_fixed("config-reset-and-initialized".to_string(), fixes);
         }
@@ -422,6 +469,12 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
         }
         Err(e) => return StepResult::err(e),
     }
+
+    // `openclaw models auth paste-token` writes to the GLOBAL auth store
+    // (~/.openclaw/auth-profiles.json), but `openclaw agent` reads from an
+    // AGENT-SPECIFIC store (~/.openclaw/agents/main/agent/auth-profiles.json).
+    // Sync the global file to all agent directories so the key is found at runtime.
+    sync_auth_to_agents(&mut fixes);
 
     if let Some(model) = provider_default_model(&provider) {
         // Set as the active default model.
