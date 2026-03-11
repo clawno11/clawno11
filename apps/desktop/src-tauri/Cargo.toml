@@ -35,6 +35,10 @@ rand = "0.8"
 russh = "0.44"
 russh-keys = "0.44"
 async-trait = "0.1"
+axum = { version = "0.8.4", features = ["json"] }
+
+[profile.dev]
+opt-level = 1
 
 [profile.release]
 panic = "abort"

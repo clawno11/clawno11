@@ -33,15 +33,15 @@ const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string; badg
   siliconflow: { model: "openrouter/meta-llama/llama-3.1-8b-instruct", label: "SiliconFlow Llama 3.1 8B", badge: "免费" },
   hunyuan:     { model: "openrouter/tencent/hunyuan-lite",             label: "混元 Lite",                 badge: "免费" },
   spark:       { model: "openrouter/iflytek/spark-lite",               label: "讯飞星火 Lite",             badge: "免费" },
-  zai:         { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "¥0.1/1M" },
+  zai:         { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "低价" },
   openrouter:  { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
-  doubao:      { model: "openrouter/bytedance/doubao-lite-32k",        label: "豆包 Lite",                 badge: "¥0.3/1M" },
-  minimax:     { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "¥0.15/1M" },
-  deepseek:    { model: "openrouter/deepseek/deepseek-chat",           label: "DeepSeek V3",               badge: "¥1/1M" },
-  qwen:        { model: "openrouter/qwen/qwen-plus",                   label: "通义千问 Plus",             badge: "¥0.5/1M" },
-  moonshot:    { model: "openrouter/moonshot-ai/moonshot-v1-8k",       label: "月之暗面 v1-8k",            badge: "¥12/1M" },
-  openai:      { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "$0.15/1M" },
-  anthropic:   { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "$0.25/1M" },
+  doubao:      { model: "openrouter/bytedance/doubao-lite-32k",        label: "豆包 Lite",                 badge: "低价" },
+  minimax:     { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "低价" },
+  deepseek:    { model: "openrouter/deepseek/deepseek-chat",           label: "DeepSeek V3",               badge: "低价" },
+  qwen:        { model: "openrouter/qwen/qwen-plus",                   label: "通义千问 Plus",             badge: "低价" },
+  moonshot:    { model: "openrouter/moonshot-ai/moonshot-v1-8k",       label: "月之暗面 v1-8k",            badge: "标准" },
+  openai:      { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "轻量" },
+  anthropic:   { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "轻量" },
 };
 
 // ── Shell command audit ────────────────────────────────────────────────────
@@ -344,6 +344,7 @@ export function ChatPage() {
 
   const bottomRef    = useRef<HTMLDivElement>(null);
   const textareaRef  = useRef<HTMLTextAreaElement>(null);
+  const scrollBehaviorRef = useRef<ScrollBehavior>("instant");
 
   // ── Lifecycle refs ───────────────────────────────────────────────────────
   /** Set to false on unmount; guards all deferred state updates. */
@@ -479,7 +480,13 @@ export function ChatPage() {
   }, []);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    scrollBehaviorRef.current = "instant";
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    bottomRef.current?.scrollIntoView({ behavior: scrollBehaviorRef.current });
+    scrollBehaviorRef.current = "smooth";
   }, [messages]);
 
   // Auto-resize textarea as content grows (max 8 rem ≈ 6 lines).

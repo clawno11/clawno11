@@ -60,10 +60,8 @@ However, when you use the app, you may connect to:
 |---------|------|---------------------|
 | Your own AI gateway (OpenClaw) | During chat | Self-hosted, your control |
 | AI model providers (Zhipu AI, OpenRouter, etc.) | Via your gateway | Each provider's own policy |
-| Cloud server providers (Alibaba Cloud, DigitalOcean, etc.) | Only when you click a purchase link | Each provider's own policy |
-| Cloudflare Workers (refer.clawno11.ai) | Only when clicking cloud/AI referral links | [Cloudflare Privacy Policy](https://www.cloudflare.com/privacypolicy/) |
 
-The referral redirect at `refer.clawno11.ai` does **not log your IP address or personal information** beyond what Cloudflare's infrastructure inherently processes.
+The app contains **no referral links, no affiliate redirects, and no external tracking services**.
 
 ### 6. Children's Privacy
 
@@ -150,10 +148,8 @@ ClawNo.11 本身不与任何第三方服务器通信。
 |------|----------|-----------|
 | 您自己的 AI 网关（OpenClaw） | 聊天时 | 自托管，由您控制 |
 | AI 模型提供商（智谱 AI、OpenRouter 等） | 通过您的网关 | 各提供商自身政策 |
-| 云服务器提供商（阿里云、DigitalOcean 等） | 仅在您点击购买链接时 | 各提供商自身政策 |
-| Cloudflare Workers（refer.clawno11.ai） | 仅在点击云服务器/AI 推广链接时 | [Cloudflare 隐私政策](https://www.cloudflare.com/privacypolicy/) |
 
-`refer.clawno11.ai` 的推广跳转**不记录您的 IP 地址或个人信息**（Cloudflare 基础设施可能有基本的请求日志，受 Cloudflare 隐私政策约束）。
+本应用**不含任何推广链接、推广跳转或外部追踪服务**。
 
 ### 6. 儿童隐私
 

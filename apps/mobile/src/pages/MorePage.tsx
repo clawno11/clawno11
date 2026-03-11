@@ -5,19 +5,10 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   BarChart3, Database, Puzzle, GitBranch,
-  ShieldCheck, ChevronRight, Server, ExternalLink,
+  ShieldCheck, ChevronRight,
 } from "lucide-react";
 import { useTokenAnomalyStore } from "../store/tokenAnomalyStore";
 import { TopBar } from "../components/TopBar";
-
-const REFER_BASE = "https://refer.clawno11.ai";
-
-const CLOUD_SERVERS = [
-  { id: "aliyun",       emoji: "🇨🇳", name: "阿里云 ECS",    badge: "7.5折优惠",  url: `${REFER_BASE}/aliyun` },
-  { id: "tencent",      emoji: "🇨🇳", name: "腾讯云 CVM",    badge: "新用户折扣",  url: `${REFER_BASE}/tencent` },
-  { id: "digitalocean", emoji: "🌊", name: "DigitalOcean",  badge: "$200试用金",  url: `${REFER_BASE}/digitalocean` },
-  { id: "vultr",        emoji: "⚡", name: "Vultr",         badge: "$300试用金",  url: `${REFER_BASE}/vultr` },
-] as const;
 
 export function MorePage() {
   const { t } = useTranslation();
@@ -108,50 +99,6 @@ export function MorePage() {
           })}
         </div>
 
-        {/* ── 推荐云服务器 ── */}
-        <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider px-1 mb-2">
-          {t("more.cloudServers")}
-        </p>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
-          {/* header */}
-          <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[hsl(var(--border))]/60 bg-gradient-to-r from-cyan-50 to-blue-50">
-            <div className="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center flex-shrink-0">
-              <Server size={15} className="text-cyan-600" />
-            </div>
-            <div>
-              <p className="text-sm font-semibold">{t("more.cloudServersTitle")}</p>
-              <p className="text-xs text-[hsl(var(--muted-foreground))]">{t("more.cloudServersSubtitle")}</p>
-            </div>
-          </div>
-          {/* provider rows */}
-          {CLOUD_SERVERS.map((s, idx) => (
-            <button
-              key={s.id}
-              onClick={() => window.open(s.url, "_blank")}
-              className={`touch-btn w-full flex items-center gap-3 px-4 py-3.5 text-left active:bg-gray-50 ${
-                idx < CLOUD_SERVERS.length - 1 ? "border-b border-[hsl(var(--border))]/50" : ""
-              }`}
-            >
-              <span className="text-lg flex-shrink-0">{s.emoji}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold">{s.name}</span>
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full text-emerald-700 bg-emerald-50 flex-shrink-0">
-                    {s.badge}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center gap-1 text-[hsl(var(--primary))] flex-shrink-0">
-                <span className="text-xs font-medium">{t("more.cloudBuyBtn")}</span>
-                <ExternalLink size={12} />
-              </div>
-            </button>
-          ))}
-          {/* disclosure */}
-          <p className="text-[10px] text-[hsl(var(--muted-foreground))]/60 text-center py-2 border-t border-[hsl(var(--border))]/30">
-            {t("more.cloudDisclosure")}
-          </p>
-        </div>
       </div>
     </div>
   );

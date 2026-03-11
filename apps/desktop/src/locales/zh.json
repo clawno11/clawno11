@@ -442,14 +442,10 @@
     "remoteAccessTitle": "远程访问隧道",
     "comingSoon": "即将推出",
     "mobileQr": {
-      "title": "手机 App 安全扫码连接",
-      "desc": "OTP 令牌 + PIN 双重验证，2 分钟自动过期，防截图泄漏",
-      "pinLabel": "配对确认码",
-      "pinHint": "扫码后，手机会要求您确认此配对码是否一致",
+      "title": "手机 App 扫码连接",
+      "desc": "OTP 一次性令牌，2 分钟自动过期，扫码即连",
       "step1": "在手机上安装 ClawNo.11 App",
-      "step2": "打开 App → 连接页 → 点击「粘贴连接码」",
-      "step3": "扫描二维码后，手机界面会显示一个 6 位配对码",
-      "step4": "核对手机上的配对码与桌面上方的配对码一致后，点击「确认连接」",
+      "step2": "打开 App → 连接页 → 点击「扫一扫」，对准此二维码即可完成连接",
       "noLan": "未检测到局域网 IP，请确保已连接 WiFi 或以太网",
       "noLanWarn": "未检测到局域网 IP，二维码无法生成。请先连接局域网。",
       "genError": "生成失败，请刷新重试",
@@ -493,7 +489,7 @@
       "testFirst": "请先完成测试连接"
     },
     "tailscale": {
-      "title": "Tailscale VPN（境外用户）",
+      "title": "Tailscale VPN",
       "subtitle": "在任意网络下安全访问家中的 AI 服务",
       "connected": "Tailscale 已连接",
       "notRunning": "Tailscale 已安装但未运行",
@@ -509,9 +505,9 @@
       "startHint": "Tailscale 已安装，请打开客户端并登录，然后刷新状态。"
     },
     "xedge": {
-      "title": "xEdge 干将互联（国内首选）",
-      "subtitle": "微信扫码 · 无需公网服务器 · 中国最简方案",
-      "desc": "xEdge 干将互联是基于 Tailscale 协议的国产组网工具，支持微信扫码登录，设备自动获得 100.x.x.x 内网 IP，国内中转节点保障低延迟，免费方案支持 20 台设备。",
+      "title": "xEdge 干将互联（微信扫码登录）",
+      "subtitle": "微信扫码 · 无需公网服务器 · 零配置组网",
+      "desc": "xEdge 是基于 Tailscale 协议的组网工具，支持微信扫码登录，设备自动获得 100.x.x.x 内网 IP，中转节点保障低延迟，免费方案支持 20 台设备。",
       "guideTitle": "配置步骤（约 3 分钟）",
       "step1": "在本机（运行 ClawNo.11 的电脑）下载并安装 xEdge 客户端",
       "step2": "打开 xEdge 客户端，微信扫码登录，本机自动加入您的安全内网并获得 100.x.x.x IP",

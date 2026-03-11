@@ -17,6 +17,7 @@
   "dependencies": {
     "@clawno/deploy-engine": "workspace:*",
     "@clawno/openclaw-client": "workspace:*",
+    "@clawno/shared": "workspace:*",
     "@tauri-apps/api": "^2.3.0",
     "@tauri-apps/plugin-dialog": "^2.3.0",
     "@tauri-apps/plugin-fs": "^2.3.0",

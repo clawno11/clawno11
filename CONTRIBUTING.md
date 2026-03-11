@@ -44,12 +44,11 @@ See [DEVELOPMENT.md](./docs/DEVELOPMENT.md) for the full setup guide.
 
 ### What We Do NOT Accept
 
-To protect the project's integrity and affiliate revenue that funds development:
+To protect the project's integrity and user safety:
 
-- ❌ Changes to affiliate/referral link domains or IDs
 - ❌ Removal of the [PRIVACY.md](./PRIVACY.md), [DISCLAIMER.md](./DISCLAIMER.md), or [TRADEMARK.md](./TRADEMARK.md)
-- ❌ Embedding tracking, analytics, or telemetry of any kind
-- ❌ Weakening security features (PII filter, CSP, sandbox)
+- ❌ Embedding tracking, analytics, telemetry, or affiliate/referral links of any kind
+- ❌ Weakening security features (PII filter, CSP, sandbox, auth tokens)
 - ❌ Hardcoded credentials of any kind
 
 ### Code Style
@@ -79,7 +78,7 @@ By submitting a pull request, you agree that your contribution will be licensed 
 - 🔧 **代码贡献** — Fork → 新建分支 → 提交 PR
 - 📖 **文档改进** — 修正错别字、提高可读性、补充示例
 - 🌐 **翻译** — 改进 `src/locales/` 文件（目前支持中文/英文）
-- ⭐ **传播推广** — Star 仓库，分享给有需要的朋友
+- ⭐ **传播分享** — Star 仓库，分享给有需要的朋友
 
 ### 开始之前
 
@@ -110,12 +109,11 @@ pnpm tauri dev
 
 ### 我们不接受的改动
 
-为保护项目完整性及维持项目运营的推广收入：
+为保护项目完整性及用户安全：
 
-- ❌ 修改推广链接域名或推广 ID
 - ❌ 删除 [PRIVACY.md](./PRIVACY.md)、[DISCLAIMER.md](./DISCLAIMER.md) 或 [TRADEMARK.md](./TRADEMARK.md)
-- ❌ 嵌入任何形式的追踪、分析或遥测
-- ❌ 削弱安全功能（PII 过滤、CSP、沙箱隔离）
+- ❌ 嵌入任何形式的追踪、分析、遥测或推广/返佣链接
+- ❌ 削弱安全功能（PII 过滤、CSP、沙箱隔离、认证令牌）
 - ❌ 任何形式的硬编码密钥
 
 ### 安全漏洞报告

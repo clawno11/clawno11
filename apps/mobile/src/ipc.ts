@@ -54,6 +54,10 @@ export const getTailscaleStatus = () =>
 export const probeGatewayUrl = (url: string) =>
   invoke<boolean>("probe_gateway_url", { url });
 
+/** Fetch the chat proxy auth token from the desktop's chat proxy health endpoint. */
+export const fetchChatProxyToken = (gatewayUrl: string) =>
+  invoke<string | null>("fetch_chat_proxy_token", { gatewayUrl });
+
 // ── Secure store ─────────────────────────────────────────────────────────
 
 export const setSecureValue = (key: string, value: string) =>

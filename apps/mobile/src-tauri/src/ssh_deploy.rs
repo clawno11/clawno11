@@ -31,7 +31,12 @@ pub struct DeployProgress {
     pub error: Option<String>,
 }
 
-// ── SSH handler (accept all host keys — TOFU style) ───────────────────────────
+// ── SSH handler ───────────────────────────────────────────────────────────────
+//
+// TODO: implement TOFU (Trust On First Use) host key verification like desktop.
+// Currently accepts all host keys, which is vulnerable to MITM attacks.
+// Desktop's ssh_deploy.rs has a reference implementation using TofuHandler
+// that persists fingerprints to ~/.clawno11/ssh_known_hosts.json.
 
 struct AcceptAllKeys;
 
@@ -117,6 +122,27 @@ async fn connect_session(
     Ok(session)
 }
 
+// ── Input validation ─────────────────────────────────────────────────────────
+
+fn validate_ssh_input(host: &str, username: &str, port: u16) -> Result<(), String> {
+    if host.is_empty() || host.len() > 253 {
+        return Err("invalid-host:empty or too long".into());
+    }
+    if host.contains(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == '`' || c == '$') {
+        return Err("invalid-host:contains disallowed characters".into());
+    }
+    if username.is_empty() || username.len() > 64 {
+        return Err("invalid-username:empty or too long".into());
+    }
+    if username.contains(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == '`' || c == '$') {
+        return Err("invalid-username:contains disallowed characters".into());
+    }
+    if port == 0 {
+        return Err("invalid-port:0".into());
+    }
+    Ok(())
+}
+
 // ── Tauri commands ────────────────────────────────────────────────────────────
 
 /// Quick connectivity test — returns the remote `uname -a` on success.
@@ -127,6 +153,7 @@ pub async fn ssh_test_connection(
     username: String,
     password: String,
 ) -> Result<String, String> {
+    validate_ssh_input(&host, &username, ssh_port)?;
     let session = connect_session(&host, ssh_port, &username, &password).await?;
     let (out, _) = exec(&session, "uname -a").await?;
     Ok(out.trim().to_string())
@@ -144,7 +171,8 @@ pub async fn ssh_deploy(
     password: String,
     openclaw_port: u16,
 ) -> Result<String, String> {
-    // Helper macro to emit progress and immediately return on fatal error.
+    validate_ssh_input(&host, &username, ssh_port)?;
+
     macro_rules! emit {
         ($step:expr, $msg:expr, $pct:expr) => {
             let _ = app.emit("deploy-progress", DeployProgress {

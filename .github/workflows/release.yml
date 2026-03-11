@@ -53,25 +53,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      # ── 关键步骤：从 GitHub Secrets 注入推广 ID ──────────────────────────────
-      # 在 GitHub → Settings → Secrets and variables → Actions 中添加以下 secrets:
-      #   VITE_AFFILIATE_ALIYUN       阿里云云大使 userCode
-      #   VITE_AFFILIATE_TENCENT      腾讯云 CPS cps_key
-      #   VITE_AFFILIATE_DIGITALOCEAN DigitalOcean refcode
-      #   VITE_AFFILIATE_VULTR        Vultr ref（纯数字）
-      #   VITE_AFFILIATE_LINODE       Linode/Akamai ref
-      - name: Inject affiliate IDs
-        working-directory: apps/desktop
-        shell: bash
-        run: |
-          cat > .env.production << 'EOF'
-          VITE_AFFILIATE_ALIYUN=${{ secrets.VITE_AFFILIATE_ALIYUN }}
-          VITE_AFFILIATE_TENCENT=${{ secrets.VITE_AFFILIATE_TENCENT }}
-          VITE_AFFILIATE_DIGITALOCEAN=${{ secrets.VITE_AFFILIATE_DIGITALOCEAN }}
-          VITE_AFFILIATE_VULTR=${{ secrets.VITE_AFFILIATE_VULTR }}
-          VITE_AFFILIATE_LINODE=${{ secrets.VITE_AFFILIATE_LINODE }}
-          EOF
-
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:

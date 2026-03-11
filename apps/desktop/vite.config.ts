@@ -15,6 +15,8 @@ export default defineConfig({
       // Point to TS source so Vite bundles it as ESM (avoids "exports is not
       // defined" that occurs when the CJS dist is loaded in a browser context).
       "@clawno/openclaw-client": path.resolve(__dirname, "../../packages/openclaw-client/src/index.ts"),
+      // Shared store/utils package — resolve to TS source for Vite transpilation.
+      "@clawno/shared": path.resolve(__dirname, "../../packages/shared/src"),
     },
   },
   optimizeDeps: {

@@ -107,7 +107,7 @@ fn derive_pin(raw: &[u8]) -> String {
 }
 
 /// Encode a byte slice as URL-safe Base64 (no padding).
-fn b64_encode(data: &[u8]) -> String {
+pub fn b64_encode(data: &[u8]) -> String {
     use std::fmt::Write;
     // Use only std — avoid pulling in the base64 crate.
     // We implement the RFC 4648 URL-safe alphabet manually.
@@ -323,13 +323,17 @@ fn generate_pair_qr_inner(
     // 7. Build QR data string.
     //    Host and name are Base64-encoded so they are not plaintext in the QR.
     //    `vp` carries the verify-server port so the mobile can consume the token.
+    //    `ck` carries the chat proxy Bearer token so mobile can authenticate REST requests.
     let host_b64 = b64_encode(host_and_port.as_bytes());
     let name_b64 = b64_encode(server_name.as_bytes());
-    let qr_data  = if verify_port > 0 {
-        format!("clawno11://pair?h={host_b64}&n={name_b64}&t={token}&exp={expires_at}&vp={verify_port}")
-    } else {
-        format!("clawno11://pair?h={host_b64}&n={name_b64}&t={token}&exp={expires_at}")
-    };
+    let chat_key = crate::chat_proxy::get_proxy_auth_token();
+    let mut qr_data = format!("clawno11://pair?h={host_b64}&n={name_b64}&t={token}&exp={expires_at}");
+    if verify_port > 0 {
+        qr_data.push_str(&format!("&vp={verify_port}"));
+    }
+    if !chat_key.is_empty() {
+        qr_data.push_str(&format!("&ck={chat_key}"));
+    }
 
     Ok(PairQrPayload { qr_data, pin, expires_at })
 }
@@ -340,7 +344,7 @@ fn generate_pair_qr_inner(
 /// real LAN IP) so the mobile app can reach the desktop over the local network.
 /// This variant is a fallback for single-machine testing.
 #[tauri::command]
-pub fn generate_pair_qr(
+pub async fn generate_pair_qr(
     port: u16,
     server_name: String,
     state: tauri::State<'_, PairingState>,
@@ -355,7 +359,7 @@ pub fn generate_pair_qr(
 /// `get_local_lan_info` and wants it baked into the QR so the mobile app
 /// can connect over the local network.
 #[tauri::command]
-pub fn generate_pair_qr_with_host(
+pub async fn generate_pair_qr_with_host(
     host: String,
     port: u16,
     server_name: String,

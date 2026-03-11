@@ -15,6 +15,7 @@ pub mod mcp;            // MCP server security scanner
 pub mod rag;            // local RAG: text ingestion helper
 pub mod token_log;      // SQLite schema migrations
 pub mod chat;           // streaming chat proxy (SSE → Tauri events)
+pub mod chat_proxy;     // LAN-facing REST proxy for mobile chat
 pub mod ollama;         // local Ollama model engine (install / pull / manage)
 
 use tauri::Manager;
@@ -143,9 +144,12 @@ pub fn run() {
         ])
         .setup(|app| {
             if let Some(window) = app.get_webview_window("main") {
-                // 动态设置窗口图标，确保 dev/release 均使用最新图标
                 let _ = window.set_icon(tauri::include_image!("icons/icon.png"));
             }
+
+            // Start LAN-accessible REST chat proxy for mobile clients.
+            let proxy_port = chat_proxy::start_proxy(app.handle(), 18789);
+            eprintln!("[setup] chat REST proxy started on port {proxy_port}");
 
             // ── 系统托盘：最小化到托盘，双击恢复，右键退出 ──────────────────
             let tray_menu = tauri::menu::MenuBuilder::new(app)

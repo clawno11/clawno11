@@ -7,7 +7,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import {
   Terminal, Server, Wifi, CheckCircle2, XCircle, Loader,
-  ChevronRight, Eye, EyeOff, ArrowLeft,
+  ChevronRight, Eye, EyeOff,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { useNavigate } from "react-router-dom";
@@ -180,14 +180,7 @@ export function DeployPage() {
       <TopBar
         title={t("deploy.ssh.title")}
         subtitle={t("deploy.ssh.subtitle")}
-        left={
-          <button
-            onClick={() => navigate(-1)}
-            className="touch-btn p-2 rounded-full text-[hsl(var(--muted-foreground))]"
-          >
-            <ArrowLeft size={20} />
-          </button>
-        }
+        back
       />
 
       <div className="flex-1 scrollable p-4 space-y-4 pb-8">
@@ -319,8 +312,8 @@ export function DeployPage() {
           </div>
         )}
 
-        {/* ── Buttons (form phase) ── */}
-        {phase === "form" && (
+        {/* ── Buttons (form / testing phase) ── */}
+        {(phase === "form" || phase === "testing") && (
           <div className="flex flex-col gap-2.5">
             <button
               onClick={handleTest}

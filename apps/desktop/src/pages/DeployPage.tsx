@@ -328,54 +328,6 @@ const SSH_USER_PRESETS = [
   { user: "admin",    hint: "Debian (AWS)" },
 ] as const;
 
-// ── CPS 推广链接（服务端跳转，ID 永远不出现在源码里）────────────────────────────
-// 所有请求先到 Cloudflare Worker（infra/refer-worker），由服务端附加真实 ID 后跳转。
-// 即使有人 fork 并把 REFER_BASE 改成别的域名，那是他们自己的服务，不影响你的佣金。
-// 修改推广 ID 只需: wrangler secret put AFFILIATE_ALIYUN（无需重新打包 App）
-const REFER_BASE = "https://refer.clawno11.ai";
-
-const CLOUD_AFFILIATES = [
-  {
-    group:  "domestic" as const,
-    id:     "aliyun",
-    name:   "阿里云 ECS",
-    badge:  "新用户特惠",
-    spec:   "2核 4GB · Ubuntu / CentOS",
-    url:    `${REFER_BASE}/aliyun`,
-  },
-  {
-    group:  "domestic" as const,
-    id:     "tencent",
-    name:   "腾讯云 CVM",
-    badge:  "限时折扣",
-    spec:   "2核 4GB · 高性价比",
-    url:    `${REFER_BASE}/tencent`,
-  },
-  {
-    group:  "international" as const,
-    id:     "digitalocean",
-    name:   "DigitalOcean",
-    badge:  "$200 试用金",
-    spec:   "2vCPU 4GB · 全球机房",
-    url:    `${REFER_BASE}/digitalocean`,
-  },
-  {
-    group:  "international" as const,
-    id:     "vultr",
-    name:   "Vultr",
-    badge:  "GPU 实例可选",
-    spec:   "2vCPU 4GB · 按时计费",
-    url:    `${REFER_BASE}/vultr`,
-  },
-  {
-    group:  "international" as const,
-    id:     "linode",
-    name:   "Linode / Akamai",
-    badge:  "老牌稳定",
-    spec:   "2vCPU 4GB · 长期分佣",
-    url:    `${REFER_BASE}/linode`,
-  },
-];
 
 export function DeployPage() {
   const { t } = useTranslation();
@@ -750,75 +702,7 @@ export function DeployPage() {
       {mode === "remote" && steps.length === 0 && !finalResult && (
         <div className="mb-5 space-y-3">
 
-          {/* ── ① 推荐云服务器（CPS 推广） ── */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 bg-muted/20">
-              <div className="flex items-center gap-2">
-                <Server size={14} className="text-primary flex-shrink-0" />
-                <span className="text-sm font-semibold text-foreground">还没有云服务器？</span>
-                <span className="text-xs text-muted-foreground hidden sm:inline">推荐配置：2核 4GB RAM · 公网 IP</span>
-              </div>
-            </div>
-
-            <div className="p-4 space-y-3">
-              {/* 国内推荐 */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2">🇨🇳 国内推荐</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {CLOUD_AFFILIATES.filter((p) => p.group === "domestic").map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => openInBrowser(p.url).catch(console.error)}
-                      className="flex flex-col items-start gap-1.5 p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 text-left transition-colors"
-                    >
-                      <div className="flex items-center justify-between w-full gap-1">
-                        <span className="text-sm font-semibold truncate">{p.name}</span>
-                        <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 font-medium">{p.badge}</span>
-                      </div>
-                      <span className="text-xs text-muted-foreground">{p.spec}</span>
-                      <div className="flex items-center gap-1 text-xs text-primary">
-                        <ExternalLink size={11} />
-                        <span>前往购买</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 国际推荐 */}
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-2">🌐 国际推荐（出海 / GPU）</p>
-                <div className="grid grid-cols-3 gap-2">
-                  {CLOUD_AFFILIATES.filter((p) => p.group === "international").map((p) => (
-                    <button
-                      key={p.id}
-                      type="button"
-                      onClick={() => openInBrowser(p.url).catch(console.error)}
-                      className="flex flex-col items-start gap-1.5 p-3 rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 text-left transition-colors"
-                    >
-                      <div className="flex items-center justify-between w-full gap-1">
-                        <span className="text-xs font-semibold truncate">{p.name}</span>
-                        <span className="flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-medium whitespace-nowrap">{p.badge}</span>
-                      </div>
-                      <span className="text-[11px] text-muted-foreground">{p.spec}</span>
-                      <div className="flex items-center gap-1 text-[11px] text-primary">
-                        <ExternalLink size={10} />
-                        <span>前往购买</span>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* 透明披露 */}
-              <p className="text-[10px] text-muted-foreground/70 leading-relaxed border-t border-border/40 pt-2.5">
-                🤝 通过以上链接购买服务器，OpenClaw 将获得少量推广佣金（不影响您的价格），用于支持项目持续开发与维护。感谢支持！
-              </p>
-            </div>
-          </div>
-
-          {/* ── ② SSH 连接信息指南（始终展开） ── */}
+          {/* ── SSH 连接信息指南（始终展开） ── */}
           <div className="rounded-xl border border-border overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 bg-muted/10 border-b border-border/50">
               <Info size={14} className="text-primary flex-shrink-0" />

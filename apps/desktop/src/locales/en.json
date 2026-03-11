@@ -416,14 +416,10 @@
     "remoteAccessTitle": "Remote Access Tunnels",
     "comingSoon": "Coming Soon",
     "mobileQr": {
-      "title": "Secure Mobile App QR Pairing",
-      "desc": "OTP token + PIN confirmation, auto-expires in 2 minutes, screenshot-safe",
-      "pinLabel": "Pairing Confirmation Code",
-      "pinHint": "After scanning, the app will ask you to confirm this code matches",
+      "title": "Mobile App QR Connect",
+      "desc": "One-time OTP token, auto-expires in 2 minutes, scan to connect",
       "step1": "Install ClawNo.11 on your phone",
-      "step2": "Open App → Connect tab → tap 'Paste Connection Link'",
-      "step3": "After scanning, the app shows a 6-char pairing code",
-      "step4": "Verify the phone's code matches the desktop PIN above, then tap 'Confirm'",
+      "step2": "Open App → Connect tab → tap 'Scan QR Code' and point at this QR code",
       "noLan": "No LAN IP detected. Please connect to WiFi or Ethernet.",
       "noLanWarn": "No LAN IP detected — QR code cannot be generated. Connect to a local network first.",
       "genError": "Generation failed. Please try refreshing.",
@@ -467,7 +463,7 @@
       "testFirst": "Complete the connection test first"
     },
     "tailscale": {
-      "title": "Tailscale VPN (Outside China)",
+      "title": "Tailscale VPN",
       "subtitle": "Securely access your home AI from any network",
       "connected": "Tailscale Connected",
       "notRunning": "Tailscale Installed but Not Running",
@@ -483,9 +479,9 @@
       "startHint": "Tailscale is installed. Please open the Tailscale client, sign in, and refresh."
     },
     "xedge": {
-      "title": "xEdge (China — Easiest)",
-      "subtitle": "WeChat login · No public server · Lowest friction",
-      "desc": "xEdge is a Tailscale-compatible mesh networking tool built for China. Log in with WeChat, devices automatically receive 100.x.x.x IPs via Chinese relay nodes. Free tier: 20 devices, 1 GB relay traffic/month.",
+      "title": "xEdge (WeChat Login — Easiest)",
+      "subtitle": "WeChat login · No public server · Zero-config networking",
+      "desc": "xEdge is a Tailscale-compatible mesh networking tool. Log in with WeChat, devices automatically receive 100.x.x.x IPs via relay nodes. Free tier: 20 devices, 1 GB relay traffic/month.",
       "guideTitle": "Setup (~3 minutes)",
       "step1": "Download and install the xEdge client on this machine (the one running ClawNo.11)",
       "step2": "Open the xEdge client, scan the QR code with WeChat — this machine automatically joins your private network and receives a 100.x.x.x IP",

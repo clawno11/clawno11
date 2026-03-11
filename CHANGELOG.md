@@ -10,11 +10,11 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - Mobile app (Android / iOS) built on Tauri 2 for remote gateway management
-- AI provider recommendations with referral links in mobile Settings page
-- Cloud server recommendations with referral links in mobile More page
-- Cloudflare Worker (`refer.clawno11.ai`) for secure affiliate ID management
+- AI provider quick-start guides in mobile Settings page (direct official links, no affiliates)
 - Privacy Policy (PRIVACY.md) for app store compliance
 - CONTRIBUTING.md and CODE_OF_CONDUCT.md
+- Bearer Token authentication for chat proxy (LAN-accessible REST endpoint)
+- SSH input validation (host/username sanitization)
 
 ### Fixed
 - P0: Removed `deployLocal` IPC call referencing unregistered Rust command
@@ -26,10 +26,12 @@ This project adheres to [Semantic Versioning](https://semver.org/).
 - P3: Fixed `budgetOver` translation having unfilled `{{used}}/{{limit}}` placeholders
 - P3: Converted hardcoded Chinese strings in MorePage/SettingsPage to i18n keys
 
+### Removed
+- All CPS/affiliate referral links and Cloudflare Worker redirect service
+- Cloud server recommendation sections from desktop Deploy and mobile More pages
+
 ### Changed
 - GitHub repo URL updated to `github.com/clawno11/clawno11`
-- Referral base URL changed from `refer.openclaw.dev` to `refer.clawno11.ai`
-- Cloudflare Worker renamed to `clawno11-refer`
 
 ---
 

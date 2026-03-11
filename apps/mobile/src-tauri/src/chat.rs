@@ -16,6 +16,7 @@ pub async fn stream_chat(
     messages: Vec<Value>,
     req_id: String,
     model: Option<String>,
+    auth_token: Option<String>,
 ) -> Result<(), String> {
     let url = format!(
         "{}/v1/chat/completions",
@@ -34,12 +35,18 @@ pub async fn stream_chat(
         .build()
         .map_err(|e| e.to_string())?;
 
-    let response = match client
+    let mut request = client
         .post(&url)
         .header("Content-Type", "application/json")
-        .json(&body)
-        .send()
-        .await
+        .json(&body);
+
+    if let Some(ref token) = auth_token {
+        if !token.is_empty() {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+    }
+
+    let response = match request.send().await
     {
         Ok(r) => r,
         Err(e) => {

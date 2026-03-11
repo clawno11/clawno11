@@ -16,7 +16,7 @@ target
 .env
 .env.local
 .env.*.local
-# Production secrets (affiliate IDs etc.) — never commit real IDs
+# Production secrets — never commit
 .env.production
 .env.production.local
 
@@ -54,10 +54,15 @@ apps/mobile/src-tauri/target
 
 # Android build outputs (generated, not committed)
 apps/mobile/src-tauri/gen/android/app/build/
+apps/mobile/src-tauri/gen/android/build/
 apps/mobile/src-tauri/gen/android/.gradle/
 apps/mobile/src-tauri/gen/android/buildSrc/.gradle/
 apps/mobile/src-tauri/gen/android/buildSrc/build/
 apps/mobile/src-tauri/gen/android/buildSrc/.kotlin/
+
+# Android generated assets & native libs (Tauri auto-generates these on build)
+apps/mobile/src-tauri/gen/android/app/src/main/assets/
+apps/mobile/src-tauri/gen/android/app/src/main/jniLibs/
 
 # Android signing secrets (NEVER commit these)
 apps/mobile/src-tauri/gen/android/keystore.properties
@@ -81,3 +86,11 @@ apps/mobile/bugreport-*.zip
 apps/mobile/src/**/*.js
 apps/mobile/src/**/*.js.map
 apps/mobile/vite.config.js
+
+# Rust incremental compilation & dep-info (should be covered by `target` above,
+# but explicit patterns ensure coverage on all platforms)
+**/*.d
+**/incremental/
+
+# TOFU SSH known hosts (user data, not project config)
+.clawno11/

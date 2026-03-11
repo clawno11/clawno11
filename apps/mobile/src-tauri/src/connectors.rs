@@ -74,7 +74,56 @@ pub async fn probe_gateway_url(url: String) -> Result<bool, String> {
         .map_err(|e| e.to_string())?;
 
     match client.get(&health_url).send().await {
-        Ok(r) => Ok(r.status().as_u16() < 500),
-        Err(_) => Ok(false),
+        Ok(r) => {
+            eprintln!("[probe] {} → HTTP {}", health_url, r.status().as_u16());
+            Ok(r.status().as_u16() < 500)
+        }
+        Err(e) => {
+            eprintln!("[probe] {} → ERROR: {e}", health_url);
+            Ok(false)
+        }
+    }
+}
+
+/// Fetch the chat proxy auth token from the desktop's chat proxy health endpoint.
+/// The desktop embeds `ck` in the /health JSON response so LAN clients can
+/// auto-discover the token without QR pairing.
+#[tauri::command]
+pub async fn fetch_chat_proxy_token(gateway_url: String) -> Result<Option<String>, String> {
+    let base = gateway_url.trim_end_matches('/');
+
+    // Replace the gateway port with 18800 using simple string manipulation.
+    let proxy_base = if let Some(scheme_end) = base.find("://") {
+        let after_scheme = &base[scheme_end + 3..];
+        let (host_part, _path) = after_scheme.split_once('/').unwrap_or((after_scheme, ""));
+        let host_no_port = host_part.split(':').next().unwrap_or(host_part);
+        format!("{}://{}:18800", &base[..scheme_end], host_no_port)
+    } else {
+        return Ok(None);
+    };
+    let proxy_url = format!("{proxy_base}/health");
+
+    eprintln!("[fetch_chat_proxy_token] probing {proxy_url}");
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    match client.get(&proxy_url).send().await {
+        Ok(r) if r.status().is_success() => {
+            let body: serde_json::Value = r.json().await.unwrap_or_default();
+            let token = body.get("ck").and_then(|v| v.as_str()).map(|s| s.to_string());
+            eprintln!("[fetch_chat_proxy_token] got token: {}", token.is_some());
+            Ok(token)
+        }
+        Ok(r) => {
+            eprintln!("[fetch_chat_proxy_token] HTTP {}", r.status().as_u16());
+            Ok(None)
+        }
+        Err(e) => {
+            eprintln!("[fetch_chat_proxy_token] error: {e}");
+            Ok(None)
+        }
     }
 }

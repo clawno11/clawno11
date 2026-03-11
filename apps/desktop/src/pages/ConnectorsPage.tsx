@@ -552,7 +552,7 @@ function XEdgePanel() {
             <h2 className="font-semibold text-sm">{t("connectors.xedge.title")}</h2>
             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white"
               style={{ background: "linear-gradient(135deg,#06b6d4,#0891b2)" }}>
-              国内首选
+              推荐
             </span>
           </div>
           <p className="text-xs text-muted-foreground">{t("connectors.xedge.subtitle")}</p>
@@ -751,30 +751,13 @@ function MobileQrPanel() {
           )}
         </div>
 
-        {/* Right column: PIN + steps */}
+        {/* Right column: steps */}
         <div className="flex-1 space-y-4 min-w-0">
-          {/* PIN box — prominent, always visible */}
-          {payload && !expired && (
-            <div className="rounded-xl border-2 border-primary/20 bg-primary/5 p-3 text-center">
-              <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">
-                {t("connectors.mobileQr.pinLabel")}
-              </p>
-              <p className="text-2xl font-black tracking-[0.25em] text-primary font-mono">
-                {payload.pin}
-              </p>
-              <p className="text-[10px] text-muted-foreground mt-1">
-                {t("connectors.mobileQr.pinHint")}
-              </p>
-            </div>
-          )}
-
           {/* Steps */}
           <ol className="space-y-2">
             {[
               t("connectors.mobileQr.step1"),
               t("connectors.mobileQr.step2"),
-              t("connectors.mobileQr.step3"),
-              t("connectors.mobileQr.step4"),
             ].map((s, i) => (
               <li key={i} className="flex items-start gap-2 text-sm text-muted-foreground">
                 <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center flex-shrink-0 mt-0.5">

@@ -4,15 +4,22 @@
   "version": "0.1.0",
   "identifier": "ai.clawno11.mobile",
   "build": {
-    "beforeDevCommand": "bash -c 'lsof -ti:1421 > /dev/null 2>&1 || (pnpm --filter @clawno/openclaw-client build && pnpm --filter @clawno/mobile run dev)'",
+    "beforeDevCommand": "pnpm --filter @clawno/openclaw-client build && pnpm --filter @clawno/mobile run dev",
     "devUrl": "http://localhost:1421",
     "beforeBuildCommand": "pnpm --filter @clawno/openclaw-client build && pnpm --filter @clawno/mobile run build",
     "frontendDist": "../dist"
   },
   "app": {
     "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "ClawNo.11",
+        "width": 400,
+        "height": 800
+      }
+    ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://* https://* ws://* wss://*; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;"
+      "csp": null
     }
   },
   "bundle": {

@@ -34,7 +34,7 @@ impl BotManager {
 
     /// Create a new running-flag for `name`, stopping any previously running instance.
     pub fn start_flag(&self, name: &str) -> Arc<AtomicBool> {
-        let mut map = self.running.lock().unwrap();
+        let mut map = self.running.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(old) = map.get(name) {
             old.store(false, Ordering::Relaxed);
         }
@@ -422,7 +422,8 @@ async fn discord_gateway_loop(token: String, port: u16, stop: Arc<AtomicBool>) {
                                     let reply = call_ai_gateway(port, &query).await;
                                     // Discord has a 2000-char message limit; truncate if needed.
                                     let reply = if reply.len() > 1980 {
-                                        format!("{}…", &reply[..1977])
+                                        let truncated: String = reply.chars().take(1977).collect();
+                                        format!("{truncated}…")
                                     } else {
                                         reply
                                     };

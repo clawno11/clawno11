@@ -9,6 +9,8 @@
 ///   2. Password
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::collections::HashMap;
 use std::time::Duration;
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -30,20 +32,65 @@ pub struct SshArgs {
     pub gateway_port: u16,
 }
 
-// ── russh client handler — accepts all server host keys ───────────────────────
+// ── TOFU (Trust On First Use) SSH host key verification ───────────────────────
+//
+// First connection to a host:port → accept the key and persist its fingerprint.
+// Subsequent connections → reject if the fingerprint has changed (MITM defence).
+// Known hosts are stored in ~/.clawno11/ssh_known_hosts.json.
 
-struct AcceptAllHandler;
+fn known_hosts_path() -> String {
+    crate::platform::path_join(
+        &crate::platform::path_join(&crate::platform::user_home(), ".clawno11"),
+        "ssh_known_hosts.json",
+    )
+}
+
+fn load_known_hosts() -> HashMap<String, String> {
+    std::fs::read_to_string(known_hosts_path())
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_known_host(host_id: &str, fingerprint: &str) {
+    let path = known_hosts_path();
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let mut hosts = load_known_hosts();
+    hosts.insert(host_id.to_string(), fingerprint.to_string());
+    let _ = std::fs::write(&path, serde_json::to_string_pretty(&hosts).unwrap_or_default());
+}
+
+struct TofuHandler {
+    expected_fp: Option<String>,
+    actual_fp: Arc<std::sync::Mutex<Option<String>>>,
+    rejected: Arc<AtomicBool>,
+}
 
 #[async_trait]
-impl russh::client::Handler for AcceptAllHandler {
+impl russh::client::Handler for TofuHandler {
     type Error = russh::Error;
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh_keys::key::PublicKey,
+        server_public_key: &russh_keys::key::PublicKey,
     ) -> Result<bool, Self::Error> {
-        // Accept any host key; a production tool would verify the fingerprint here.
-        Ok(true)
+        use russh_keys::PublicKeyBase64;
+        let fp = format!("{}:{}", server_public_key.name(), server_public_key.public_key_base64());
+
+        if let Ok(mut guard) = self.actual_fp.lock() {
+            *guard = Some(fp.clone());
+        }
+
+        match &self.expected_fp {
+            None => Ok(true),
+            Some(expected) if expected == &fp => Ok(true),
+            Some(_) => {
+                self.rejected.store(true, Ordering::SeqCst);
+                Ok(false)
+            }
+        }
     }
 }
 
@@ -56,17 +103,38 @@ impl russh::client::Handler for AcceptAllHandler {
 async fn ssh_exec(args: &SshArgs, script: &str) -> Result<(u32, String), String> {
     use russh::ChannelMsg;
 
-    // 15-second connection timeout — prevents hanging on unreachable hosts.
-    // russh::client::Config has no timeout field; wrap the connect call with tokio::time::timeout.
+    let host_id = format!("{}:{}", args.host, args.port);
+    let known = load_known_hosts();
+    let expected_fp = known.get(&host_id).cloned();
+    let actual_fp = Arc::new(std::sync::Mutex::new(None));
+    let rejected = Arc::new(AtomicBool::new(false));
+
+    let handler = TofuHandler {
+        expected_fp: expected_fp.clone(),
+        actual_fp: Arc::clone(&actual_fp),
+        rejected: Arc::clone(&rejected),
+    };
+
     let config = Arc::new(russh::client::Config::default());
 
     let mut session = timeout(
         Duration::from_secs(15),
-        russh::client::connect(config, (args.host.as_str(), args.port), AcceptAllHandler),
+        russh::client::connect(config, (args.host.as_str(), args.port), handler),
     )
     .await
     .map_err(|_| "ssh-connect-timeout".to_string())?
-    .map_err(|e| format!("ssh-connect-failed:{e}"))?;
+    .map_err(|e| {
+        if rejected.load(Ordering::SeqCst) {
+            format!(
+                "ssh-host-key-changed:{host_id} — the server's host key has changed since the \
+                 last connection, which could indicate a man-in-the-middle attack. \
+                 If the server was legitimately re-provisioned, delete the entry in \
+                 ~/.clawno11/ssh_known_hosts.json and retry."
+            )
+        } else {
+            format!("ssh-connect-failed:{e}")
+        }
+    })?;
 
     // Authenticate — private key first, then password.
     let mut authed = false;
@@ -100,6 +168,15 @@ async fn ssh_exec(args: &SshArgs, script: &str) -> Result<(u32, String), String>
 
     if !authed {
         return Err("ssh-auth-failed".to_string());
+    }
+
+    // TOFU: persist the fingerprint after successful auth on first connection.
+    if expected_fp.is_none() {
+        if let Ok(guard) = actual_fp.lock() {
+            if let Some(ref fp) = *guard {
+                save_known_host(&host_id, fp);
+            }
+        }
     }
 
     // Wrap in bash heredoc.  The exec request goes through `/bin/sh -c`, which
@@ -150,6 +227,26 @@ fn last_line(out: &str) -> String {
         .to_string()
 }
 
+/// Reject obviously malicious SSH args before any connection attempt.
+fn validate_ssh_args(args: &SshArgs) -> Result<(), String> {
+    if args.host.is_empty() || args.host.len() > 253 {
+        return Err("invalid-host:empty or too long".into());
+    }
+    if args.host.contains(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == '`' || c == '$') {
+        return Err("invalid-host:contains disallowed characters".into());
+    }
+    if args.username.is_empty() || args.username.len() > 64 {
+        return Err("invalid-username:empty or too long".into());
+    }
+    if args.username.contains(|c: char| c.is_whitespace() || c == ';' || c == '|' || c == '&' || c == '`' || c == '$') {
+        return Err("invalid-username:contains disallowed characters".into());
+    }
+    if args.port == 0 {
+        return Err("invalid-port:0".into());
+    }
+    Ok(())
+}
+
 // ── Common PATH setup (inlined in each script, no shebang needed) ─────────────
 //
 // NVM, fnm, and the npm global bin directory are added to PATH so that
@@ -162,6 +259,9 @@ fn last_line(out: &str) -> String {
 
 #[tauri::command]
 pub async fn deploy_remote_connect(args: SshArgs) -> StepResult {
+    if let Err(e) = validate_ssh_args(&args) {
+        return StepResult::err(e);
+    }
     match ssh_exec(&args, "echo connection-ok && uname -srm 2>/dev/null || echo ok").await {
         Ok((0, out)) => StepResult::ok(format!("ssh-connected:{}", last_line(&out))),
         Ok((code, out)) => StepResult::err(format!("ssh-exit-{code}:{out}")),

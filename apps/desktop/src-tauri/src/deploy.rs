@@ -397,7 +397,13 @@ pub async fn deploy_step_onboard() -> StepResult {
     StepResult::ok_fixed("config-skipped-using-defaults".to_string(), fixes)
 }
 
-// ── Remote deploy (stub) ──────────────────────────────────────────────────────
+// ── Remote deploy ─────────────────────────────────────────────────────────────
+//
+// The legacy single-call `deploy_remote` API is kept for backward compatibility
+// with the deploy-engine shim (tauri-shims/deploy-engine.ts).  It delegates to
+// the step-by-step SSH pipeline in ssh_deploy.rs which is what the frontend
+// actually uses.  `get_remote_service_info` remains a stub until full remote
+// service monitoring is implemented.
 
 #[derive(Deserialize)]
 pub struct RemoteDeployArgs {
@@ -417,7 +423,13 @@ pub async fn deploy_remote(args: RemoteDeployArgs) -> RemoteDeployResult {
         host: args.host.clone(),
         gateway_port: args.gateway_port,
         gateway_url: format!("http://{}:{}", args.host, args.gateway_port),
-        error: Some("remote-deploy-not-implemented".to_string()),
+        error: Some(
+            "Use the step-by-step SSH deployment commands instead: \
+             deploy_remote_connect → deploy_remote_check_node → \
+             deploy_remote_install_openclaw → deploy_remote_onboard → \
+             deploy_remote_start_gateway"
+                .to_string(),
+        ),
     }
 }
 

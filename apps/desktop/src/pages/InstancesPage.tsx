@@ -21,9 +21,6 @@ import { verifyProviderKey, type VerifyStatus } from "../store/aiVerify";
 type CardAction = "idle" | "starting" | "restarting" | "stopping";
 
 // ── Featured AI providers shown as prominent cards (register + key input in one place) ──
-// 注册链接通过 Cloudflare Worker 中转（infra/refer-worker），ID 不出现在源码里
-const AI_REFER_BASE = "https://refer.clawno11.ai";
-
 const FEATURED_AI = [
   {
     id:          "zai" as const,
@@ -31,8 +28,8 @@ const FEATURED_AI = [
     name:        "智谱 AI (GLM)",
     badge:       "注册送额度",
     badgeClass:  "bg-emerald-50 border-emerald-200 text-emerald-700",
-    highlight:   "注册送免费额度 · GLM-4-Flash 低价 · 国内直连 · 无需翻墙",
-    registerUrl: `${AI_REFER_BASE}/zhipu`,
+    highlight:   "注册送免费额度 · GLM-4-Flash 低价 · 配置简单",
+    registerUrl: "https://open.bigmodel.cn/usercenter/apikeys",
     placeholder: "输入 API Key",
   },
   {
@@ -41,7 +38,7 @@ const FEATURED_AI = [
     name:        "OpenRouter",
     badge:       "含免费模型",
     badgeClass:  "bg-blue-50 border-blue-200 text-blue-700",
-    highlight:   "一个 Key 用遍所有模型 · 含免费 Llama / Phi · 支持国内支付",
+    highlight:   "一个 Key 用遍所有模型 · 含免费 Llama / Phi · 多种支付方式",
     registerUrl: "https://openrouter.ai/keys",
     placeholder: "sk-or-v1-...",
   },
@@ -49,9 +46,9 @@ const FEATURED_AI = [
     id:          "minimax" as const,
     emoji:       "🐋",
     name:        "MiniMax（海螺）",
-    badge:       "国内直连",
+    badge:       "注册送额度",
     badgeClass:  "bg-violet-50 border-violet-200 text-violet-700",
-    highlight:   "海螺 AI 背后的模型 · 国内直连 · 注册送免费额度",
+    highlight:   "海螺 AI 背后的模型 · 配置简单 · 注册送免费额度",
     registerUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     placeholder: "输入 API Key",
   },
@@ -69,34 +66,33 @@ interface ProviderPricing {
   priceNote: string;
 }
 const PROVIDER_PRICING: Record<string, ProviderPricing> = {
-  zai:         { hasFree: true,  freeLabel: "注册送额度",         range: "¥1+/1M",     priceNote: "注册送免费额度；GLM-4-Flash ¥0.1/1M，GLM-4-Air ¥1/1M，GLM-4 ¥100/1M（输入/输出同价）" },
-  minimax:     { hasFree: false,                                  range: "¥0.15–1/1M", priceNote: "abab5.5 ¥0.15/1M · abab6.5s ¥1/1M（输入=输出同价）" },
-  anthropic:   { hasFree: false,                                  range: "$0.25–75/1M", priceNote: "Haiku $0.25/$1.25 · Sonnet-3.5 $3/$15 · Opus $15/$75（输入/输出）" },
-  openai:      { hasFree: false,                                  range: "$0.15–60/1M", priceNote: "GPT-4o-mini $0.15/$0.60 · GPT-4o $2.5/$10 · o1 $15/$60（输入/输出）" },
-  openrouter:  { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "聚合平台，含大量免费开源模型（Llama、Phi 等），付费模型价格与官方相当" },
-  deepseek:    { hasFree: false,                                  range: "¥1–16/1M",   priceNote: "DeepSeek-V3 ¥1/$4 · DeepSeek-R1 ¥4/¥16（输入/输出）" },
-  moonshot:    { hasFree: false,                                  range: "¥12–60/1M",  priceNote: "moonshot-v1-8k ¥12/1M · 32k ¥24/1M · 128k ¥60/1M（输入=输出同价）" },
-  qwen:        { hasFree: false,                                  range: "¥0.5–120/1M",priceNote: "Turbo ¥2/$6 · Plus ¥4/$12 · Max ¥40/$120 · Long ¥0.5/$2（输入/输出）" },
-  doubao:      { hasFree: false,                                  range: "¥0.3–2/1M",  priceNote: "Doubao-Lite ¥0.30/$0.60 · Doubao-Pro ¥0.80/$2.00（输入/输出）" },
-  hunyuan:     { hasFree: true,  freeLabel: "混元Lite 免费",     range: "¥30+/1M",    priceNote: "混元Lite 免费；混元Standard ¥4.5/$5 · 混元Pro ¥30/$100（输入/输出）" },
-  spark:       { hasFree: true,  freeLabel: "Spark Lite 免费",                        priceNote: "Spark Lite 完全免费；Spark Pro ¥21/1M · Max ¥30/1M（输入=输出同价）" },
-  baichuan:    { hasFree: false,                                  range: "¥4–8/1M",    priceNote: "Baichuan3-Turbo ¥4/1M · Baichuan2-Turbo ¥8/1M（输入=输出同价）" },
-  stepfun:     { hasFree: false,                                  range: "¥38–150/1M", priceNote: "Step-1 ¥40/1M · Step-2 ¥38/$120 · Step-1v ¥150/1M（输入=输出或输入/输出）" },
-  lingyi:      { hasFree: false,                                  range: "¥0.99–20/1M",priceNote: "Yi-Lightning ¥0.99 · Yi-Medium ¥2.5 · Yi-Large ¥20/1M（输入=输出同价）" },
-  siliconflow: { hasFree: true,  freeLabel: "含大量免费模型",                          priceNote: "大量开源模型（Llama-3.1-8B、Qwen2.5-7B 等）完全免费；大参数模型 ¥1-4/1M" },
+  zai:         { hasFree: true,  freeLabel: "注册送额度",                              priceNote: "注册即送免费额度，多档模型可选，具体价格请查看官网" },
+  minimax:     { hasFree: false,                                                       priceNote: "多档模型可选，具体价格请查看官网" },
+  anthropic:   { hasFree: false,                                                       priceNote: "提供 Haiku / Sonnet / Opus 等多档模型，具体价格请查看官网" },
+  openai:      { hasFree: false,                                                       priceNote: "提供 GPT-4o-mini / GPT-4o / o1 等多档模型，具体价格请查看官网" },
+  openrouter:  { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "聚合平台，含多种免费开源模型，付费模型价格与各厂商官网一致" },
+  deepseek:    { hasFree: false,                                                       priceNote: "提供 DeepSeek-V3 / R1 等模型，具体价格请查看官网" },
+  moonshot:    { hasFree: false,                                                       priceNote: "提供不同上下文长度模型，具体价格请查看官网" },
+  qwen:        { hasFree: false,                                                       priceNote: "提供 Turbo / Plus / Max 等多档模型，具体价格请查看官网" },
+  doubao:      { hasFree: false,                                                       priceNote: "提供 Lite / Pro 等多档模型，具体价格请查看官网" },
+  hunyuan:     { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "混元Lite 免费可用，更多模型请查看官网" },
+  spark:       { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "Spark Lite 免费可用，更多模型请查看官网" },
+  baichuan:    { hasFree: false,                                                       priceNote: "提供 Turbo 等多档模型，具体价格请查看官网" },
+  stepfun:     { hasFree: false,                                                       priceNote: "提供多档模型，具体价格请查看官网" },
+  lingyi:      { hasFree: false,                                                       priceNote: "提供 Lightning / Medium / Large 等多档模型，具体价格请查看官网" },
+  siliconflow: { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "含多种免费开源模型，更多模型请查看官网" },
 };
 
 // direct: true  = OpenClaw 原生支持，配完即用
 // direct: false = 需先在 OpenRouter 里开通对应模型，再填 OpenRouter Key
 const AI_PROVIDERS = [
-  // ── 国内直连（优先推荐）
-  { id: "zai",         direct: true,  label: "智谱 AI / ZAI (GLM)",    placeholder: "...",          registerUrl: `${AI_REFER_BASE}/zhipu`,                                               tip: "注册即送免费额度，OpenClaw 直连，配完即可聊天" },
-  { id: "minimax",     direct: true,  label: "MiniMax（海螺）",         placeholder: "...",          registerUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key", tip: "OpenClaw 直连支持，注册送额度" },
-  // ── 国际直连
-  { id: "anthropic",   direct: true,  label: "Anthropic (Claude)",      placeholder: "sk-ant-api03-...", registerUrl: "https://console.anthropic.com/",                                  tip: "需要国际信用卡，国内用户建议用 OpenRouter 代替" },
-  { id: "openai",      direct: true,  label: "OpenAI (GPT)",            placeholder: "sk-proj-...",  registerUrl: "https://platform.openai.com/api-keys",                               tip: "需要国际手机号验证" },
+  // ── 原生支持
+  { id: "zai",         direct: true,  label: "智谱 AI / ZAI (GLM)",    placeholder: "...",          registerUrl: "https://open.bigmodel.cn/usercenter/apikeys",                            tip: "注册即送免费额度，配完即可聊天" },
+  { id: "minimax",     direct: true,  label: "MiniMax（海螺）",         placeholder: "...",          registerUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key", tip: "注册送额度，配置后即可使用" },
+  { id: "anthropic",   direct: true,  label: "Anthropic (Claude)",      placeholder: "sk-ant-api03-...", registerUrl: "https://console.anthropic.com/",                                  tip: "需在官网注册并获取 API Key" },
+  { id: "openai",      direct: true,  label: "OpenAI (GPT)",            placeholder: "sk-proj-...",  registerUrl: "https://platform.openai.com/api-keys",                               tip: "需在官网注册并获取 API Key" },
   // ── 通过 OpenRouter 中转（需先注册 OpenRouter）
-  { id: "openrouter",  direct: true,  label: "OpenRouter（聚合平台）",  placeholder: "sk-or-v1-...", registerUrl: "https://openrouter.ai/keys",                                          tip: "一个 Key 可用 DeepSeek/Claude/GPT 等所有模型，支持国内支付" },
+  { id: "openrouter",  direct: true,  label: "OpenRouter（聚合平台）",  placeholder: "sk-or-v1-...", registerUrl: "https://openrouter.ai/keys",                                          tip: "一个 Key 可用 DeepSeek/Claude/GPT 等多种模型" },
   { id: "deepseek",    direct: false, label: "DeepSeek（深度求索）",    placeholder: "sk-...",       registerUrl: "https://platform.deepseek.com/api_keys",                             tip: "需通过 OpenRouter 中转使用，建议直接配置 OpenRouter Key" },
   { id: "moonshot",    direct: false, label: "Moonshot / Kimi",         placeholder: "sk-...",       registerUrl: "https://platform.moonshot.cn/console/api-keys",                     tip: "需通过 OpenRouter 中转使用，建议直接配置 OpenRouter Key" },
   { id: "qwen",        direct: false, label: "阿里通义千问 (Qwen)",     placeholder: "sk-...",       registerUrl: "https://bailian.console.aliyun.com/",                                tip: "需通过 OpenRouter 中转使用，建议直接配置 OpenRouter Key" },

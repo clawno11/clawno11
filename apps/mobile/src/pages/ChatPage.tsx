@@ -24,6 +24,7 @@ import type { ChatMessage } from "@clawno/openclaw-client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { useInstanceStore, type ClawInstance } from "../store/instances";
+import { fetchChatProxyToken } from "../ipc";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { recordTokenUsage } from "../store/tokenLog";
@@ -41,6 +42,7 @@ import { logSecurityEvent } from "../store/securityEventStore";
 import { TopBar } from "../components/TopBar";
 
 const MAX_CONTEXT_CHARS = 32_000;
+const CHAT_PROXY_PORT = 18800;
 
 /**
  * Provider ID → cheapest available model.
@@ -48,11 +50,11 @@ const MAX_CONTEXT_CHARS = 32_000;
  * and stored by aiConfigStore (secureAiConfig prefix "ai_key_configured:").
  */
 const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string; badge: string }> = {
-  zhipu:      { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "¥0.1/1M" },
+  zhipu:      { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "低价" },
   openrouter: { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
-  minimax:    { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "¥0.15/1M" },
-  openai:     { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "$0.15/1M" },
-  anthropic:  { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "$0.25/1M" },
+  minimax:    { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "低价" },
+  openai:     { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "轻量" },
+  anthropic:  { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "轻量" },
 };
 
 function extractShellCommands(text: string): string[] {
@@ -249,7 +251,7 @@ function HistoryDrawer({
 export function ChatPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { instances } = useInstanceStore();
+  const { instances, lastChatProxyToken, setGlobalChatProxyToken, updateTokenByHost } = useInstanceStore();
   const { configured: configuredProviders } = useAiConfigStore();
 
   const [selectedId, setSelectedId]    = useState<string | null>(null);
@@ -281,6 +283,7 @@ export function ChatPage() {
 
   const bottomRef   = useRef<HTMLDivElement>(null);
   const inputRef    = useRef<HTMLTextAreaElement>(null);
+  const scrollBehaviorRef = useRef<ScrollBehavior>("instant");
   const mountedRef  = useRef(true);
   const isSendingRef = useRef(false);
   const cancelRef   = useRef(false);
@@ -349,7 +352,13 @@ export function ChatPage() {
   }, [selectedId, instances, configuredProviders]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    scrollBehaviorRef.current = "instant";
+  }, [currentSessionId]);
+
+  useEffect(() => {
+    if (messages.length === 0) return;
+    bottomRef.current?.scrollIntoView({ behavior: scrollBehaviorRef.current });
+    scrollBehaviorRef.current = "smooth";
   }, [messages]);
 
   // iOS WKWebView: visualViewport resize when keyboard appears
@@ -375,6 +384,21 @@ export function ChatPage() {
   const selectedInst = instances.find((i) => i.id === selectedId) ?? null;
   const gatewayUrl   = selectedInst?.httpUrl ?? "";
   const isOnline     = selectedInst?.health === "online";
+
+  /**
+   * Derive the chat proxy URL from the gateway URL.
+   * The openclaw gateway (port 18789) is WebSocket-only and has no REST chat
+   * endpoint.  The desktop's chat_proxy (port 18800) bridges REST ↔ CLI for us.
+   */
+  const getChatProxyUrl = useCallback((gUrl: string): string => {
+    try {
+      const u = new URL(gUrl);
+      u.port = String(CHAT_PROXY_PORT);
+      return u.origin;
+    } catch {
+      return gUrl;
+    }
+  }, []);
 
   const handleSelectSession = useCallback(async (session: ChatSession) => {
     cancelRef.current = true;
@@ -589,11 +613,28 @@ export function ChatPage() {
           isSendingRef.current = false;
         }, { once: true });
 
+        let authToken = selectedInst?.chatProxyToken ?? lastChatProxyToken ?? null;
+
+        if (!authToken && effectiveGatewayUrl) {
+          try {
+            const fetched = await fetchChatProxyToken(effectiveGatewayUrl);
+            if (fetched) {
+              authToken = fetched;
+              setGlobalChatProxyToken(fetched);
+              try {
+                const host = new URL(effectiveGatewayUrl).host;
+                if (host) updateTokenByHost(host, fetched);
+              } catch { /* ignore */ }
+            }
+          } catch { /* non-fatal */ }
+        }
+
         invoke("stream_chat", {
-          gatewayUrl: effectiveGatewayUrl,
+          gatewayUrl: getChatProxyUrl(effectiveGatewayUrl),
           messages: contextMsgs,
           reqId,
           model: effectiveModel,
+          authToken,
         }).catch((e: unknown) => {
           if (cancelRef.current || !mountedRef.current) return;
           unlistenChunk();
@@ -624,7 +665,7 @@ export function ChatPage() {
   }, [
     input, isStreaming, piiEnabled, selectedId, gatewayUrl, routingEnabled,
     ragEnabled, ragDocCount, currentSessionId, messages, instances, t,
-    activeModelInfo, selectedModel,
+    activeModelInfo, selectedModel, getChatProxyUrl,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Empty state ─────────────────────────────────────────────────────────

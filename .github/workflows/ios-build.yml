@@ -1,0 +1,127 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: '构建后上传到 TestFlight（需要配置 APP_STORE_CONNECT_API_KEY）'
+        required: false
+        default: 'false'
+
+env:
+  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+jobs:
+  build-ios:
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 15
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app/Contents/Developer
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust stable + iOS targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build openclaw-client
+        run: pnpm --filter @clawno/openclaw-client build
+
+      # Replace Team ID placeholder
+      - name: Set Apple Team ID
+        working-directory: apps/mobile
+        run: sed -i '' "s/YOUR_TEAM_ID/${{ secrets.APPLE_TEAM_ID }}/" src-tauri/tauri.conf.json
+
+      # Install Apple certificate and provisioning profile
+      - name: Install Apple certificate
+        env:
+          P12_BASE64: ${{ secrets.APPLE_CERTIFICATE_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
+          PROVISION_PATH=$RUNNER_TEMP/profile.mobileprovision
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+
+          echo -n "$P12_BASE64" | base64 --decode -o $CERTIFICATE_PATH
+          echo -n "$PROVISION_PROFILE_BASE64" | base64 --decode -o $PROVISION_PATH
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+
+          security import $CERTIFICATE_PATH -P "$P12_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp $PROVISION_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      # Initialize iOS project
+      - name: Tauri iOS init
+        working-directory: apps/mobile
+        run: pnpm tauri ios init
+
+      # Merge Info.plist permissions
+      - name: Merge Info.plist
+        working-directory: apps/mobile
+        run: |
+          PLIST_PATH="src-tauri/gen/apple/clawno-mobile_iOS/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :NSDocumentsFolderUsageDescription string '需要访问文档以导入知识库文件'" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string '需要访问本地网络以连接您的 OpenClaw AI 网关'" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string '_http._tcp'" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:1 string '_https._tcp'" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity dict" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsArbitraryLoads bool true" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST_PATH" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'ClawNo.11'" "$PLIST_PATH" || true
+
+      # Build iOS app
+      - name: Build iOS
+        working-directory: apps/mobile
+        run: pnpm tauri ios build --export-method app-store-connect
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+
+      # Upload IPA as artifact (always)
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClawNo11-iOS
+          path: apps/mobile/src-tauri/gen/apple/build/**/*.ipa
+          if-no-files-found: warn
+
+      # Upload to TestFlight (optional)
+      - name: Upload to TestFlight
+        if: inputs.upload_testflight == 'true'
+        working-directory: apps/mobile
+        run: |
+          xcrun altool --upload-app \
+            --type ios \
+            --file src-tauri/gen/apple/build/**/*.ipa \
+            --apiKey "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
+            --apiIssuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}"
+        env:
+          API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+
+      # Clean up keychain
+      - name: Clean up
+        if: always()
+        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true

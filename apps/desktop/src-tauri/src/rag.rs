@@ -36,7 +36,19 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
         return Err("文件路径为空".to_string());
     }
 
-    let p = Path::new(&path);
+    // Path traversal defence: canonicalize first, then reject if the raw input
+    // contained ".." segments.  Canonicalize resolves symlinks and relative
+    // components, so comparing against the raw path catches traversal attempts.
+    let canonical = tokio::fs::canonicalize(&path)
+        .await
+        .map_err(|e| format!("路径无效或文件不存在：{e}"))?;
+
+    let raw_components: Vec<_> = Path::new(&path).components().collect();
+    if raw_components.iter().any(|c| matches!(c, std::path::Component::ParentDir)) {
+        return Err("检测到路径遍历（..），已拒绝读取。".to_string());
+    }
+
+    let p = canonical.as_path();
 
     // Extract and normalise the extension for allowlist check.
     let ext = p
@@ -54,7 +66,7 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
     }
 
     // Reject oversized files before reading to prevent OOM.
-    let meta = tokio::fs::metadata(&path)
+    let meta = tokio::fs::metadata(&canonical)
         .await
         .map_err(|e| format!("无法读取文件信息：{e}"))?;
 
@@ -66,7 +78,7 @@ pub async fn read_text_file(path: String) -> Result<String, String> {
         ));
     }
 
-    tokio::fs::read_to_string(&path).await.map_err(|e| {
+    tokio::fs::read_to_string(&canonical).await.map_err(|e| {
         // Provide a helpful hint for the most common failure on Windows:
         // files saved by Notepad or other tools in GBK / GB2312 encoding.
         if e.kind() == std::io::ErrorKind::InvalidData {

@@ -2,18 +2,19 @@
  * ConnectPage — mobile-first server connection setup.
  *
  * Supports two connection methods:
- *  1. xEdge 干将互联 (recommended for mainland China)
- *  2. Tailscale VPN (for users outside China)
+ *  1. xEdge (WeChat login, easy setup)
+ *  2. Tailscale VPN (global, cross-platform)
  */
 import { useState, useEffect, useCallback } from "react";
 import {
   Network, ExternalLink, Wifi, WifiOff, Plus, CheckCircle2,
   AlertTriangle, Loader, ChevronDown, ChevronUp, Info, Zap,
-  QrCode, ClipboardPaste, Server, ChevronRight,
+  QrCode, ClipboardPaste, Server, ChevronRight, Camera,
 } from "lucide-react";
+import { scan, Format } from "@tauri-apps/plugin-barcode-scanner";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { getTailscaleStatus, probeGatewayUrl, type TailscaleStatus } from "../ipc";
+import { getTailscaleStatus, probeGatewayUrl, fetchChatProxyToken, type TailscaleStatus } from "../ipc";
 import { useInstanceStore, type ClawInstance } from "../store/instances";
 import { TopBar } from "../components/TopBar";
 
@@ -103,6 +104,8 @@ interface ParsedPairLink {
   pin: string;
   /** Verify-server port (optional — present only when desktop supports it). */
   verifyPort?: number;
+  /** Chat proxy Bearer token for authenticating REST chat requests (port 18800). */
+  chatKey?: string;
 }
 
 interface ParsedConnectLink {
@@ -124,8 +127,9 @@ function parsePairLink(raw: string): ParsedPairLink | null {
     const expiresAt = parseInt(parsed.searchParams.get("exp") ?? "0", 10);
     const vpRaw     = parsed.searchParams.get("vp");
     const verifyPort = vpRaw ? parseInt(vpRaw, 10) : undefined;
+    const chatKey   = parsed.searchParams.get("ck") ?? undefined;
     if (!host || !token || !expiresAt) return null;
-    return { host, name, token, expiresAt, pin: derivePin(token), verifyPort };
+    return { host, name, token, expiresAt, pin: derivePin(token), verifyPort, chatKey };
   } catch { return null; }
 }
 
@@ -244,16 +248,69 @@ function PinConfirmModal({
   );
 }
 
-// ── Paste / QR banner ─────────────────────────────────────────────────────
+// ── Scan / Paste QR banner ────────────────────────────────────────────────
+
+/** Consume a pairing token via the desktop verify micro-server (best-effort). */
+async function consumePairToken(pair: ParsedPairLink) {
+  if (!pair.verifyPort || pair.verifyPort <= 0) return;
+  const lanIp = pair.host.split(":")[0];
+  const verifyUrl = `http://${lanIp}:${pair.verifyPort}/pair/verify`;
+  try {
+    await fetch(verifyUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: pair.token }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    // Non-fatal — token TTL + single-use still protect against replay.
+  }
+}
 
 function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
-  onPairConfirmed: (url: string, name: string, method: ConnectMethod) => void;
+  onPairConfirmed: (url: string, name: string, method: ConnectMethod, chatKey?: string) => void;
   onLegacyParsed: (url: string, name: string, method: ConnectMethod) => void;
 }) {
   const { t } = useTranslation();
+  const [scanning, setScanning]     = useState(false);
   const [pasting, setPasting]       = useState(false);
   const [err, setErr]               = useState<string | null>(null);
   const [pendingPair, setPendingPair] = useState<ParsedPairLink | null>(null);
+
+  const finishPair = useCallback(async (pair: ParsedPairLink) => {
+    await consumePairToken(pair);
+    onPairConfirmed(`http://${pair.host}`, pair.name, "xedge", pair.chatKey);
+  }, [onPairConfirmed]);
+
+  const handleScan = async () => {
+    setScanning(true);
+    setErr(null);
+    try {
+      const result = await scan({ formats: [Format.QRCode] });
+      const content = result.content;
+
+      const pair = parsePairLink(content);
+      if (pair) {
+        if (pair.expiresAt <= Math.floor(Date.now() / 1000)) {
+          setErr(t("connect.qrExpiredErr"));
+          return;
+        }
+        await finishPair(pair);
+        return;
+      }
+
+      const legacy = parseConnectLink(content);
+      if (legacy) {
+        onLegacyParsed(legacy.url, legacy.name, legacy.method);
+      } else {
+        setErr(t("connect.qrInvalidErr"));
+      }
+    } catch {
+      setErr(t("connect.qrScanErr"));
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const handlePaste = async () => {
     setPasting(true);
@@ -261,7 +318,6 @@ function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
     try {
       const text = await navigator.clipboard.readText();
 
-      // Try new secure format first.
       const pair = parsePairLink(text);
       if (pair) {
         if (pair.expiresAt <= Math.floor(Date.now() / 1000)) {
@@ -272,7 +328,6 @@ function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
         return;
       }
 
-      // Fall back to legacy format.
       const legacy = parseConnectLink(text);
       if (legacy) {
         onLegacyParsed(legacy.url, legacy.name, legacy.method);
@@ -287,26 +342,8 @@ function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
   };
 
   const handlePinConfirm = async (host: string, name: string) => {
-    const url = `http://${host}`;
-    // Attempt to consume the token via the verify micro-server so the desktop
-    // can enforce single-use semantics.  We extract the LAN IP from the host
-    // (strip the gateway port) and use the verify port from the QR data.
-    if (pendingPair?.verifyPort && pendingPair.verifyPort > 0) {
-      const lanIp = host.split(":")[0];
-      const verifyUrl = `http://${lanIp}:${pendingPair.verifyPort}/pair/verify`;
-      try {
-        await fetch(verifyUrl, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ token: pendingPair.token }),
-          signal: AbortSignal.timeout(3000),
-        });
-      } catch {
-        // Verify failed (network error / desktop too old) — proceed anyway.
-        // PIN visual confirmation is still the primary security gate.
-      }
-    }
-    onPairConfirmed(url, name, "xedge");
+    if (pendingPair) await consumePairToken(pendingPair);
+    onPairConfirmed(`http://${host}`, name, "xedge", pendingPair?.chatKey);
     setPendingPair(null);
   };
 
@@ -328,23 +365,34 @@ function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
             <p className="text-sm font-semibold">{t("connect.qrTitle")}</p>
             <p className="text-xs text-[hsl(var(--muted-foreground))]">{t("connect.qrDesc")}</p>
           </div>
-          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-green-50 border border-green-200 text-green-700 flex-shrink-0">
-            OTP
-          </span>
         </div>
         <div className="p-4 space-y-3">
           <p className="text-xs text-[hsl(var(--muted-foreground))] leading-relaxed">
-            {t("connect.qrInstruction")}
+            {t("connect.qrScanInstruction")}
           </p>
+
+          {/* Primary: in-app QR scan */}
+          <button
+            onClick={handleScan}
+            disabled={scanning}
+            className="touch-btn w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
+            style={{ background: "linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary)/0.8))" }}
+          >
+            {scanning ? <Loader size={15} className="animate-spin" /> : <Camera size={15} />}
+            {t("connect.qrScanBtn")}
+          </button>
+
+          {/* Secondary: paste fallback */}
           <button
             onClick={handlePaste}
             disabled={pasting}
-            className="touch-btn w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-            style={{ background: "linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary)/0.8))" }}
+            className="touch-btn w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs text-[hsl(var(--muted-foreground))] disabled:opacity-50"
+            style={{ border: "1px solid hsl(var(--border))" }}
           >
-            {pasting ? <Loader size={14} className="animate-spin" /> : <ClipboardPaste size={14} />}
+            {pasting ? <Loader size={12} className="animate-spin" /> : <ClipboardPaste size={12} />}
             {t("connect.qrPasteBtn")}
           </button>
+
           {err && (
             <p className="text-xs text-red-500 flex items-center gap-1.5">
               <AlertTriangle size={12} /> {err}
@@ -361,7 +409,7 @@ function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
 export function ConnectPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { addOrUpdate } = useInstanceStore();
+  const { addOrUpdate, updateTokenByHost, setGlobalChatProxyToken } = useInstanceStore();
 
   const [method, setMethod]         = useState<ConnectMethod>("xedge");
   const [tailscale, setTailscale]   = useState<TailscaleStatus | null>(null);
@@ -369,6 +417,7 @@ export function ConnectPage() {
 
   const [url, setUrl]               = useState("");
   const [name, setName]             = useState("");
+  const [chatProxyToken, setChatProxyToken] = useState<string | undefined>();
   const [testing, setTesting]       = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; ms?: number } | null>(null);
   const [added, setAdded]           = useState(false);
@@ -407,6 +456,19 @@ export function ConnectPage() {
     try {
       const ok = await probeGatewayUrl(trimmed);
       setTestResult({ ok, ms: Date.now() - start });
+      if (ok && !chatProxyToken) {
+        try {
+          const token = await fetchChatProxyToken(trimmed);
+          if (token) {
+            setChatProxyToken(token);
+            setGlobalChatProxyToken(token);
+            try {
+              const host = new URL(trimmed).host;
+              if (host) updateTokenByHost(host, token);
+            } catch { /* ignore */ }
+          }
+        } catch { /* non-fatal */ }
+      }
     } catch {
       setTestResult({ ok: false });
     } finally {
@@ -427,6 +489,7 @@ export function ConnectPage() {
       port:       extractPort(trimmed),
       deployedAt: Date.now(),
       health:     "unknown",
+      chatProxyToken,
     };
     addOrUpdate(inst);
     setAdded(true);
@@ -435,13 +498,26 @@ export function ConnectPage() {
 
   const activeMethod = METHOD_META.find((m) => m.id === method)!;
 
-  const applyParsed = useCallback((parsedUrl: string, parsedName: string, parsedMethod: ConnectMethod) => {
+  const applyParsed = useCallback((parsedUrl: string, parsedName: string, parsedMethod: ConnectMethod, chatKey?: string) => {
+    // Always persist the chat proxy token globally so ANY instance (even one
+    // added manually with a different IP like 10.0.2.2) can authenticate.
+    if (chatKey) {
+      setGlobalChatProxyToken(chatKey);
+
+      // Also update existing instances whose host matches (best-effort).
+      try {
+        const host = new URL(parsedUrl).host;
+        if (host) updateTokenByHost(host, chatKey);
+      } catch { /* ignore */ }
+    }
+
     setUrl(parsedUrl);
     if (parsedName) setName(parsedName);
     setMethod(parsedMethod);
+    setChatProxyToken(chatKey);
     setTestResult(null);
     setAdded(false);
-  }, []);
+  }, [updateTokenByHost, setGlobalChatProxyToken]);
 
   return (
     <div className="flex flex-col h-full">
