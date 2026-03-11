@@ -361,8 +361,10 @@ pub async fn start_local_service(port: Option<u16>) -> StepResult {
 
 // ── Dashboard URL ─────────────────────────────────────────────────────────────
 
-fn openclaw_dashboard_url() -> Option<String> {
-    // Use the platform shell abstraction (cmd /C on Windows, sh -c on Unix).
+/// Try to get the dashboard URL by asking a running openclaw process.
+/// This works when openclaw is in PATH (Windows, Linux) but often fails on macOS
+/// due to GUI app PATH isolation.  It is used as an OPTIONAL enhancement only.
+fn openclaw_dashboard_url_from_cli() -> Option<String> {
     let out = crate::platform::shell_cmd("openclaw dashboard --no-open").ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     for line in text.lines() {
@@ -374,14 +376,31 @@ fn openclaw_dashboard_url() -> Option<String> {
     None
 }
 
+/// Scan common openclaw UI ports to find which one is actually listening.
+/// The UI port is always the gateway port + 2.  We probe a range of gateway
+/// ports (18789 ± 10) and return the first UI port that is reachable.
+fn find_listening_ui_port(hint_ui_port: u16) -> Option<u16> {
+    // Try the hinted port first
+    if is_port_listening(hint_ui_port) { return Some(hint_ui_port); }
+    // Scan gateway ports 18780..18800; UI = gateway + 2
+    for gw in 18780u16..=18800 {
+        let ui = gw + 2;
+        if ui != hint_ui_port && is_port_listening(ui) { return Some(ui); }
+    }
+    None
+}
+
 #[tauri::command]
 pub async fn get_browser_url(ui_port: Option<u16>) -> String {
-    if let Some(url) = openclaw_dashboard_url() {
+    // Priority 1: ask openclaw CLI for the actual dashboard URL (works on Windows/Linux)
+    if let Some(url) = openclaw_dashboard_url_from_cli() {
         return url;
     }
-    // Default gateway port is 18789; UI runs on port+2 = 18791.
-    let port = ui_port.unwrap_or(18789 + 2);
-    format!("http://127.0.0.1:{}/", port)
+    // Priority 2: use the port the frontend passed in (comes from deploy result)
+    let hint = ui_port.unwrap_or(18789 + 2);
+    // Priority 3: port discovery — maybe the instance uses a custom port
+    let actual = find_listening_ui_port(hint).unwrap_or(hint);
+    format!("http://127.0.0.1:{}/", actual)
 }
 
 // ── Open in system browser ────────────────────────────────────────────────────
