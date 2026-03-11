@@ -172,6 +172,22 @@ fn inject_bin_dir(bin_path: &str) -> String {
     parent
 }
 
+/// Resolve the nvm data directory, respecting custom NVM_DIR env var.
+/// Default: ~/.nvm  (override: export NVM_DIR=/custom/path in shell profile)
+#[cfg(not(target_os = "windows"))]
+fn nvm_dir() -> String {
+    // User may have set NVM_DIR to a custom location in their shell profile.
+    // The Tauri GUI process might not inherit this, so we try both.
+    if let Ok(dir) = std::env::var("NVM_DIR") {
+        let nvm_sh = format!("{dir}/nvm.sh");
+        if !dir.is_empty() && std::path::Path::new(&nvm_sh).exists() {
+            return dir;
+        }
+    }
+    // Standard default location
+    format!("{}/.nvm", crate::platform::user_home())
+}
+
 /// Source nvm.sh in a subprocess and run `which node` to get the absolute path
 /// to the currently active node binary.  This is the most reliable method for
 /// nvm-managed installations because it lets nvm resolve its own PATH instead of
@@ -181,13 +197,13 @@ fn inject_bin_dir(bin_path: &str) -> String {
 /// or an empty string if nvm is not installed or node is not found.
 #[cfg(not(target_os = "windows"))]
 fn nvm_which_node() -> String {
-    let home = crate::platform::user_home();
-    let nvm_sh = format!("{home}/.nvm/nvm.sh");
+    let nvm = nvm_dir();
+    let nvm_sh = format!("{nvm}/nvm.sh");
     if !std::path::Path::new(&nvm_sh).exists() {
         return String::new();
     }
     let cmd = format!(
-        "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" 2>/dev/null && which node 2>/dev/null"
+        "export NVM_DIR=\"{nvm}\" && . \"{nvm_sh}\" 2>/dev/null && which node 2>/dev/null"
     );
     let path = shell_output(&cmd).trim().to_string();
     if !path.is_empty() && std::path::Path::new(&path).exists() {
@@ -257,13 +273,13 @@ pub fn scan_openclaw_bin_dir() -> Option<String> {
             format!("{local}/clawno-npm-global/bin"),
         ];
         // nvm: scan all installed node versions for the openclaw binary
-        let nvm_dir = format!("{home}/.nvm/versions/node");
-        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+        let nvm_vers_dir = format!("{}/versions/node", nvm_dir());
+        if let Ok(entries) = std::fs::read_dir(&nvm_vers_dir) {
             let mut versions: Vec<String> = entries
                 .flatten()
                 .filter_map(|e| {
                     let s = e.file_name().to_string_lossy().to_string();
-                    if s.starts_with('v') { Some(format!("{nvm_dir}/{s}/bin")) } else { None }
+                    if s.starts_with('v') { Some(format!("{nvm_vers_dir}/{s}/bin")) } else { None }
                 })
                 .collect();
             versions.sort_by(|a, b| b.cmp(a)); // newest first
@@ -291,14 +307,14 @@ pub fn scan_openclaw_mjs() -> Option<String> {
     #[cfg(not(target_os = "windows"))]
     {
         // nvm: scan all node versions
-        let nvm_dir = format!("{home}/.nvm/versions/node");
-        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+        let nvm_vers_mjs = format!("{}/versions/node", nvm_dir());
+        if let Ok(entries) = std::fs::read_dir(&nvm_vers_mjs) {
             let mut versions: Vec<String> = entries
                 .flatten()
                 .filter_map(|e| {
                     let s = e.file_name().to_string_lossy().to_string();
                     if s.starts_with('v') {
-                        Some(format!("{nvm_dir}/{s}/lib/node_modules/openclaw/openclaw.mjs"))
+                        Some(format!("{nvm_vers_mjs}/{s}/lib/node_modules/openclaw/openclaw.mjs"))
                     } else {
                         None
                     }
@@ -350,26 +366,83 @@ pub fn scan_node_paths() -> Option<String> {
     let candidates = {
         let mut v = vec![
             format!("{home}/.volta/bin"),
-            format!("{home}/.fnm/current/bin"),
-            "/opt/homebrew/bin".to_string(),
-            "/usr/local/bin".to_string(),
+            "/opt/homebrew/bin".to_string(), // Apple Silicon Homebrew
+            "/usr/local/bin".to_string(),     // Intel Mac Homebrew / pkg installer
             "/usr/bin".to_string(),
             format!("{home}/.npm-global/bin"),
             format!("{home}/.local/bin"),
         ];
-        // nvm stores versions at ~/.nvm/versions/node/vX.Y.Z/bin — scan all of them
-        let nvm_dir = format!("{home}/.nvm/versions/node");
-        if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+
+        // ── nvm: scan all installed versions (respects custom NVM_DIR) ─────────
+        let nvm_base = nvm_dir();
+        let nvm_vers = format!("{nvm_base}/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_vers) {
             let mut versions: Vec<String> = entries
                 .flatten()
                 .filter_map(|e| {
                     let s = e.file_name().to_string_lossy().to_string();
-                    if s.starts_with('v') { Some(format!("{nvm_dir}/{s}/bin")) } else { None }
+                    if s.starts_with('v') { Some(format!("{nvm_vers}/{s}/bin")) } else { None }
                 })
                 .collect();
             versions.sort_by(|a, b| b.cmp(a)); // newest first
             for ver_bin in versions { v.insert(0, ver_bin); }
         }
+
+        // ── fnm: actual version directories (not just the current symlink) ──────
+        // fnm stores versions at ~/.local/share/fnm/node-versions/vX.Y.Z/installation/bin/
+        // The ~/.fnm/current/bin symlink only works in the active shell, not GUI apps.
+        for fnm_base in &[
+            format!("{home}/.local/share/fnm/node-versions"),
+            format!("{home}/.fnm/node-versions"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(fnm_base) {
+                let mut fnm_bins: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let s = e.file_name().to_string_lossy().to_string();
+                        if s.starts_with('v') {
+                            Some(format!("{fnm_base}/{s}/installation/bin"))
+                        } else { None }
+                    })
+                    .collect();
+                fnm_bins.sort_by(|a, b| b.cmp(a));
+                for bin in fnm_bins { v.insert(0, bin); }
+            }
+        }
+
+        // ── mise (formerly rtx): ~/.local/share/mise/installs/node/X.Y.Z/bin/ ──
+        let mise_dir = format!("{home}/.local/share/mise/installs/node");
+        if let Ok(entries) = std::fs::read_dir(&mise_dir) {
+            let mut mise_bins: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    // mise uses bare version numbers like "22.14.0" (no 'v' prefix)
+                    if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                        Some(format!("{mise_dir}/{s}/bin"))
+                    } else { None }
+                })
+                .collect();
+            mise_bins.sort_by(|a, b| b.cmp(a));
+            for bin in mise_bins { v.insert(0, bin); }
+        }
+
+        // ── asdf: ~/.asdf/installs/nodejs/X.Y.Z/bin/ ─────────────────────────
+        let asdf_dir = format!("{home}/.asdf/installs/nodejs");
+        if let Ok(entries) = std::fs::read_dir(&asdf_dir) {
+            let mut asdf_bins: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false) {
+                        Some(format!("{asdf_dir}/{s}/bin"))
+                    } else { None }
+                })
+                .collect();
+            asdf_bins.sort_by(|a, b| b.cmp(a));
+            for bin in asdf_bins { v.insert(0, bin); }
+        }
+
         v
     };
 
@@ -408,15 +481,15 @@ fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
     // macOS/Linux: nvm is a shell function — must source nvm.sh before calling it
     #[cfg(not(target_os = "windows"))]
     {
-        let home = crate::platform::user_home();
-        let nvm_sh = format!("{home}/.nvm/nvm.sh");
+        let nvm = nvm_dir();
+        let nvm_sh = format!("{nvm}/nvm.sh");
         if std::path::Path::new(&nvm_sh).exists() {
             fixes.push(format!("nvm-upgrade:{}", current_ver));
             // Install, set as default, AND get the path — all in ONE subprocess.
             // nvm use 22 only affects the current shell; alias default 22 persists.
             // Redirect nvm noise to /dev/null so stdout is only the `which node` result.
             let cmd = format!(
-                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" \
+                "export NVM_DIR=\"{nvm}\" && . \"{nvm_sh}\" \
                  && nvm install 22 >/dev/null 2>&1 \
                  && nvm use 22 >/dev/null 2>&1 \
                  && nvm alias default 22 >/dev/null 2>&1 \
@@ -474,8 +547,8 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
     // macOS/Linux: nvm first (fast, no brew-update overhead), then Homebrew, then guide user
     #[cfg(not(target_os = "windows"))]
     {
-        let home = crate::platform::user_home();
-        let nvm_sh = format!("{home}/.nvm/nvm.sh");
+        let nvm = nvm_dir();
+        let nvm_sh = format!("{nvm}/nvm.sh");
 
         // ── Strategy 1: nvm already installed — fastest path ──────────────────────────────
         if std::path::Path::new(&nvm_sh).exists() {
@@ -484,7 +557,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
             // This avoids the "nvm use only affects current shell" problem where a new
             // subprocess would see the old default version.
             let cmd = format!(
-                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" \
+                "export NVM_DIR=\"{nvm}\" && . \"{nvm_sh}\" \
                  && nvm install 22 >/dev/null 2>&1 \
                  && nvm use 22 >/dev/null 2>&1 \
                  && nvm alias default 22 >/dev/null 2>&1 \

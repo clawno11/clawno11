@@ -16,35 +16,61 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 /// Find the `pm2.cmd` (Windows) or `pm2` (Unix) binary path.
 /// Searching well-known locations avoids relying on cmd /C PATH quoting.
 pub fn find_pm2_cmd() -> Option<String> {
-    let roaming = data_roaming();
-    let local   = data_local();
+    let local = data_local();
 
+    // ── Windows: static known locations ──────────────────────────────────────
     #[cfg(target_os = "windows")]
-    let candidates = vec![
-        format!("{roaming}\\npm\\pm2.cmd"),
-        format!("{local}\\clawno-npm-global\\bin\\pm2.cmd"),
-        format!("{local}\\Programs\\nodejs\\pm2.cmd"),
-        r"C:\Program Files\nodejs\pm2.cmd".to_string(),
-    ];
-    #[cfg(not(target_os = "windows"))]
-    let candidates = vec![
-        "/opt/homebrew/bin/pm2".to_string(), // Apple Silicon Homebrew
-        "/usr/local/bin/pm2".to_string(),    // Intel Mac Homebrew / Linux
-        "/usr/bin/pm2".to_string(),
-        format!("{}/.npm-global/bin/pm2", crate::platform::user_home()),
-        format!("{}/clawno-npm-global/bin/pm2", local),
-    ];
-
-    for p in &candidates {
-        if std::path::Path::new(p).exists() {
-            return Some(p.clone());
+    {
+        let roaming = data_roaming();
+        let candidates = vec![
+            format!("{roaming}\\npm\\pm2.cmd"),
+            format!("{local}\\clawno-npm-global\\bin\\pm2.cmd"),
+            format!("{local}\\Programs\\nodejs\\pm2.cmd"),
+            r"C:\Program Files\nodejs\pm2.cmd".to_string(),
+        ];
+        for p in &candidates {
+            if std::path::Path::new(p).exists() { return Some(p.clone()); }
         }
     }
 
-    // Fallback: scan augmented PATH
+    // ── macOS/Linux: static + nvm version dirs ────────────────────────────
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = crate::platform::user_home();
+        let mut candidates = vec![
+            "/opt/homebrew/bin/pm2".to_string(), // Apple Silicon Homebrew
+            "/usr/local/bin/pm2".to_string(),    // Intel Mac Homebrew / Linux pkg
+            "/usr/bin/pm2".to_string(),
+            format!("{home}/.npm-global/bin/pm2"),
+            format!("{local}/clawno-npm-global/bin/pm2"),
+        ];
+        // Scan all nvm version directories — pm2 may be under any nvm-managed node.
+        // Respect custom NVM_DIR env var (falls back to ~/.nvm).
+        let nvm_base = std::env::var("NVM_DIR")
+            .ok()
+            .filter(|d| !d.is_empty() && std::path::Path::new(d).exists())
+            .unwrap_or_else(|| format!("{home}/.nvm"));
+        let nvm_vers = format!("{nvm_base}/versions/node");
+        if let Ok(entries) = std::fs::read_dir(&nvm_vers) {
+            let mut pm2_bins: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.starts_with('v') { Some(format!("{nvm_vers}/{s}/bin/pm2")) } else { None }
+                })
+                .collect();
+            pm2_bins.sort_by(|a, b| b.cmp(a)); // newest first (v22 before v20)
+            candidates.extend(pm2_bins);
+        }
+        for p in &candidates {
+            if std::path::Path::new(p).exists() { return Some(p.clone()); }
+        }
+    }
+
+    // ── Fallback: scan augmented PATH ─────────────────────────────────────
     let path_env = augmented_path();
     let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-    let bin  = if cfg!(target_os = "windows") { "pm2.cmd" } else { "pm2" };
+    let bin = if cfg!(target_os = "windows") { "pm2.cmd" } else { "pm2" };
     for dir in path_env.split(sep) {
         let candidate = path_join(dir, bin);
         if std::path::Path::new(&candidate).exists() {

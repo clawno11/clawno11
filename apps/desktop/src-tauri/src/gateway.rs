@@ -113,11 +113,33 @@ fn wait_for_port(port: u16, secs: u8) -> bool {
 
 // ── Node.js executable finder ─────────────────────────────────────────────────
 
+/// Extract a version major number from a binary path by looking for "/vX." or
+/// "/X." patterns — used as a fallback when we cannot execute the binary
+/// (e.g. quarantined on macOS, or wrong architecture under Rosetta 2).
+fn major_from_path(path: &str) -> u32 {
+    // Patterns: .../versions/node/v22.1.0/bin/node  OR  .../node-versions/v22.../
+    //           .../mise/installs/node/22.1.0/bin/node  (no 'v' prefix)
+    let path_lower = path.replace('\\', "/");
+    for segment in path_lower.split('/') {
+        let digits = segment.trim_start_matches('v');
+        if let Some(major_str) = digits.split('.').next() {
+            if let Ok(m) = major_str.parse::<u32>() {
+                // Sanity check: must look like a node version (10–99)
+                if m >= 10 && m < 100 && (segment.starts_with('v') || digits == segment) {
+                    return m;
+                }
+            }
+        }
+    }
+    0
+}
+
 /// Find the first `node` / `node.exe` binary in the current process PATH that
-/// is version 22 or newer.  Falls back to the first `node` binary found if none
-/// is ≥ 22.  This is used to embed an explicit path in the CJS gateway wrapper
-/// so the gateway always runs with the correct Node.js version, regardless of
-/// which node version pm2 itself was installed under.
+/// is version 22 or newer.  Falls back to path-name heuristics when the binary
+/// cannot be executed (quarantine, Rosetta, permissions).
+///
+/// This is embedded in the CJS gateway wrapper so the gateway always starts
+/// with a v22+ Node.js, regardless of which version pm2 itself uses.
 fn find_node_exe() -> String {
     #[cfg(target_os = "windows")]
     let exe_name = "node.exe";
@@ -127,30 +149,46 @@ fn find_node_exe() -> String {
     let path_env = std::env::var("PATH").unwrap_or_default();
     let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
 
-    let mut first_found = String::new();
+    // We do two passes:
+    //   pass 0 — candidates we can actually execute and confirm ≥ v22
+    //   pass 1 — candidates whose path name suggests ≥ v22 (binary unexecutable)
+    //   fallback — first binary we found regardless of version
+    let mut path_hint_v22 = String::new(); // exists but can't execute; path says v22+
+    let mut first_executable = String::new(); // can execute but < v22
+    let mut first_existing = String::new();   // exists but can't execute and no path hint
+
     for dir in path_env.split(sep) {
         let candidate = std::path::Path::new(dir).join(exe_name);
-        if candidate.exists() {
-            let candidate_str = candidate.to_string_lossy().to_string();
-            // Try to run it to verify the version
-            if let Ok(o) = std::process::Command::new(&candidate_str).arg("--version").output() {
+        if !candidate.exists() { continue; }
+        let s = candidate.to_string_lossy().to_string();
+
+        match std::process::Command::new(&s).arg("--version").output() {
+            Ok(o) => {
                 let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 let major = ver.trim_start_matches('v')
                     .split('.').next().unwrap_or("0")
                     .parse::<u32>().unwrap_or(0);
                 if major >= 22 {
-                    return candidate_str;
+                    return s; // ✓ confirmed v22+
                 }
-                if first_found.is_empty() {
-                    first_found = candidate_str;
+                if first_executable.is_empty() { first_executable = s; }
+            }
+            Err(_) => {
+                // Binary exists but cannot be executed — use path-name heuristic
+                if major_from_path(&s) >= 22 && path_hint_v22.is_empty() {
+                    path_hint_v22 = s;
+                } else if first_existing.is_empty() {
+                    first_existing = s;
                 }
-            } else if first_found.is_empty() {
-                first_found = candidate_str;
             }
         }
     }
-    // No v22+ found — return whatever we found, or just "node" as last resort
-    if first_found.is_empty() { exe_name.to_string() } else { first_found }
+
+    // Priority: path-hint v22+ > first executable (any ver) > first existing > bare name
+    if !path_hint_v22.is_empty() { return path_hint_v22; }
+    if !first_executable.is_empty() { return first_executable; }
+    if !first_existing.is_empty() { return first_existing; }
+    exe_name.to_string()
 }
 
 // ── CJS wrapper writer ────────────────────────────────────────────────────────
@@ -249,6 +287,10 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
     }
 
     cleanup_pm2_openclaw(&mut fixes);
+
+    // Clear historical pm2 logs so the user only sees logs from this fresh start.
+    // pm2 flush clears log files for all processes; harmless if openclaw was just deleted.
+    run_pm2(&["flush", "openclaw"]);
 
     let (pm2_ok, pm2_err) = pm2_start_with_retry(&wrapper_path, &mut fixes);
     if !pm2_ok {
