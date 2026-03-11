@@ -412,20 +412,28 @@ fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
         let nvm_sh = format!("{home}/.nvm/nvm.sh");
         if std::path::Path::new(&nvm_sh).exists() {
             fixes.push(format!("nvm-upgrade:{}", current_ver));
+            // Install, set as default, AND get the path — all in ONE subprocess.
+            // nvm use 22 only affects the current shell; alias default 22 persists.
+            // Redirect nvm noise to /dev/null so stdout is only the `which node` result.
             let cmd = format!(
-                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
+                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" \
+                 && nvm install 22 >/dev/null 2>&1 \
+                 && nvm use 22 >/dev/null 2>&1 \
+                 && nvm alias default 22 >/dev/null 2>&1 \
+                 && which node 2>/dev/null"
             );
-            shell_ok(&cmd);
-            // Ask nvm where the binary is after upgrade
-            let node_path = nvm_which_node();
-            if !node_path.is_empty() {
+            let node_path = shell_output(&cmd).trim().to_string();
+            if !node_path.is_empty() && std::path::Path::new(&node_path).exists() {
                 inject_bin_dir(&node_path);
                 let ver = std::process::Command::new(&node_path)
                     .arg("--version")
                     .output()
                     .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    .unwrap_or_else(|_| "22".to_string());
-                return StepResult::ok_fixed(if ver.is_empty() { "nvm-upgraded".to_string() } else { ver }, fixes);
+                    .unwrap_or_else(|_| "v22".to_string());
+                return StepResult::ok_fixed(
+                    if ver.is_empty() { "nvm-upgraded".to_string() } else { ver },
+                    fixes,
+                );
             }
         }
         if !shell_output("fnm --version").is_empty() {
@@ -469,41 +477,35 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
         let home = crate::platform::user_home();
         let nvm_sh = format!("{home}/.nvm/nvm.sh");
 
-        // ── 检测辅助：shell PATH 或直接路径都行 ────────────────────────────────────────────
-        let node_ver = || -> String {
-            let v = shell_output("node --version");
-            if !v.is_empty() { return v; }
-            node_version_direct() // Tauri sandbox PATH 隔离时用完整路径直接运行
-        };
-
         // ── Strategy 1: nvm already installed — fastest path ──────────────────────────────
         if std::path::Path::new(&nvm_sh).exists() {
             fixes.push("install-via-nvm".to_string());
+            // Install v22, set as default, AND get the path — all in ONE subprocess.
+            // This avoids the "nvm use only affects current shell" problem where a new
+            // subprocess would see the old default version.
             let cmd = format!(
-                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
+                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" \
+                 && nvm install 22 >/dev/null 2>&1 \
+                 && nvm use 22 >/dev/null 2>&1 \
+                 && nvm alias default 22 >/dev/null 2>&1 \
+                 && which node 2>/dev/null"
             );
-            let (ok, _, _) = shell_result(&cmd);
-            if ok {
-                // Ask nvm where it put node — most reliable, avoids PATH guessing
-                let node_path = nvm_which_node();
-                if !node_path.is_empty() {
-                    inject_bin_dir(&node_path);
-                    let ver = std::process::Command::new(&node_path)
-                        .arg("--version")
-                        .output()
-                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                        .unwrap_or_default();
-                    let ver = if ver.is_empty() {
-                        // Can't run it (maybe macOS quarantine), but nvm says it's installed
-                        fixes.push("nvm-binary-found-no-exec".to_string());
-                        "nvm-installed".to_string()
-                    } else { ver };
-                    return StepResult::ok_fixed(ver, fixes);
-                }
-                // nvm ok but even `which node` after sourcing nvm.sh found nothing
-                // — give up, tell user to restart (PATH will update after app restart)
-                return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
+            let node_path = shell_output(&cmd).trim().to_string();
+            if !node_path.is_empty() && std::path::Path::new(&node_path).exists() {
+                inject_bin_dir(&node_path);
+                let ver = std::process::Command::new(&node_path)
+                    .arg("--version")
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_default();
+                let ver = if ver.is_empty() {
+                    fixes.push("nvm-binary-found-no-exec".to_string());
+                    "nvm-installed".to_string()
+                } else { ver };
+                return StepResult::ok_fixed(ver, fixes);
             }
+            // `which node` returned nothing — PATH will update after app restart
+            return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
         }
 
         // ── Strategy 2: Homebrew (macOS only) ─────────────────────────────────────────────
@@ -547,16 +549,23 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
         );
         if std::path::Path::new(&nvm_sh).exists() {
             let cmd = format!(
-                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
+                "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" \
+                 && nvm install 22 >/dev/null 2>&1 \
+                 && nvm use 22 >/dev/null 2>&1 \
+                 && nvm alias default 22 >/dev/null 2>&1 \
+                 && which node 2>/dev/null"
             );
-            let (ok, _, _) = shell_result(&cmd);
-            if ok {
-                let ver = node_ver();
-                if node_major(&ver) >= 22 {
-                    return StepResult::ok_fixed(ver, fixes);
-                }
-                return StepResult::err_fixed(
-                    "node-install-failed: nvm ok but binary not found".to_string(), fixes,
+            let node_path = shell_output(&cmd).trim().to_string();
+            if !node_path.is_empty() && std::path::Path::new(&node_path).exists() {
+                inject_bin_dir(&node_path);
+                let ver = std::process::Command::new(&node_path)
+                    .arg("--version")
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_else(|_| "v22".to_string());
+                return StepResult::ok_fixed(
+                    if ver.is_empty() { "nvm-installed".to_string() } else { ver },
+                    fixes,
                 );
             }
         }
