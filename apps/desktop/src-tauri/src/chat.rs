@@ -346,12 +346,27 @@ async fn run_openclaw_agent(message: &str) -> Result<String, String> {
         c
     };
 
+    // On macOS/Linux, the `openclaw` shim script has a hardcoded shebang pointing to
+    // whichever node version was active when openclaw was installed (often v20 after nvm
+    // default was later upgraded to v22).  Running `node {openclaw.mjs} agent ...`
+    // with an explicit v22+ node path bypasses this shebang entirely.
     #[cfg(not(target_os = "windows"))]
     let mut cmd = {
-        let mut c = tokio::process::Command::new("openclaw");
-        c.args(["agent", "--agent", "main", "--json", "-m", message]);
-        c.env("PATH", &augmented);
-        c
+        // Prefer explicit v22+ node + openclaw.mjs to avoid shebang version mismatch.
+        let node_exe = crate::node::find_node_exe();
+        let mjs_path = crate::node::scan_openclaw_mjs();
+        if let Some(mjs) = mjs_path {
+            let mut c = tokio::process::Command::new(&node_exe);
+            c.args([&mjs, "agent", "--agent", "main", "--json", "-m", message]);
+            c.env("PATH", &augmented);
+            c
+        } else {
+            // Fallback: use the openclaw shim from PATH (may use wrong node version)
+            let mut c = tokio::process::Command::new("openclaw");
+            c.args(["agent", "--agent", "main", "--json", "-m", message]);
+            c.env("PATH", &augmented);
+            c
+        }
     };
 
     let out = cmd

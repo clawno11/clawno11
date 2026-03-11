@@ -112,84 +112,7 @@ fn wait_for_port(port: u16, secs: u8) -> bool {
 }
 
 // ── Node.js executable finder ─────────────────────────────────────────────────
-
-/// Extract a version major number from a binary path by looking for "/vX." or
-/// "/X." patterns — used as a fallback when we cannot execute the binary
-/// (e.g. quarantined on macOS, or wrong architecture under Rosetta 2).
-fn major_from_path(path: &str) -> u32 {
-    // Patterns: .../versions/node/v22.1.0/bin/node  OR  .../node-versions/v22.../
-    //           .../mise/installs/node/22.1.0/bin/node  (no 'v' prefix)
-    let path_lower = path.replace('\\', "/");
-    for segment in path_lower.split('/') {
-        let digits = segment.trim_start_matches('v');
-        if let Some(major_str) = digits.split('.').next() {
-            if let Ok(m) = major_str.parse::<u32>() {
-                // Sanity check: must look like a node version (10–99)
-                if m >= 10 && m < 100 && (segment.starts_with('v') || digits == segment) {
-                    return m;
-                }
-            }
-        }
-    }
-    0
-}
-
-/// Find the first `node` / `node.exe` binary in the current process PATH that
-/// is version 22 or newer.  Falls back to path-name heuristics when the binary
-/// cannot be executed (quarantine, Rosetta, permissions).
-///
-/// This is embedded in the CJS gateway wrapper so the gateway always starts
-/// with a v22+ Node.js, regardless of which version pm2 itself uses.
-fn find_node_exe() -> String {
-    #[cfg(target_os = "windows")]
-    let exe_name = "node.exe";
-    #[cfg(not(target_os = "windows"))]
-    let exe_name = "node";
-
-    let path_env = std::env::var("PATH").unwrap_or_default();
-    let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-
-    // We do two passes:
-    //   pass 0 — candidates we can actually execute and confirm ≥ v22
-    //   pass 1 — candidates whose path name suggests ≥ v22 (binary unexecutable)
-    //   fallback — first binary we found regardless of version
-    let mut path_hint_v22 = String::new(); // exists but can't execute; path says v22+
-    let mut first_executable = String::new(); // can execute but < v22
-    let mut first_existing = String::new();   // exists but can't execute and no path hint
-
-    for dir in path_env.split(sep) {
-        let candidate = std::path::Path::new(dir).join(exe_name);
-        if !candidate.exists() { continue; }
-        let s = candidate.to_string_lossy().to_string();
-
-        match std::process::Command::new(&s).arg("--version").output() {
-            Ok(o) => {
-                let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                let major = ver.trim_start_matches('v')
-                    .split('.').next().unwrap_or("0")
-                    .parse::<u32>().unwrap_or(0);
-                if major >= 22 {
-                    return s; // ✓ confirmed v22+
-                }
-                if first_executable.is_empty() { first_executable = s; }
-            }
-            Err(_) => {
-                // Binary exists but cannot be executed — use path-name heuristic
-                if major_from_path(&s) >= 22 && path_hint_v22.is_empty() {
-                    path_hint_v22 = s;
-                } else if first_existing.is_empty() {
-                    first_existing = s;
-                }
-            }
-        }
-    }
-
-    // Priority: path-hint v22+ > first executable (any ver) > first existing > bare name
-    if !path_hint_v22.is_empty() { return path_hint_v22; }
-    if !first_executable.is_empty() { return first_executable; }
-    if !first_existing.is_empty() { return first_existing; }
-    exe_name.to_string()
-}
+// Delegated to crate::node::find_node_exe() which is shared with chat.rs.
 
 // ── CJS wrapper writer ────────────────────────────────────────────────────────
 
@@ -198,7 +121,7 @@ fn write_cjs_wrapper(mjs: &str, port: u16, fixes: &mut Vec<String>) -> Option<St
     // Find the v22+ node binary and embed it explicitly.
     // Using process.execPath would inherit pm2's own node (which may be v20 if pm2
     // was installed before the nvm upgrade), causing "Node.js v22+ is required" crashes.
-    let node_exe = find_node_exe();
+    let node_exe = crate::node::find_node_exe();
     let node_exe_js = node_exe.replace('\\', "\\\\");
     let content = format!(
         concat!(

@@ -9,7 +9,7 @@ use crate::platform::{
 };
 use crate::types::StepResult;
 
-// ── npm error classification ─────────────────────────────────────────────────
+// ?? npm error classification ?????????????????????????????????????????????????
 
 #[derive(Debug, PartialEq)]
 pub enum NpmError {
@@ -42,7 +42,7 @@ pub fn classify_npm_error(stderr: &str, stdout: &str) -> NpmError {
     }
 }
 
-// ── npm install with automatic fallbacks ────────────────────────────────────
+// ?? npm install with automatic fallbacks ????????????????????????????????????
 
 pub fn npm_install_with_fallback(pkg: &str) -> (bool, String, Vec<String>) {
     let mut fixes: Vec<String> = Vec::new();
@@ -81,7 +81,7 @@ pub fn npm_install_with_fallback(pkg: &str) -> (bool, String, Vec<String>) {
             (false, format!("ssl-fix-failed: {}", first_line(&stderr2)), fixes)
         }
         NpmError::DiskFull => {
-            // wmic is Windows-only and deprecated on Win11 — use PowerShell as fallback.
+            // wmic is Windows-only and deprecated on Win11 ? use PowerShell as fallback.
             // On Unix report the error without the Windows-specific size query.
             #[cfg(target_os = "windows")]
             let detail = {
@@ -143,7 +143,7 @@ fn npm_install_user_prefix(pkg: &str, mut fixes: Vec<String>) -> (bool, String, 
     (true, format!("{pkg} installed to user prefix"), fixes)
 }
 
-// ── Node.js scan / install ───────────────────────────────────────────────────
+// ?? Node.js scan / install ???????????????????????????????????????????????????
 
 /// Parse the major version number from a `v24.0.0` style string.
 pub fn node_major(ver: &str) -> u32 {
@@ -153,6 +153,67 @@ pub fn node_major(ver: &str) -> u32 {
         .unwrap_or("0")
         .parse()
         .unwrap_or(0)
+}
+
+/// Extract a major version number from a binary path like `.../v22.1.0/bin/node`.
+/// Used as fallback when the binary cannot be executed (quarantine, Rosetta, etc.).
+fn major_from_path(path: &str) -> u32 {
+    let p = path.replace('\\', "/");
+    for segment in p.split('/') {
+        let digits = segment.trim_start_matches('v');
+        if let Some(m_str) = digits.split('.').next() {
+            if let Ok(m) = m_str.parse::<u32>() {
+                if m >= 10 && m < 100 { return m; }
+            }
+        }
+    }
+    0
+}
+
+/// Find the first `node` / `node.exe` binary in the current process PATH (including
+/// dirs injected during the deploy step) that is version 22 or newer.
+/// Falls back to path-name heuristics when the binary cannot be executed.
+///
+/// Used by the chat module and gateway CJS wrapper to bypass hardcoded
+/// shebangs in the openclaw/pm2 wrapper scripts.
+pub fn find_node_exe() -> String {
+    #[cfg(target_os = "windows")]
+    let exe_name = "node.exe";
+    #[cfg(not(target_os = "windows"))]
+    let exe_name = "node";
+
+    let path_env = std::env::var("PATH").unwrap_or_default();
+    let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+
+    let mut path_hint_v22 = String::new();
+    let mut first_executable = String::new();
+    let mut first_existing  = String::new();
+
+    for dir in path_env.split(sep) {
+        let candidate = std::path::Path::new(dir).join(exe_name);
+        if !candidate.exists() { continue; }
+        let s = candidate.to_string_lossy().to_string();
+        match std::process::Command::new(&s).arg("--version").output() {
+            Ok(o) => {
+                let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                let major = ver.trim_start_matches('v').split('.').next()
+                    .unwrap_or("0").parse::<u32>().unwrap_or(0);
+                if major >= 22 { return s; }
+                if first_executable.is_empty() { first_executable = s; }
+            }
+            Err(_) => {
+                if major_from_path(&s) >= 22 && path_hint_v22.is_empty() {
+                    path_hint_v22 = s;
+                } else if first_existing.is_empty() {
+                    first_existing = s;
+                }
+            }
+        }
+    }
+    if !path_hint_v22.is_empty() { return path_hint_v22; }
+    if !first_executable.is_empty() { return first_executable; }
+    if !first_existing.is_empty() { return first_existing; }
+    exe_name.to_string()
 }
 
 /// Inject a binary's parent directory into the current process PATH.
@@ -301,7 +362,7 @@ pub fn scan_openclaw_bin_dir() -> Option<String> {
                     if s.starts_with('v') { Some(format!("{nvm_vers_dir}/{s}/bin")) } else { None }
                 })
                 .collect();
-            versions.sort_by(|a, b| b.cmp(a)); // newest first
+            versions.sort(); // ascending ? newest ends up at insert-pos-0 after all inserts
             for ver_bin in versions { candidates.insert(0, ver_bin); }
         }
         for dir in &candidates {
@@ -346,7 +407,7 @@ pub fn scan_openclaw_mjs() -> Option<String> {
                     }
                 })
                 .collect();
-            versions.sort_by(|a, b| b.cmp(a));
+            versions.sort(); // ascending ? newest ends up at insert-pos-0 after all inserts
             for p in versions { candidates.insert(0, p); }
         }
         candidates.push(format!("{home}/.npm-global/lib/node_modules/openclaw/openclaw.mjs"));
@@ -428,7 +489,7 @@ pub fn scan_node_paths() -> Option<String> {
                         } else { None }
                     })
                     .collect();
-                fnm_vers.sort_by(|a, b| b.cmp(a)); // newest first
+                fnm_vers.sort(); // ascending ? newest ends up at insert-pos-0
                 for dir in fnm_vers { v.insert(0, dir); }
             }
         }
@@ -446,7 +507,7 @@ pub fn scan_node_paths() -> Option<String> {
             format!("{home}/.local/bin"),
         ];
 
-        // ── nvm: scan all installed versions (respects custom NVM_DIR) ─────────
+        // ?? nvm: scan all installed versions (respects custom NVM_DIR) ?????????
         let nvm_base = nvm_dir();
         let nvm_vers = format!("{nvm_base}/versions/node");
         if let Ok(entries) = std::fs::read_dir(&nvm_vers) {
@@ -457,11 +518,11 @@ pub fn scan_node_paths() -> Option<String> {
                     if s.starts_with('v') { Some(format!("{nvm_vers}/{s}/bin")) } else { None }
                 })
                 .collect();
-            versions.sort_by(|a, b| b.cmp(a)); // newest first
+            versions.sort(); // ascending ? newest ends up at insert-pos-0
             for ver_bin in versions { v.insert(0, ver_bin); }
         }
 
-        // ── fnm: actual version directories (not just the current symlink) ──────
+        // ?? fnm: actual version directories (not just the current symlink) ??????
         // fnm stores versions at ~/.local/share/fnm/node-versions/vX.Y.Z/installation/bin/
         // The ~/.fnm/current/bin symlink only works in the active shell, not GUI apps.
         for fnm_base in &[
@@ -483,7 +544,7 @@ pub fn scan_node_paths() -> Option<String> {
             }
         }
 
-        // ── mise (formerly rtx): ~/.local/share/mise/installs/node/X.Y.Z/bin/ ──
+        // ?? mise (formerly rtx): ~/.local/share/mise/installs/node/X.Y.Z/bin/ ??
         let mise_dir = format!("{home}/.local/share/mise/installs/node");
         if let Ok(entries) = std::fs::read_dir(&mise_dir) {
             let mut mise_bins: Vec<String> = entries
@@ -500,7 +561,7 @@ pub fn scan_node_paths() -> Option<String> {
             for bin in mise_bins { v.insert(0, bin); }
         }
 
-        // ── asdf: ~/.asdf/installs/nodejs/X.Y.Z/bin/ ─────────────────────────
+        // ?? asdf: ~/.asdf/installs/nodejs/X.Y.Z/bin/ ?????????????????????????
         let asdf_dir = format!("{home}/.asdf/installs/nodejs");
         if let Ok(entries) = std::fs::read_dir(&asdf_dir) {
             let mut asdf_bins: Vec<String> = entries
@@ -553,7 +614,7 @@ fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
             shell_ok("fnm install 22");
             shell_ok("fnm default 22");
             // fnm on Windows requires evaluating `fnm env` in the current shell to update
-            // PATH — that's not possible in a subprocess. Instead, scan the fnm version
+            // PATH ? that's not possible in a subprocess. Instead, scan the fnm version
             // directories directly and inject the v22 path into the current process.
             let ver2 = node_version_direct();
             if node_major(&ver2) >= 22 { return StepResult::ok_fixed(ver2, fixes); }
@@ -568,14 +629,14 @@ fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
             if node_major(&ver2) >= 22 { return StepResult::ok_fixed(ver2, fixes); }
         }
     }
-    // macOS/Linux: nvm is a shell function — must source nvm.sh before calling it
+    // macOS/Linux: nvm is a shell function ? must source nvm.sh before calling it
     #[cfg(not(target_os = "windows"))]
     {
         let nvm = nvm_dir();
         let nvm_sh = format!("{nvm}/nvm.sh");
         if std::path::Path::new(&nvm_sh).exists() {
             fixes.push(format!("nvm-upgrade:{}", current_ver));
-            // Install, set as default, AND get the path — all in ONE subprocess.
+            // Install, set as default, AND get the path ? all in ONE subprocess.
             // nvm use 22 only affects the current shell; alias default 22 persists.
             // Redirect nvm noise to /dev/null so stdout is only the `which node` result.
             let cmd = format!(
@@ -660,10 +721,10 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
         let nvm = nvm_dir();
         let nvm_sh = format!("{nvm}/nvm.sh");
 
-        // ── Strategy 1: nvm already installed — fastest path ──────────────────────────────
+        // ?? Strategy 1: nvm already installed ? fastest path ??????????????????????????????
         if std::path::Path::new(&nvm_sh).exists() {
             fixes.push("install-via-nvm".to_string());
-            // Install v22, set as default, AND get the path — all in ONE subprocess.
+            // Install v22, set as default, AND get the path ? all in ONE subprocess.
             // This avoids the "nvm use only affects current shell" problem where a new
             // subprocess would see the old default version.
             let cmd = format!(
@@ -687,15 +748,15 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
                 } else { ver };
                 return StepResult::ok_fixed(ver, fixes);
             }
-            // `which node` returned nothing — PATH will update after app restart
+            // `which node` returned nothing ? PATH will update after app restart
             return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
         }
 
-        // ── Strategy 2: Homebrew (macOS only) ─────────────────────────────────────────────
+        // ?? Strategy 2: Homebrew (macOS only) ?????????????????????????????????????????????
         #[cfg(target_os = "macos")]
         if !shell_output("brew --version").is_empty() {
             fixes.push("brew-install-node".to_string());
-            // HOMEBREW_NO_AUTO_UPDATE=1 skips `brew update` — saves 1-3 minutes
+            // HOMEBREW_NO_AUTO_UPDATE=1 skips `brew update` ? saves 1-3 minutes
             let (ok, _, _) = shell_result(
                 "HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 brew install node"
             );
@@ -725,7 +786,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
             }
         }
 
-        // ── Strategy 3: install nvm via curl, then install node 22 ────────────────────────
+        // ?? Strategy 3: install nvm via curl, then install node 22 ????????????????????????
         fixes.push("install-nvm-then-node".to_string());
         shell_ok(
             "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash",
@@ -760,7 +821,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
     }
 }
 
-// ── openclaw CLI ─────────────────────────────────────────────────────────────
+// ?? openclaw CLI ?????????????????????????????????????????????????????????????
 
 fn openclaw_semver(raw: &str) -> String {
     raw.lines()
@@ -773,17 +834,17 @@ fn openclaw_semver(raw: &str) -> String {
         .to_string()
 }
 
-// ── Tauri commands ───────────────────────────────────────────────────────────
+// ?? Tauri commands ???????????????????????????????????????????????????????????
 
 #[tauri::command]
 pub async fn deploy_step_check_node() -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
 
-    // ── 1. shell PATH 直接检测（augmented_path 已涵盖 nvm/brew 常见路径）────────
+    // ?? 1. shell PATH ?????augmented_path ??? nvm/brew ?????????????
     let ver = shell_output("node --version");
     if !ver.is_empty() && node_major(&ver) >= 22 { return StepResult::ok(ver); }
 
-    // ── 2. 文件系统扫描 + 直接执行（应对 augmented_path 遗漏的路径）────────────
+    // ?? 2. ?????? + ??????? augmented_path ??????????????????
     let ver_direct = node_version_direct();
     if !ver_direct.is_empty() {
         if node_major(&ver_direct) >= 22 {
@@ -793,7 +854,7 @@ pub async fn deploy_step_check_node() -> StepResult {
         return upgrade_node(&ver_direct, fixes);
     }
 
-    // ── 3. 让 nvm 自己报告 node 路径（最可靠：source nvm.sh + which node）────────
+    // ?? 3. ? nvm ???? node ???????source nvm.sh + which node?????????
     // This handles cases where node is installed via nvm but our path scan missed it.
     // nvm knows exactly where its binaries are; we just need to ask it.
     #[cfg(not(target_os = "windows"))]
@@ -814,20 +875,20 @@ pub async fn deploy_step_check_node() -> StepResult {
                 }
                 return upgrade_node(&ver, fixes);
             }
-            // Binary found but can't execute (quarantine / arch issue) — treat as ≥22
+            // Binary found but can't execute (quarantine / arch issue) ? treat as ?22
             // nvm only installs the requested version, so trust that it's correct
             fixes.push("found-via-nvm-which-no-exec".to_string());
             return StepResult::ok_fixed("found-via-nvm".to_string(), fixes);
         }
     }
 
-    // ── 4. 完全找不到 → 自动安装 ─────────────────────────────────────────────
+    // ?? 4. ????? ? ???? ?????????????????????????????????????????????
     install_node_auto(fixes)
 }
 
 #[tauri::command]
 pub async fn deploy_step_install_openclaw() -> StepResult {
-    // ── 1. Already installed? Check via shell then filesystem scan ───────────
+    // ?? 1. Already installed? Check via shell then filesystem scan ???????????
     let ver = shell_output("openclaw --version");
     let sv = openclaw_semver(&ver);
     if !sv.is_empty() { return StepResult::ok(format!("already-installed:{}", sv)); }
@@ -843,18 +904,18 @@ pub async fn deploy_step_install_openclaw() -> StepResult {
         return StepResult::ok("already-installed:found-via-scan".to_string());
     }
 
-    // ── 2. Not installed — run npm install ───────────────────────────────────
+    // ?? 2. Not installed ? run npm install ???????????????????????????????????
     let (ok, detail, fixes) = npm_install_with_fallback("openclaw");
     if !ok { return StepResult::err_fixed(detail, fixes); }
 
-    // ── 3. Verify install: shell first, filesystem scan as fallback ──────────
+    // ?? 3. Verify install: shell first, filesystem scan as fallback ??????????
     let ver2 = shell_output("openclaw --version");
     let sv2 = openclaw_semver(&ver2);
     if !sv2.is_empty() {
         return StepResult::ok_fixed(format!("installed:{}", sv2), fixes);
     }
 
-    // shell_output failed (PATH isolation) — scan filesystem directly
+    // shell_output failed (PATH isolation) ? scan filesystem directly
     if let Some(bin_dir) = scan_openclaw_bin_dir() {
         let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
         let current = std::env::var("PATH").unwrap_or_default();
@@ -875,7 +936,7 @@ pub async fn deploy_step_install_openclaw() -> StepResult {
 /// Runs `openclaw models status --json` and parses the JSON field:
 ///   `auth.providers[].provider`
 ///
-/// Returns an empty list on any error (non-fatal — UI falls back gracefully).
+/// Returns an empty list on any error (non-fatal ? UI falls back gracefully).
 #[tauri::command]
 pub async fn list_configured_providers() -> Vec<String> {
     let out = shell_output("openclaw models status --json");
@@ -925,9 +986,9 @@ pub async fn check_deploy_status() -> crate::types::DeployStatus {
 /// Force-reinstall openclaw to the latest published version.
 ///
 /// Update strategy (tried in order):
-///   1. `openclaw update` — OpenClaw's own self-update command (knows about
+///   1. `openclaw update` ? OpenClaw's own self-update command (knows about
 ///      channels/releases that pre-date npm publication).
-///   2. `npm install -g openclaw@latest --force` — always re-downloads even
+///   2. `npm install -g openclaw@latest --force` ? always re-downloads even
 ///      if npm thinks the installed version is current.
 ///
 /// Uses the same fallback chain as the initial install (mirrors, user-prefix).
@@ -943,7 +1004,7 @@ pub async fn update_openclaw() -> StepResult {
         fixes.push("self-update-ok".to_string());
     } else {
         // `openclaw update` either doesn't exist or reported a non-fatal status.
-        // Keep going — npm install is the definitive fallback.
+        // Keep going ? npm install is the definitive fallback.
         fixes.push(format!(
             "self-update-skipped:{}",
             first_line(&self_update_out).chars().take(60).collect::<String>()
@@ -975,7 +1036,7 @@ pub async fn update_openclaw() -> StepResult {
 pub async fn uninstall_local_instance() -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
 
-    // ── 1. Stop + remove from pm2 ─────────────────────────────────────────────
+    // ?? 1. Stop + remove from pm2 ?????????????????????????????????????????????
     let (stop_ok, _, _) = shell_result("pm2 stop openclaw");
     if stop_ok { fixes.push("pm2-stopped".to_string()); }
 
@@ -985,7 +1046,7 @@ pub async fn uninstall_local_instance() -> StepResult {
     // Persist the pm2 process list so openclaw doesn't resurrect after a reboot.
     let _ = shell_result("pm2 save");
 
-    // ── 2. Uninstall openclaw npm package ─────────────────────────────────────
+    // ?? 2. Uninstall openclaw npm package ?????????????????????????????????????
     // Try global uninstall first, then the user-prefix fallback path.
     let (global_ok, _, _) = shell_result("npm uninstall -g openclaw");
     if global_ok {
@@ -1003,14 +1064,14 @@ pub async fn uninstall_local_instance() -> StepResult {
         }
     }
 
-    // ── 3. Data directory left intact ─────────────────────────────────────────
+    // ?? 3. Data directory left intact ?????????????????????????????????????????
     // ~/.openclaw/ is preserved so the user can restore by re-deploying.
     fixes.push("data-preserved".to_string());
 
     StepResult::ok_fixed("uninstalled".to_string(), fixes)
 }
 
-// ── Unit tests ───────────────────────────────────────────────────────────────
+// ?? Unit tests ???????????????????????????????????????????????????????????????
 
 #[cfg(test)]
 mod tests {

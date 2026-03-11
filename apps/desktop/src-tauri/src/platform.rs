@@ -134,6 +134,9 @@ pub fn augmented_path() -> String {
         ];
         // nvm: dynamically scan all installed versions (e.g. v24.12.0, v22.5.1)
         // so we don't miss any patch/minor version.
+        // IMPORTANT: sort ASCENDING then insert at 0 each time — the last insert
+        // (= highest version) ends up at position 0.  Descending + insert(0) would
+        // accidentally put the OLDEST version first.
         let nvm_dir = format!("{home}/.nvm/versions/node");
         if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
             let mut versions: Vec<String> = entries
@@ -144,8 +147,7 @@ pub fn augmented_path() -> String {
                     if s.starts_with('v') { Some(s) } else { None }
                 })
                 .collect();
-            // Sort descending so newest version appears first in PATH.
-            versions.sort_by(|a, b| b.cmp(a));
+            versions.sort(); // ascending: v20 < v22 < v24 → last insert wins at pos 0
             for ver in versions {
                 v.insert(0, format!("{nvm_dir}/{ver}/bin"));
             }
