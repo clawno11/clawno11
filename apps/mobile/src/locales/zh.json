@@ -436,7 +436,8 @@
       "allowlist_remove": "白名单移除",
       "injection_detected": "注入攻击检测",
       "shell_audit": "Shell 命令审计",
-      "token_anomaly_kill": "异常流量 → 紧急断网"
+      "token_anomaly_kill": "异常流量 → 紧急断网",
+      "mcp_danger_detected": "危险 MCP 插件已拦截"
     }
   },
   "tokens": {

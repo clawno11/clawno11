@@ -10,6 +10,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
 import { DB_URL } from "./db";
+import { logSecurityEvent } from "./securityEventStore";
 
 // ── DB singleton ───────────────────────────────────────────────────────────
 
@@ -54,12 +55,21 @@ export interface McpServer {
   name: string;
   endpoint: string;
   transport: Transport;
+  /** Optional plain-text description of what this server does. */
+  description: string;
   enabled: boolean;
   riskLevel: RiskLevel;
   /** JSON-encoded string array of risk factor keys, stored in DB. */
   factors: string[];
   lastScanned: number | null;
   createdAt: number;
+}
+
+export interface McpCallSummary {
+  totalCalls: number;
+  blockedCalls: number;
+  recentTools: string[];
+  lastCallAt: number | null;
 }
 
 export interface McpScanResult {
@@ -84,15 +94,16 @@ export async function listServers(): Promise<McpServer[]> {
   const db = await getDb();
   const rows = await db.select<Array<{
     id: string; name: string; endpoint: string; transport: string;
-    enabled: number; risk_level: string; factors: string;
+    description: string; enabled: number; risk_level: string; factors: string;
     last_scanned: number | null; created_at: number;
   }>>(
-    `SELECT id, name, endpoint, transport, enabled, risk_level, factors, last_scanned, created_at
+    `SELECT id, name, endpoint, transport, description, enabled, risk_level, factors, last_scanned, created_at
      FROM mcp_servers ORDER BY created_at DESC`,
   );
   return rows.map((r) => ({
     id: r.id, name: r.name, endpoint: r.endpoint,
     transport: r.transport as Transport,
+    description: r.description ?? "",
     enabled: r.enabled === 1,
     riskLevel: r.risk_level as RiskLevel,
     factors: parseFactors(r.factors),
@@ -102,15 +113,15 @@ export async function listServers(): Promise<McpServer[]> {
 }
 
 export async function addServer(
-  name: string, endpoint: string, transport: Transport,
+  name: string, endpoint: string, transport: Transport, description = "",
 ): Promise<string> {
   const db  = await getDb();
   const id  = crypto.randomUUID();
   const now = Date.now();
   await db.execute(
-    `INSERT INTO mcp_servers (id, name, endpoint, transport, enabled, risk_level, factors, created_at)
-     VALUES ($1, $2, $3, $4, 1, 'unknown', '[]', $5)`,
-    [id, name, endpoint, transport, now],
+    `INSERT INTO mcp_servers (id, name, endpoint, transport, description, enabled, risk_level, factors, created_at)
+     VALUES ($1, $2, $3, $4, $5, 1, 'unknown', '[]', $6)`,
+    [id, name, endpoint, transport, description.trim(), now],
   );
   return id;
 }
@@ -150,6 +161,18 @@ export async function scanServer(server: McpServer): Promise<McpScanResult> {
 
   // Persist risk level + factors so they survive page reloads.
   await updateServerRisk(server.id, result.riskLevel, result.factors);
+
+  if (result.riskLevel === "danger") {
+    await toggleServer(server.id, false).catch(
+      (err) => console.error("[MCP] auto-disable failed:", err),
+    );
+
+    await logSecurityEvent(
+      "mcp_danger_detected",
+      `MCP server "${server.name}" rated danger. Factors: ${result.factors.join(", ")}. Auto-disabled.`,
+      "danger",
+    ).catch(() => {});
+  }
 
   // Record the security scan in the audit log.
   const argsPreview = `reachable=${result.reachable} factors=[${result.factors.join(", ")}]`;
@@ -198,4 +221,35 @@ export async function listAuditEntries(limit = 200): Promise<McpAuditEntry[]> {
 export async function clearAuditLog(): Promise<void> {
   const db = await getDb();
   await db.execute(`DELETE FROM mcp_audit`);
+}
+
+export async function getServerCallSummary(serverId: string): Promise<McpCallSummary> {
+  const db = await getDb();
+
+  const [counts] = await db.select<Array<{ total: number; blocked: number; last_at: number | null }>>(
+    `SELECT
+       COUNT(*)                                          AS total,
+       SUM(CASE WHEN outcome = 'blocked' THEN 1 ELSE 0 END) AS blocked,
+       MAX(created_at)                                   AS last_at
+     FROM mcp_audit
+     WHERE server_id = $1`,
+    [serverId],
+  );
+
+  const toolRows = await db.select<Array<{ tool_name: string }>>(
+    `SELECT DISTINCT tool_name
+     FROM mcp_audit
+     WHERE server_id = $1
+       AND tool_name != 'security_scan'
+     ORDER BY created_at DESC
+     LIMIT 5`,
+    [serverId],
+  );
+
+  return {
+    totalCalls:   counts?.total   ?? 0,
+    blockedCalls: counts?.blocked ?? 0,
+    recentTools:  toolRows.map((r) => r.tool_name),
+    lastCallAt:   counts?.last_at ?? null,
+  };
 }

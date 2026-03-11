@@ -99,8 +99,8 @@ pub async fn stream_chat(
                 let line = buf[..pos].trim().to_string();
                 buf.drain(..=pos);
 
-                if line.starts_with("data: ") {
-                    let data = &line["data: ".len()..];
+                if line.starts_with("data:") {
+                    let data = line["data:".len()..].trim_start();
 
                     if data == "[DONE]" {
                         let _ = app.emit(

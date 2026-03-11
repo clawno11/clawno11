@@ -117,7 +117,7 @@
     },
     "ai": {
       "title": "Configure AI Models",
-      "directTip": "Prefer 'Direct' providers (green badge) — no relay needed.",
+      "directTip": "'Direct' providers work immediately after key entry — no relay needed.",
       "relayTip": "Providers marked 'Relay' require OpenRouter to be configured first.",
       "directGroup": "✅ Direct (ready after key entry)",
       "relayGroup": "⚠️ Requires OpenRouter relay",
@@ -411,7 +411,8 @@
       "allowlist_remove": "Allowlist Entry Removed",
       "injection_detected": "Injection Attempt Detected",
       "shell_audit": "Shell Command Detected",
-      "token_anomaly_kill": "Anomaly → Emergency Offline"
+      "token_anomaly_kill": "Anomaly → Emergency Offline",
+      "mcp_danger_detected": "Dangerous MCP Plugin Blocked"
     }
   },
   "tokens": {

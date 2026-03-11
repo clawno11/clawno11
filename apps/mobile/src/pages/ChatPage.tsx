@@ -62,7 +62,7 @@ function extractShellCommands(text: string): string[] {
   const re = /```(?:bash|sh|shell|cmd|powershell|ps1|zsh|fish|python)\r?\n([\s\S]*?)```/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    const firstLine = m[1].trim().split(/\r?\n/)[0] ?? "";
+    const firstLine = (m[1] ?? "").trim().split(/\r?\n/)[0] ?? "";
     if (firstLine) commands.push(firstLine.slice(0, 200));
   }
   return commands;

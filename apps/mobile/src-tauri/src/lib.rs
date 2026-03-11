@@ -19,7 +19,7 @@ pub fn run() {
         .plugin(tauri_plugin_barcode_scanner::init())
         .plugin(
             SqlBuilder::default()
-                .add_migrations("sqlite:clawno.db", token_log::migrations())
+                .add_migrations(token_log::DB_URL, token_log::migrations())
                 .build(),
         )
         .invoke_handler(tauri::generate_handler![
