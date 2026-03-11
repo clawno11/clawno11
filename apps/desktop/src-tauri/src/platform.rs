@@ -95,6 +95,8 @@ pub fn augmented_path() -> String {
         ];
         // fnm on Windows: actual node binaries live in version subdirectories,
         // NOT directly in %LOCALAPPDATA%\fnm.
+        // IMPORTANT: sort ASCENDING then insert at 0 each time — the last insert
+        // (= highest version) ends up at position 0, matching nvm sort logic.
         for fnm_base in &[
             format!("{local}\\fnm\\node-versions"),
             format!("{home}\\.fnm\\node-versions"),
@@ -109,7 +111,7 @@ pub fn augmented_path() -> String {
                         } else { None }
                     })
                     .collect();
-                fnm_vers.sort_by(|a, b| b.cmp(a)); // newest first (v22 before v20)
+                fnm_vers.sort(); // ascending: v20 < v22 → last insert at pos 0 wins
                 for dir in fnm_vers { v.insert(0, dir); }
             }
         }
@@ -137,7 +139,12 @@ pub fn augmented_path() -> String {
         // IMPORTANT: sort ASCENDING then insert at 0 each time — the last insert
         // (= highest version) ends up at position 0.  Descending + insert(0) would
         // accidentally put the OLDEST version first.
-        let nvm_dir = format!("{home}/.nvm/versions/node");
+        // Respect NVM_DIR env var (some users install nvm to a custom location).
+        let nvm_dir = std::env::var("NVM_DIR")
+            .ok()
+            .filter(|d| !d.is_empty() && std::path::Path::new(d).exists())
+            .map(|d| format!("{d}/versions/node"))
+            .unwrap_or_else(|| format!("{home}/.nvm/versions/node"));
         if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
             let mut versions: Vec<String> = entries
                 .flatten()

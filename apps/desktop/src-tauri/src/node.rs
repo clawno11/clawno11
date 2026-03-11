@@ -437,7 +437,7 @@ pub fn scan_openclaw_mjs() -> Option<String> {
                         } else { None }
                     })
                     .collect();
-                fnm_mjs.sort_by(|a, b| b.cmp(a));
+                fnm_mjs.sort(); // ascending: last insert at pos 0 = newest version first
                 for p in fnm_mjs { candidates.insert(0, p); }
             }
         }
@@ -539,7 +539,7 @@ pub fn scan_node_paths() -> Option<String> {
                         } else { None }
                     })
                     .collect();
-                fnm_bins.sort_by(|a, b| b.cmp(a));
+                fnm_bins.sort(); // ascending: last insert at pos 0 = newest version first
                 for bin in fnm_bins { v.insert(0, bin); }
             }
         }
@@ -557,7 +557,7 @@ pub fn scan_node_paths() -> Option<String> {
                     } else { None }
                 })
                 .collect();
-            mise_bins.sort_by(|a, b| b.cmp(a));
+            mise_bins.sort(); // ascending: last insert at pos 0 = newest version first
             for bin in mise_bins { v.insert(0, bin); }
         }
 
@@ -573,7 +573,7 @@ pub fn scan_node_paths() -> Option<String> {
                     } else { None }
                 })
                 .collect();
-            asdf_bins.sort_by(|a, b| b.cmp(a));
+            asdf_bins.sort(); // ascending: last insert at pos 0 = newest version first
             for bin in asdf_bins { v.insert(0, bin); }
         }
 
@@ -933,44 +933,92 @@ pub async fn deploy_step_install_openclaw() -> StepResult {
 
 /// Read which AI providers already have a key configured in OpenClaw.
 ///
-/// Runs `openclaw models status --json` and parses the JSON field:
-///   `auth.providers[].provider`
+/// Uses TWO strategies to ensure reliability across all environments:
+///   1. CLI: `openclaw models status --json` ? auth.providers[].provider
+///   2. File: directly read auth-profiles.json from both global and agent dirs
 ///
-/// Returns an empty list on any error (non-fatal ? UI falls back gracefully).
+/// The union of both sources is returned so the UI never falsely shows
+/// "not configured" just because the CLI isn't in PATH (common on macOS).
 #[tauri::command]
 pub async fn list_configured_providers() -> Vec<String> {
+    let mut providers = std::collections::HashSet::<String>::new();
+
+    // Strategy 1: CLI (fast, authoritative when it works)
     let out = shell_output("openclaw models status --json");
-    if out.is_empty() {
-        return vec![];
+    if !out.is_empty() {
+        if let Ok(json) = serde_json::from_str::<serde_json::Value>(&out) {
+            if let Some(arr) = json.get("auth")
+                .and_then(|a| a.get("providers"))
+                .and_then(|p| p.as_array())
+            {
+                for entry in arr {
+                    if let Some(p) = entry.get("provider").and_then(|v| v.as_str()) {
+                        providers.insert(p.to_string());
+                    }
+                }
+            }
+        }
     }
 
-    // Parse JSON and navigate auth.providers[].provider
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&out) else {
-        return vec![];
-    };
+    // Strategy 2: read auth-profiles.json directly (works even without CLI in PATH)
+    let home = crate::platform::user_home();
+    let oc = crate::platform::path_join(&home, ".openclaw");
+    let files = [
+        crate::platform::path_join(&oc, "auth-profiles.json"),
+        crate::platform::path_join(&oc, "agents/main/agent/auth-profiles.json"),
+    ];
+    for path in &files {
+        if let Ok(content) = std::fs::read_to_string(path) {
+            if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&content) {
+                if let Some(profiles) = doc.get("profiles").and_then(|p| p.as_object()) {
+                    for (_key, val) in profiles {
+                        if let Some(p) = val.get("provider").and_then(|v| v.as_str()) {
+                            if let Some(tok) = val.get("token").and_then(|v| v.as_str()) {
+                                if !tok.is_empty() {
+                                    providers.insert(p.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-    json.get("auth")
-        .and_then(|a| a.get("providers"))
-        .and_then(|p| p.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|entry| {
-                    entry.get("provider")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string())
-                })
-                .collect()
-        })
-        .unwrap_or_default()
+    providers.into_iter().collect()
 }
 
 /// Quick pre-deploy status check: is openclaw installed? is the service running?
 /// This runs fast (no npm download) and is called when the Deploy page loads.
+///
+/// Uses two strategies to detect openclaw:
+///   1. Shell: `openclaw --version` (works when openclaw is in PATH)
+///   2. Filesystem scan: check well-known install locations directly
+/// This prevents false "not installed" on macOS where GUI apps have isolated PATH.
 #[tauri::command]
 pub async fn check_deploy_status() -> crate::types::DeployStatus {
     let ver = shell_output("openclaw --version");
     let sv = openclaw_semver(&ver);
-    let openclaw_installed = !sv.is_empty();
+    let mut openclaw_installed = !sv.is_empty();
+    let mut version = sv;
+
+    // Fallback: filesystem scan when shell PATH doesn't find openclaw
+    if !openclaw_installed {
+        if let Some(bin_dir) = scan_openclaw_bin_dir() {
+            openclaw_installed = true;
+            // Inject into PATH so subsequent commands work
+            let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+            let current = std::env::var("PATH").unwrap_or_default();
+            if !current.contains(&bin_dir) {
+                std::env::set_var("PATH", format!("{}{}{}", bin_dir, sep, current));
+            }
+            // Try to get the version from the discovered binary
+            let ver2 = shell_output("openclaw --version");
+            let sv2 = openclaw_semver(&ver2);
+            if !sv2.is_empty() { version = sv2; }
+            else { version = "installed".to_string(); }
+        }
+    }
 
     let jlist = crate::pm2::pm2_jlist();
     let service_running =
@@ -978,7 +1026,7 @@ pub async fn check_deploy_status() -> crate::types::DeployStatus {
 
     crate::types::DeployStatus {
         openclaw_installed,
-        openclaw_version: sv,
+        openclaw_version: version,
         service_running,
     }
 }
@@ -1037,14 +1085,26 @@ pub async fn uninstall_local_instance() -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
 
     // ?? 1. Stop + remove from pm2 ?????????????????????????????????????????????
-    let (stop_ok, _, _) = shell_result("pm2 stop openclaw");
-    if stop_ok { fixes.push("pm2-stopped".to_string()); }
+    // Use find_pm2_cmd() to locate the pm2 binary reliably, since bare `pm2`
+    // may not be in PATH on macOS GUI apps or custom-prefix installs.
+    if let Some(pm2) = crate::pm2::find_pm2_cmd() {
+        let (stop_ok, _, _) = shell_result(&format!("\"{}\" stop openclaw", pm2));
+        if stop_ok { fixes.push("pm2-stopped".to_string()); }
 
-    let (delete_ok, _, _) = shell_result("pm2 delete openclaw");
-    if delete_ok { fixes.push("pm2-deleted".to_string()); }
+        let (delete_ok, _, _) = shell_result(&format!("\"{}\" delete openclaw", pm2));
+        if delete_ok { fixes.push("pm2-deleted".to_string()); }
 
-    // Persist the pm2 process list so openclaw doesn't resurrect after a reboot.
-    let _ = shell_result("pm2 save");
+        let _ = shell_result(&format!("\"{}\" save", pm2));
+    } else {
+        // Fallback: try bare pm2 via augmented PATH
+        let (stop_ok, _, _) = shell_result("pm2 stop openclaw");
+        if stop_ok { fixes.push("pm2-stopped".to_string()); }
+
+        let (delete_ok, _, _) = shell_result("pm2 delete openclaw");
+        if delete_ok { fixes.push("pm2-deleted".to_string()); }
+
+        let _ = shell_result("pm2 save");
+    }
 
     // ?? 2. Uninstall openclaw npm package ?????????????????????????????????????
     // Try global uninstall first, then the user-prefix fallback path.

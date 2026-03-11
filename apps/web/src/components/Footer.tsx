@@ -13,9 +13,7 @@ export function Footer() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           {/* Logo + desc */}
           <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center text-white font-black text-sm">
-              C
-            </div>
+            <img src="/icon.png" alt="ClawNo.11" width={32} height={32} className="w-8 h-8 rounded-lg" />
             <div>
               <div className="font-bold text-white text-sm">
                 Claw<span className="text-primary">No.11</span>

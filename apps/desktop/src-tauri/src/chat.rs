@@ -335,33 +335,40 @@ async fn stream_chat_cli(
 async fn run_openclaw_agent(message: &str) -> Result<String, String> {
     let augmented = crate::platform::augmented_path();
 
+    // On ALL platforms, prefer explicit v22+ node + openclaw.mjs to avoid:
+    //   - macOS/Linux: shebang version mismatch (shim points to v20)
+    //   - Windows: openclaw.cmd not in PATH after custom-prefix install
+    // Only fall back to bare `openclaw` command if openclaw.mjs is not found.
+    let node_exe = crate::node::find_node_exe();
+    let mjs_path = crate::node::scan_openclaw_mjs();
+
     #[cfg(target_os = "windows")]
     let mut cmd = {
         #[allow(unused_imports)]
         use std::os::windows::process::CommandExt;
-        let mut c = tokio::process::Command::new("cmd");
-        c.args(["/C", "openclaw", "agent", "--agent", "main", "--json", "-m", message]);
-        c.env("PATH", &augmented);
-        c.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        c
+        if let Some(ref mjs) = mjs_path {
+            let mut c = tokio::process::Command::new(&node_exe);
+            c.args([mjs.as_str(), "agent", "--agent", "main", "--json", "-m", message]);
+            c.env("PATH", &augmented);
+            c.creation_flags(0x08000000);
+            c
+        } else {
+            let mut c = tokio::process::Command::new("cmd");
+            c.args(["/C", "openclaw", "agent", "--agent", "main", "--json", "-m", message]);
+            c.env("PATH", &augmented);
+            c.creation_flags(0x08000000);
+            c
+        }
     };
 
-    // On macOS/Linux, the `openclaw` shim script has a hardcoded shebang pointing to
-    // whichever node version was active when openclaw was installed (often v20 after nvm
-    // default was later upgraded to v22).  Running `node {openclaw.mjs} agent ...`
-    // with an explicit v22+ node path bypasses this shebang entirely.
     #[cfg(not(target_os = "windows"))]
     let mut cmd = {
-        // Prefer explicit v22+ node + openclaw.mjs to avoid shebang version mismatch.
-        let node_exe = crate::node::find_node_exe();
-        let mjs_path = crate::node::scan_openclaw_mjs();
-        if let Some(mjs) = mjs_path {
+        if let Some(ref mjs) = mjs_path {
             let mut c = tokio::process::Command::new(&node_exe);
-            c.args([&mjs, "agent", "--agent", "main", "--json", "-m", message]);
+            c.args([mjs.as_str(), "agent", "--agent", "main", "--json", "-m", message]);
             c.env("PATH", &augmented);
             c
         } else {
-            // Fallback: use the openclaw shim from PATH (may use wrong node version)
             let mut c = tokio::process::Command::new("openclaw");
             c.args(["agent", "--agent", "main", "--json", "-m", message]);
             c.env("PATH", &augmented);

@@ -21,7 +21,7 @@ export const metadata: Metadata = {
     title: "ClawNo.11 — The 11th Way to Run Your AI",
     description: "Private AI gateway. One-click deploy. Zero telemetry.",
   },
-  icons: { icon: "/favicon.ico" },
+  icons: { icon: "/favicon.png" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

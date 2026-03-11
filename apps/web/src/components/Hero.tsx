@@ -2,28 +2,15 @@
 
 import { Apple, Monitor, ArrowRight } from "lucide-react";
 import { useI18n } from "@/i18n/context";
+import { AppIcon } from "@/components/AppIcon";
 
-/** Styled claw icon — mirrors openclaw's centered mascot placement */
+/** App icon — background removed via Canvas, only lobster figure with glow */
 function ClawIcon() {
   return (
-    <div className="relative flex items-center justify-center w-28 h-28 mx-auto mb-6">
-      {/* Ambient glow */}
-      <div className="absolute inset-0 rounded-full bg-primary/20 blur-3xl scale-150" />
-      {/* Outer ring */}
-      <div className="absolute inset-0 rounded-[28px] border border-primary/20" />
-      {/* Icon body */}
-      <div
-        className="relative w-24 h-24 rounded-[24px] bg-gradient-to-br from-primary via-primary to-cyan-300 flex items-center justify-center"
-        style={{ boxShadow: "0 0 48px rgba(6,182,212,0.5), 0 0 12px rgba(6,182,212,0.3)" }}
-      >
-        {/* Claw SVG mark */}
-        <svg viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-12 h-12">
-          <path d="M24 8C24 8 14 14 14 24C14 30.627 18.373 36 24 36C29.627 36 34 30.627 34 24C34 14 24 8 24 8Z" fill="white" fillOpacity="0.9"/>
-          <path d="M18 26C18 26 16 32 20 36" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
-          <path d="M30 26C30 26 32 32 28 36" stroke="white" strokeWidth="2.5" strokeLinecap="round"/>
-          <circle cx="24" cy="22" r="3" fill="rgba(6,182,212,0.8)"/>
-        </svg>
-      </div>
+    <div className="relative flex items-center justify-center w-56 h-56 mx-auto mb-4">
+      {/* Soft ambient glow underneath */}
+      <div className="absolute inset-0 rounded-full bg-primary/15 blur-3xl scale-125 pointer-events-none" />
+      <AppIcon size={216} />
     </div>
   );
 }
@@ -42,8 +29,16 @@ export function Hero() {
       <div className="relative z-10 flex flex-col items-center">
         <ClawIcon />
 
-        {/* Main title — matches openclaw's giant logo text */}
-        <h1 className="text-[80px] sm:text-[100px] lg:text-[120px] font-black leading-none tracking-tight text-white mb-3">
+        {/* Main title — cyan gradient, mirrors openclaw's colored logo text */}
+        <h1
+          className="text-[80px] sm:text-[100px] lg:text-[120px] font-black leading-none tracking-tight mb-3"
+          style={{
+            background: "linear-gradient(135deg, #06b6d4 0%, #38bdf8 40%, #818cf8 100%)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            backgroundClip: "text",
+          }}
+        >
           {t.hero.title}
         </h1>
 

@@ -110,6 +110,10 @@ fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
         Ok(false) => fixes.push("ollama-gateway-skipped-non-fatal".to_string()),
         Err(e)    => fixes.push(format!("ollama-gateway-error:{}", e)),
     }
+
+    // Guarantee the ollama key is also written to the agent auth file.
+    // paste-token may write to a location the agent doesn't read from.
+    ensure_auth_in_agent_file("ollama", "ollama-local", fixes);
 }
 
 /// Ensure auth-profiles.json exists in the main agent directory.
@@ -246,21 +250,51 @@ fn ensure_auth_in_agent_file(provider: &str, api_key: &str, fixes: &mut Vec<Stri
 /// On restart, any session-level model override the user set in chat is
 /// cleared, returning to this default priority.
 pub fn auto_select_active_model(fixes: &mut Vec<String>) {
-    // Parse configured providers from `openclaw models status --json`.
+    // Parse configured providers — try CLI first, then read auth files directly.
+    // CLI may fail on macOS due to GUI app PATH isolation.
+    let mut configured: Vec<String> = Vec::new();
+
     let status_out = crate::platform::shell_output("openclaw models status --json");
-    let configured: Vec<String> = serde_json::from_str::<serde_json::Value>(&status_out)
-        .ok()
-        .and_then(|v| {
-            v.get("auth")
-             .and_then(|a| a.get("providers"))
-             .and_then(|p| p.as_array())
-             .map(|arr| {
-                 arr.iter()
-                    .filter_map(|e| e.get("provider").and_then(|v| v.as_str()).map(String::from))
-                    .collect()
-             })
-        })
-        .unwrap_or_default();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&status_out) {
+        if let Some(arr) = v.get("auth")
+            .and_then(|a| a.get("providers"))
+            .and_then(|p| p.as_array())
+        {
+            for e in arr {
+                if let Some(p) = e.get("provider").and_then(|v| v.as_str()) {
+                    if !configured.contains(&p.to_string()) {
+                        configured.push(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: read auth-profiles.json files directly
+    if configured.is_empty() {
+        let home = user_home();
+        let oc = path_join(&home, ".openclaw");
+        for path in &[
+            path_join(&oc, "agents/main/agent/auth-profiles.json"),
+            path_join(&oc, "auth-profiles.json"),
+        ] {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                if let Ok(doc) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(profiles) = doc.get("profiles").and_then(|p| p.as_object()) {
+                        for (_key, val) in profiles {
+                            if let Some(p) = val.get("provider").and_then(|v| v.as_str()) {
+                                if let Some(tok) = val.get("token").and_then(|v| v.as_str()) {
+                                    if !tok.is_empty() && !configured.contains(&p.to_string()) {
+                                        configured.push(p.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Priority order: free-tier first, then cheapest-paid, then standard/premium.
     // This ensures the user's wallet is protected by default.
