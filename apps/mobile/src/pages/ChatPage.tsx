@@ -49,12 +49,12 @@ const CHAT_PROXY_PORT = 18800;
  * Keys MUST match the provider IDs used in SettingsPage AI_PROVIDERS
  * and stored by aiConfigStore (secureAiConfig prefix "ai_key_configured:").
  */
-const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string; badge: string }> = {
-  zhipu:      { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "低价" },
-  openrouter: { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
-  minimax:    { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "低价" },
-  openai:     { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "轻量" },
-  anthropic:  { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "轻量" },
+const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string }> = {
+  zai:        { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash" },
+  openrouter: { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B" },
+  minimax:    { model: "minimax/MiniMax-M2",                          label: "MiniMax M2" },
+  openai:     { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini" },
+  anthropic:  { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3" },
 };
 
 function extractShellCommands(text: string): string[] {
@@ -76,12 +76,16 @@ const INJECTION_PATTERNS: RegExp[] = [
   /act\s+as\s+(if\s+you\s+are\s+)?(a|an|the)\s/i,
   /new\s+system\s+prompt/i,
   /\[SYSTEM\]/,
+  /\[INST\]/,
   /jailbreak/i,
   /DAN\s+mode/i,
+  /developer\s+mode/i,
   /你(现在|从现在起)(是|变成|成为)(?!用户)/,
   /忘记.{0,20}指令/,
   /忽略.{0,20}之前.{0,20}指令/,
+  /不再遵守/,
   /绕过.{0,10}(限制|安全|规则)/,
+  /从现在起.{0,10}扮演/,
 ];
 
 function detectInjection(text: string): boolean {
@@ -978,7 +982,6 @@ export function ChatPage() {
                             <Sparkles size={13} className="text-amber-500 flex-shrink-0" />
                             <div className="flex-1 min-w-0">
                               <p className="font-medium truncate">{info.label}</p>
-                              <p className="text-[10px] text-muted-foreground">{info.badge}</p>
                             </div>
                             {isActive && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
                           </button>

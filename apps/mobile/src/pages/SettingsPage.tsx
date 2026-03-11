@@ -23,36 +23,35 @@ import { secureStore, secureApiKeys } from "../store/secureStore";
 import { useAiConfigStore } from "../store/aiConfig";
 import { TopBar } from "../components/TopBar";
 
-// ── 精选 AI 提供商（手机端引导注册用，均为官方直链，无推广）──────────────────
 const MOBILE_FEATURED_AI = [
   {
     id:          "zai",
     emoji:       "🧠",
     name:        "智谱 AI (GLM)",
-    badge:       "永久免费",
+    badge:       "直连",
     badgeColor:  "#059669",
     badgeBg:     "rgba(5,150,105,0.1)",
-    highlight:   "GLM-4-Flash 免费可用 · 注册送额度 · 配置简单",
+    highlight:   "GLM-4-Flash 可用 · 配置简单",
     registerUrl: "https://open.bigmodel.cn/usercenter/apikeys",
   },
   {
     id:          "openrouter",
     emoji:       "🌐",
     name:        "OpenRouter",
-    badge:       "含免费模型",
+    badge:       "聚合",
     badgeColor:  "#2563eb",
     badgeBg:     "rgba(37,99,235,0.1)",
-    highlight:   "一个 Key 用所有模型 · 多种支付方式",
+    highlight:   "一个 Key 可用多种模型",
     registerUrl: "https://openrouter.ai/keys",
   },
   {
     id:          "minimax",
     emoji:       "🐋",
     name:        "MiniMax（海螺）",
-    badge:       "注册送额度",
+    badge:       "直连",
     badgeColor:  "#7c3aed",
     badgeBg:     "rgba(124,58,237,0.1)",
-    highlight:   "海螺 AI 背后的模型 · 注册送免费额度 · 配置简单",
+    highlight:   "海螺 AI 背后的模型 · 配置简单",
     registerUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
   },
 ] as const;
@@ -61,12 +60,12 @@ const MOBILE_FEATURED_AI = [
 
 const AI_PROVIDERS = [
   {
-    id:          "zhipu",
+    id:          "zai",
     emoji:       "🧠",
     name:        "智谱 AI (GLM)",
     placeholder: "粘贴您的 GLM API Key",
     docsUrl:     "https://open.bigmodel.cn/usercenter/apikeys",
-    badge:       "免费",
+    badge:       "直连",
     badgeColor:  "#059669",
   },
   {

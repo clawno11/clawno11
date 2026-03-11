@@ -26,9 +26,9 @@ const FEATURED_AI = [
     id:          "zai" as const,
     emoji:       "🧠",
     name:        "智谱 AI (GLM)",
-    badge:       "注册送额度",
+    badge:       "直连",
     badgeClass:  "bg-emerald-50 border-emerald-200 text-emerald-700",
-    highlight:   "注册送免费额度 · GLM-4-Flash 低价 · 配置简单",
+    highlight:   "GLM-4-Flash 可用 · 配置简单",
     registerUrl: "https://open.bigmodel.cn/usercenter/apikeys",
     placeholder: "输入 API Key",
   },
@@ -36,9 +36,9 @@ const FEATURED_AI = [
     id:          "openrouter" as const,
     emoji:       "🌐",
     name:        "OpenRouter",
-    badge:       "含免费模型",
+    badge:       "聚合",
     badgeClass:  "bg-blue-50 border-blue-200 text-blue-700",
-    highlight:   "一个 Key 用遍所有模型 · 含免费 Llama / Phi · 多种支付方式",
+    highlight:   "一个 Key 可用多种模型",
     registerUrl: "https://openrouter.ai/keys",
     placeholder: "sk-or-v1-...",
   },
@@ -46,9 +46,9 @@ const FEATURED_AI = [
     id:          "minimax" as const,
     emoji:       "🐋",
     name:        "MiniMax（海螺）",
-    badge:       "注册送额度",
+    badge:       "直连",
     badgeClass:  "bg-violet-50 border-violet-200 text-violet-700",
-    highlight:   "海螺 AI 背后的模型 · 配置简单 · 注册送免费额度",
+    highlight:   "海螺 AI 背后的模型 · 配置简单",
     registerUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key",
     placeholder: "输入 API Key",
   },
@@ -66,29 +66,29 @@ interface ProviderPricing {
   priceNote: string;
 }
 const PROVIDER_PRICING: Record<string, ProviderPricing> = {
-  zai:         { hasFree: true,  freeLabel: "注册送额度",                              priceNote: "注册即送免费额度，多档模型可选，具体价格请查看官网" },
+  zai:         { hasFree: false,                                                       priceNote: "多档模型可选，具体价格请查看官网" },
   minimax:     { hasFree: false,                                                       priceNote: "多档模型可选，具体价格请查看官网" },
   anthropic:   { hasFree: false,                                                       priceNote: "提供 Haiku / Sonnet / Opus 等多档模型，具体价格请查看官网" },
   openai:      { hasFree: false,                                                       priceNote: "提供 GPT-4o-mini / GPT-4o / o1 等多档模型，具体价格请查看官网" },
-  openrouter:  { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "聚合平台，含多种免费开源模型，付费模型价格与各厂商官网一致" },
+  openrouter:  { hasFree: false,                                                       priceNote: "聚合平台，付费模型价格与各厂商官网一致" },
   deepseek:    { hasFree: false,                                                       priceNote: "提供 DeepSeek-V3 / R1 等模型，具体价格请查看官网" },
   moonshot:    { hasFree: false,                                                       priceNote: "提供不同上下文长度模型，具体价格请查看官网" },
   qwen:        { hasFree: false,                                                       priceNote: "提供 Turbo / Plus / Max 等多档模型，具体价格请查看官网" },
   doubao:      { hasFree: false,                                                       priceNote: "提供 Lite / Pro 等多档模型，具体价格请查看官网" },
-  hunyuan:     { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "混元Lite 免费可用，更多模型请查看官网" },
-  spark:       { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "Spark Lite 免费可用，更多模型请查看官网" },
+  hunyuan:     { hasFree: false,                                                       priceNote: "多档模型可选，具体价格请查看官网" },
+  spark:       { hasFree: false,                                                       priceNote: "多档模型可选，具体价格请查看官网" },
   baichuan:    { hasFree: false,                                                       priceNote: "提供 Turbo 等多档模型，具体价格请查看官网" },
   stepfun:     { hasFree: false,                                                       priceNote: "提供多档模型，具体价格请查看官网" },
   lingyi:      { hasFree: false,                                                       priceNote: "提供 Lightning / Medium / Large 等多档模型，具体价格请查看官网" },
-  siliconflow: { hasFree: true,  freeLabel: "含免费模型",                              priceNote: "含多种免费开源模型，更多模型请查看官网" },
+  siliconflow: { hasFree: false,                                                       priceNote: "多种开源模型可选，更多模型请查看官网" },
 };
 
 // direct: true  = OpenClaw 原生支持，配完即用
 // direct: false = 需先在 OpenRouter 里开通对应模型，再填 OpenRouter Key
 const AI_PROVIDERS = [
   // ── 原生支持
-  { id: "zai",         direct: true,  label: "智谱 AI / ZAI (GLM)",    placeholder: "...",          registerUrl: "https://open.bigmodel.cn/usercenter/apikeys",                            tip: "注册即送免费额度，配完即可聊天" },
-  { id: "minimax",     direct: true,  label: "MiniMax（海螺）",         placeholder: "...",          registerUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key", tip: "注册送额度，配置后即可使用" },
+  { id: "zai",         direct: true,  label: "智谱 AI / ZAI (GLM)",    placeholder: "...",          registerUrl: "https://open.bigmodel.cn/usercenter/apikeys",                            tip: "获取 API Key 后配置即可使用" },
+  { id: "minimax",     direct: true,  label: "MiniMax（海螺）",         placeholder: "...",          registerUrl: "https://platform.minimaxi.com/user-center/basic-information/interface-key", tip: "获取 API Key 后配置即可使用" },
   { id: "anthropic",   direct: true,  label: "Anthropic (Claude)",      placeholder: "sk-ant-api03-...", registerUrl: "https://console.anthropic.com/",                                  tip: "需在官网注册并获取 API Key" },
   { id: "openai",      direct: true,  label: "OpenAI (GPT)",            placeholder: "sk-proj-...",  registerUrl: "https://platform.openai.com/api-keys",                               tip: "需在官网注册并获取 API Key" },
   // ── 通过 OpenRouter 中转（需先注册 OpenRouter）
@@ -649,16 +649,10 @@ function ConfigureAIPanel({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      {/* ── 操作引导横幅 ── */}
-      <div className="mx-3 mb-3 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 leading-relaxed">
-        <span className="font-semibold">三步开始使用：</span>
-        {"  ①点击「前往注册」→ ②获取 API Key → ③粘贴到下方输入框并写入"}
-      </div>
-
-      {/* ── 精选推荐大卡片 ── */}
+      {/* ── 快速配置 ── */}
       <div className="px-3 mb-3">
         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-2">
-          ⭐ 精选推荐（新手从这里开始）
+          {t("instances.ai.quickSetup")}
         </p>
         <div className="grid grid-cols-3 gap-2">
           {FEATURED_AI.map((p) => (

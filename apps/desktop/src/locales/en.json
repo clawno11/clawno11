@@ -41,7 +41,7 @@
     },
     "ai": {
       "title": "Configure AI Models",
-      "directTip": "Prefer 'Direct' providers (green badge) — no relay needed.",
+      "directTip": "'Direct' providers work immediately after key entry — no relay needed.",
       "relayTip": "Providers marked 'Relay' require OpenRouter to be configured first.",
       "directGroup": "✅ Direct (ready after key entry)",
       "relayGroup": "⚠️ Requires OpenRouter relay",
@@ -55,7 +55,8 @@
       "configuredMsg": "Configured {{key}} — restart service to apply",
       "keyWritten": "API Key saved",
       "keyWrittenHint": "Key is written to OpenClaw config. Click to replace if needed.",
-      "replaceKey": "Replace Key"
+      "replaceKey": "Replace Key",
+      "quickSetup": "Quick Setup"
     }
   },
   "deploy": {
@@ -410,7 +411,7 @@
   "connectors": {
     "title": "Connectors",
     "desc": "Connect OpenClaw AI to messaging platforms and configure mobile remote access",
-    "mobileConnTitle": "Mobile App QR Connect (Recommended · Highest Security Score)",
+    "mobileConnTitle": "Mobile App QR Connect",
     "imTitle": "Instant Messaging Connectors",
     "intlImTitle": "International IM (Telegram · Discord)",
     "remoteAccessTitle": "Remote Access Tunnels",

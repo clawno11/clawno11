@@ -41,7 +41,7 @@
     },
     "ai": {
       "title": "配置 AI 模型",
-      "directTip": "推荐优先选择「直连」provider（绿色徽章），配完 Key 即可立即使用。",
+      "directTip": "「直连」provider 配完 Key 即可立即使用。",
       "relayTip": "标有「需中转」的 provider 需配合 OpenRouter 才能使用。",
       "directGroup": "✅ 直连（配完即用）",
       "relayGroup": "⚠️ 需通过 OpenRouter 中转",
@@ -55,7 +55,8 @@
       "configuredMsg": "已配置 {{key}}，重启服务后生效",
       "keyWritten": "API Key 已写入",
       "keyWrittenHint": "Key 已保存到 OpenClaw 配置，如需更换请点击右侧按钮",
-      "replaceKey": "更换 Key"
+      "replaceKey": "更换 Key",
+      "quickSetup": "快速配置"
     }
   },
   "deploy": {
@@ -436,7 +437,7 @@
   "connectors": {
     "title": "连接器",
     "desc": "将 OpenClaw AI 接入即时通讯工具，并配置手机远程访问",
-    "mobileConnTitle": "手机 App 扫码连接（推荐 · 安全评分最高）",
+    "mobileConnTitle": "手机 App 扫码连接",
     "imTitle": "即时通讯连接器",
     "intlImTitle": "国际 IM 连接器（Telegram · Discord）",
     "remoteAccessTitle": "远程访问隧道",

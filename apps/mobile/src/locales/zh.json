@@ -117,7 +117,7 @@
     },
     "ai": {
       "title": "配置 AI 模型",
-      "directTip": "推荐优先选择「直连」provider（绿色徽章），配完 Key 即可立即使用。",
+      "directTip": "「直连」provider 配完 Key 即可立即使用。",
       "relayTip": "标有「需中转」的 provider 需配合 OpenRouter 才能使用。",
       "directGroup": "✅ 直连（配完即用）",
       "relayGroup": "⚠️ 需通过 OpenRouter 中转",
@@ -677,8 +677,8 @@
       "deleteConfirm": "确认删除 {{name}} 的 API Key？",
       "getKeyLink": "获取 {{name}} API Key"
     },
-    "sectionAiProviders": "AI 提供商推荐",
-    "aiProvidersHint": "注册后获取 API Key，在桌面端或服务器端配置即可使用。推荐从智谱 AI 开始（完全免费）。",
+    "sectionAiProviders": "AI 提供商",
+    "aiProvidersHint": "注册后获取 API Key，在桌面端或服务器端配置即可使用。",
     "aiProviderRegisterBtn": "注册",
     "sectionProviders": "已配置 AI 提供商",
     "sectionStorage": "存储管理",

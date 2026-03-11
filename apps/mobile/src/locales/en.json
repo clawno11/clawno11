@@ -676,8 +676,8 @@
       "deleteConfirm": "Delete API Key for {{name}}?",
       "getKeyLink": "Get {{name}} API Key"
     },
-    "sectionAiProviders": "Recommended AI Providers",
-    "aiProvidersHint": "Register to get an API Key, then configure it on the desktop or server. Start with Zhipu AI — it's completely free.",
+    "sectionAiProviders": "AI Providers",
+    "aiProvidersHint": "Register to get an API Key, then configure it on the desktop or server.",
     "aiProviderRegisterBtn": "Register",
     "sectionProviders": "Configured AI Providers",
     "sectionStorage": "Storage",

@@ -29,19 +29,19 @@ import { logSecurityEvent } from "../store/securityEventStore";
 const MAX_CONTEXT_CHARS = 32_000;
 
 /** Provider ID → cheapest available model, mirroring deploy.rs provider_cheapest_model. */
-const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string; badge: string }> = {
-  siliconflow: { model: "openrouter/meta-llama/llama-3.1-8b-instruct", label: "SiliconFlow Llama 3.1 8B", badge: "免费" },
-  hunyuan:     { model: "openrouter/tencent/hunyuan-lite",             label: "混元 Lite",                 badge: "免费" },
-  spark:       { model: "openrouter/iflytek/spark-lite",               label: "讯飞星火 Lite",             badge: "免费" },
-  zai:         { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash",          badge: "低价" },
-  openrouter:  { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B",             badge: "免费" },
-  doubao:      { model: "openrouter/bytedance/doubao-lite-32k",        label: "豆包 Lite",                 badge: "低价" },
-  minimax:     { model: "minimax/MiniMax-M2",                          label: "MiniMax M2",                badge: "低价" },
-  deepseek:    { model: "openrouter/deepseek/deepseek-chat",           label: "DeepSeek V3",               badge: "低价" },
-  qwen:        { model: "openrouter/qwen/qwen-plus",                   label: "通义千问 Plus",             badge: "低价" },
-  moonshot:    { model: "openrouter/moonshot-ai/moonshot-v1-8k",       label: "月之暗面 v1-8k",            badge: "标准" },
-  openai:      { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini",               badge: "轻量" },
-  anthropic:   { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3",            badge: "轻量" },
+const PROVIDER_CLOUD_MODELS: Record<string, { model: string; label: string }> = {
+  siliconflow: { model: "openrouter/meta-llama/llama-3.1-8b-instruct", label: "SiliconFlow Llama 3.1 8B" },
+  hunyuan:     { model: "openrouter/tencent/hunyuan-lite",             label: "混元 Lite" },
+  spark:       { model: "openrouter/iflytek/spark-lite",               label: "讯飞星火 Lite" },
+  zai:         { model: "zai/glm-4-flash",                             label: "智谱 GLM-4-Flash" },
+  openrouter:  { model: "openrouter/meta-llama/llama-3.2-3b-instruct", label: "Llama 3.2 3B" },
+  doubao:      { model: "openrouter/bytedance/doubao-lite-32k",        label: "豆包 Lite" },
+  minimax:     { model: "minimax/MiniMax-M2",                          label: "MiniMax M2" },
+  deepseek:    { model: "openrouter/deepseek/deepseek-chat",           label: "DeepSeek V3" },
+  qwen:        { model: "openrouter/qwen/qwen-plus",                   label: "通义千问 Plus" },
+  moonshot:    { model: "openrouter/moonshot-ai/moonshot-v1-8k",       label: "月之暗面 v1-8k" },
+  openai:      { model: "openai/gpt-4o-mini",                         label: "GPT-4o Mini" },
+  anthropic:   { model: "anthropic/claude-haiku-3",                   label: "Claude Haiku 3" },
 };
 
 // ── Shell command audit ────────────────────────────────────────────────────
@@ -1338,7 +1338,6 @@ export function ChatPage() {
                               <Sparkles size={13} className="text-amber-500 flex-shrink-0" />
                               <div className="flex-1 min-w-0">
                                 <p className="font-medium truncate">{info.label}</p>
-                                <p className="text-[10px] text-muted-foreground">{info.badge}</p>
                               </div>
                               {isActive && <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />}
                             </button>

@@ -541,19 +541,13 @@ function XEdgePanel() {
   return (
     <div className="rounded-xl border-2 border-cyan-500/30 bg-card overflow-hidden"
       style={{ boxShadow: "0 0 0 1px rgba(6,182,212,0.1), 0 2px 12px rgba(6,182,212,0.06)" }}>
-      {/* "推荐" badge on the header */}
       <div className="flex items-center gap-3 px-5 py-4 border-b border-border relative">
         <div className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-500/25 flex items-center justify-center flex-shrink-0">
-          {/* xEdge logo approximation */}
           <span className="text-base font-black" style={{ color: "#06b6d4", fontFamily: "monospace" }}>X</span>
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
             <h2 className="font-semibold text-sm">{t("connectors.xedge.title")}</h2>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full text-white"
-              style={{ background: "linear-gradient(135deg,#06b6d4,#0891b2)" }}>
-              推荐
-            </span>
           </div>
           <p className="text-xs text-muted-foreground">{t("connectors.xedge.subtitle")}</p>
         </div>
@@ -1191,7 +1185,7 @@ export function ConnectorsPage() {
         </p>
       </div>
 
-      {/* ── 手机 App 扫码连接（最推荐，安全评分最高）── */}
+      {/* ── 手机 App 扫码连接 ── */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-0.5">
           {t("connectors.mobileConnTitle")}

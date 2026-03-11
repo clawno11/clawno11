@@ -313,7 +313,7 @@ function StepRow({ step, isActive }: { step: StepState; isActive: boolean }) {
 
 // AI providers list — id must match what `openclaw models auth paste-token --provider` accepts
 const AI_PROVIDERS = [
-  { id: "zai",        label: "智谱 AI / ZAI (GLM，推荐)",  placeholder: "..." },
+  { id: "zai",        label: "智谱 AI / ZAI (GLM)",         placeholder: "..." },
   { id: "deepseek",   label: "DeepSeek（深度求索）",        placeholder: "sk-..." },
   { id: "minimax",    label: "MiniMax",                     placeholder: "..." },
   { id: "anthropic",  label: "Anthropic (Claude)",          placeholder: "sk-ant-api03-..." },
