@@ -517,7 +517,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
                 "HOMEBREW_NO_AUTO_UPDATE=1 NONINTERACTIVE=1 brew install node"
             );
             if ok {
-                let ver = node_ver();
+                let ver = node_version_direct();
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
@@ -535,7 +535,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
                         std::env::set_var("PATH", format!("{}:{}", node_bin, current));
                     }
                 }
-                let ver = node_ver();
+                let ver = node_version_direct();
                 if node_major(&ver) >= 22 {
                     return StepResult::ok_fixed(ver, fixes);
                 }
