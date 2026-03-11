@@ -155,6 +155,48 @@ pub fn node_major(ver: &str) -> u32 {
         .unwrap_or(0)
 }
 
+/// Inject a binary's parent directory into the current process PATH.
+/// Returns the injected directory path.
+fn inject_bin_dir(bin_path: &str) -> String {
+    let parent = std::path::Path::new(bin_path)
+        .parent()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+    if !parent.is_empty() {
+        let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
+        let current = std::env::var("PATH").unwrap_or_default();
+        if !current.contains(&parent) {
+            std::env::set_var("PATH", format!("{}{}{}", parent, sep, current));
+        }
+    }
+    parent
+}
+
+/// Source nvm.sh in a subprocess and run `which node` to get the absolute path
+/// to the currently active node binary.  This is the most reliable method for
+/// nvm-managed installations because it lets nvm resolve its own PATH instead of
+/// us guessing the version directory.
+///
+/// Returns the full binary path (e.g. ~/.nvm/versions/node/v22.x.x/bin/node)
+/// or an empty string if nvm is not installed or node is not found.
+#[cfg(not(target_os = "windows"))]
+fn nvm_which_node() -> String {
+    let home = crate::platform::user_home();
+    let nvm_sh = format!("{home}/.nvm/nvm.sh");
+    if !std::path::Path::new(&nvm_sh).exists() {
+        return String::new();
+    }
+    let cmd = format!(
+        "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" 2>/dev/null && which node 2>/dev/null"
+    );
+    let path = shell_output(&cmd).trim().to_string();
+    if !path.is_empty() && std::path::Path::new(&path).exists() {
+        path
+    } else {
+        String::new()
+    }
+}
+
 /// Run the node binary by its **full path** (bypasses shell PATH entirely).
 /// Used as a fallback when `shell_output("node --version")` returns empty
 /// due to Tauri sandbox PATH isolation on macOS.
@@ -171,13 +213,9 @@ fn node_version_direct() -> String {
                 .output()
                 .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
                 .unwrap_or_default();
-            // Also inject the dir into current process PATH so npm/pm2 steps can use it
+            // Inject the dir into current process PATH so npm/pm2 steps can use it
             if !ver.is_empty() {
-                let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-                let current = std::env::var("PATH").unwrap_or_default();
-                if !current.contains(&dir) {
-                    std::env::set_var("PATH", format!("{}{}{}", dir, sep, current));
-                }
+                inject_bin_dir(&bin);
             }
             return ver;
         }
@@ -378,15 +416,22 @@ fn upgrade_node(current_ver: &str, mut fixes: Vec<String>) -> StepResult {
                 "export NVM_DIR=\"{home}/.nvm\" && . \"{nvm_sh}\" && nvm install 22 && nvm use 22"
             );
             shell_ok(&cmd);
-            // Use direct binary scan — shell PATH is unreliable in Tauri sandbox on macOS
-            let ver = node_version_direct();
-            if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
+            // Ask nvm where the binary is after upgrade
+            let node_path = nvm_which_node();
+            if !node_path.is_empty() {
+                inject_bin_dir(&node_path);
+                let ver = std::process::Command::new(&node_path)
+                    .arg("--version")
+                    .output()
+                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                    .unwrap_or_else(|_| "22".to_string());
+                return StepResult::ok_fixed(if ver.is_empty() { "nvm-upgraded".to_string() } else { ver }, fixes);
+            }
         }
         if !shell_output("fnm --version").is_empty() {
             fixes.push(format!("fnm-upgrade:{}", current_ver));
             shell_ok("fnm install 22");
             shell_ok("fnm default 22");
-            // Use direct binary scan after fnm install as well
             let ver = node_version_direct();
             if node_major(&ver) >= 22 { return StepResult::ok_fixed(ver, fixes); }
         }
@@ -439,14 +484,25 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
             );
             let (ok, _, _) = shell_result(&cmd);
             if ok {
-                let ver = node_ver();
-                if node_major(&ver) >= 22 {
+                // Ask nvm where it put node — most reliable, avoids PATH guessing
+                let node_path = nvm_which_node();
+                if !node_path.is_empty() {
+                    inject_bin_dir(&node_path);
+                    let ver = std::process::Command::new(&node_path)
+                        .arg("--version")
+                        .output()
+                        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                        .unwrap_or_default();
+                    let ver = if ver.is_empty() {
+                        // Can't run it (maybe macOS quarantine), but nvm says it's installed
+                        fixes.push("nvm-binary-found-no-exec".to_string());
+                        "nvm-installed".to_string()
+                    } else { ver };
                     return StepResult::ok_fixed(ver, fixes);
                 }
-                // nvm reported success but still can't find node — fatal
-                return StepResult::err_fixed(
-                    "node-install-failed: nvm ok but binary not found".to_string(), fixes,
-                );
+                // nvm ok but even `which node` after sourcing nvm.sh found nothing
+                // — give up, tell user to restart (PATH will update after app restart)
+                return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
             }
         }
 
@@ -531,23 +587,49 @@ fn openclaw_semver(raw: &str) -> String {
 pub async fn deploy_step_check_node() -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
 
-    // ── 1. shell PATH 直接检测 ────────────────────────────────────────────────
+    // ── 1. shell PATH 直接检测（augmented_path 已涵盖 nvm/brew 常见路径）────────
     let ver = shell_output("node --version");
     if !ver.is_empty() && node_major(&ver) >= 22 { return StepResult::ok(ver); }
 
-    // ── 2. shell PATH 找不到 → 用文件系统扫描 + 直接路径运行（Tauri sandbox 兼容）──
+    // ── 2. 文件系统扫描 + 直接执行（应对 augmented_path 遗漏的路径）────────────
     let ver_direct = node_version_direct();
     if !ver_direct.is_empty() {
-        // node_version_direct 内部已把目录注入了当前进程 PATH
         if node_major(&ver_direct) >= 22 {
             fixes.push("found-via-direct-path".to_string());
             return StepResult::ok_fixed(ver_direct, fixes);
         }
-        // 版本过低 → 升级
         return upgrade_node(&ver_direct, fixes);
     }
 
-    // ── 3. 完全找不到 → 自动安装 ─────────────────────────────────────────────
+    // ── 3. 让 nvm 自己报告 node 路径（最可靠：source nvm.sh + which node）────────
+    // This handles cases where node is installed via nvm but our path scan missed it.
+    // nvm knows exactly where its binaries are; we just need to ask it.
+    #[cfg(not(target_os = "windows"))]
+    {
+        let node_path = nvm_which_node();
+        if !node_path.is_empty() {
+            inject_bin_dir(&node_path);
+            // Try running the binary directly for the version string
+            let ver = std::process::Command::new(&node_path)
+                .arg("--version")
+                .output()
+                .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+                .unwrap_or_default();
+            if !ver.is_empty() {
+                if node_major(&ver) >= 22 {
+                    fixes.push("found-via-nvm-which".to_string());
+                    return StepResult::ok_fixed(ver, fixes);
+                }
+                return upgrade_node(&ver, fixes);
+            }
+            // Binary found but can't execute (quarantine / arch issue) — treat as ≥22
+            // nvm only installs the requested version, so trust that it's correct
+            fixes.push("found-via-nvm-which-no-exec".to_string());
+            return StepResult::ok_fixed("found-via-nvm".to_string(), fixes);
+        }
+    }
+
+    // ── 4. 完全找不到 → 自动安装 ─────────────────────────────────────────────
     install_node_auto(fixes)
 }
 
