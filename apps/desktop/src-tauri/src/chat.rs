@@ -396,20 +396,26 @@ fn parse_agent_reply(raw: &str) -> Result<String, String> {
     let json: serde_json::Value =
         serde_json::from_str(raw.trim()).map_err(|e| format!("json-parse-error: {e}"))?;
 
-    // Collect ALL payload texts, not just index 0.
-    if let Some(payloads) = json.pointer("/result/payloads").and_then(|v| v.as_array()) {
-        let parts: Vec<&str> = payloads
-            .iter()
-            .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-            .collect();
-        if !parts.is_empty() {
-            return Ok(parts.join(""));
+    // Try multiple JSON shapes — openclaw CLI output format varies by version:
+    //   Newer:  { "payloads": [...], "meta": {...} }        (top-level)
+    //   Older:  { "result": { "payloads": [...] } }         (nested under result)
+    for pointer in &["/payloads", "/result/payloads"] {
+        if let Some(payloads) = json.pointer(pointer).and_then(|v| v.as_array()) {
+            let parts: Vec<&str> = payloads
+                .iter()
+                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                .collect();
+            if !parts.is_empty() {
+                return Ok(parts.join("\n\n"));
+            }
         }
     }
 
-    // Fallback: single top-level text field (older CLI versions).
-    if let Some(text) = json.pointer("/result/text").and_then(|v| v.as_str()) {
-        return Ok(text.to_string());
+    // Fallback: single top-level text field.
+    for pointer in &["/result/text", "/text"] {
+        if let Some(text) = json.pointer(pointer).and_then(|v| v.as_str()) {
+            return Ok(text.to_string());
+        }
     }
 
     // Fallback: check for error fields from the CLI.
@@ -425,6 +431,10 @@ fn extract_model_from_reply(raw: &str) -> Option<String> {
     let json: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
 
     let candidates = [
+        // Newer format: { "meta": { "agentMeta": { "model": "..." } } }
+        "/meta/agentMeta/model",
+        "/meta/model",
+        // Older format: { "result": { ... } }
         "/result/model",
         "/result/agent/model",
         "/result/metadata/model",
