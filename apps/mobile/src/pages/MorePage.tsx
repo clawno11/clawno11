@@ -85,7 +85,7 @@ export function MorePage() {
               <button
                 key={item.path}
                 onClick={() => navigate(item.path)}
-                className="touch-btn w-full flex items-center gap-3.5 p-4 rounded-2xl bg-white border border-[hsl(var(--border))] text-left active:scale-[0.98] transition-transform"
+                className="touch-btn w-full flex items-center gap-3.5 p-4 rounded-2xl bg-[hsl(var(--card))] border border-[hsl(var(--border))] text-left active:scale-[0.98] transition-transform"
               >
                 <div
                   className="w-11 h-11 rounded-xl flex items-center justify-center flex-shrink-0"
@@ -112,7 +112,7 @@ export function MorePage() {
         <p className="text-xs font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider px-1 mb-2">
           {t("more.cloudServers")}
         </p>
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           {/* header */}
           <div className="flex items-center gap-2.5 px-4 py-3 border-b border-[hsl(var(--border))]/60 bg-gradient-to-r from-cyan-50 to-blue-50">
             <div className="w-8 h-8 rounded-lg bg-cyan-100 flex items-center justify-center flex-shrink-0">

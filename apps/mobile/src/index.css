@@ -18,6 +18,23 @@
     "PingFang SC", sans-serif;
 }
 
+/* ── Dark mode ─────────────────────────────────────────────────────────── */
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: 189 94% 43%;
+    --primary-foreground: 0 0% 100%;
+    --background: 222 47% 11%;
+    --foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --border: 217 33% 22%;
+    --card: 222 47% 13%;
+    --destructive: 0 63% 51%;
+    color-scheme: dark;
+  }
+}
+
 /* ── Mobile-first base styles ───────────────────────────────────────────── */
 
 * {
@@ -85,11 +102,10 @@ body,
 
 .bottom-nav {
   padding-bottom: max(var(--safe-bottom), 4px);
-  border-top: 1px solid rgba(0, 0, 0, 0.08);
-  background: rgba(255, 255, 255, 0.95);
+  border-top: 1px solid hsl(var(--border));
+  background: hsl(var(--background) / 0.95);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  /* Ensure nav bar doesn't overlap with Android gesture nav */
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
 }
@@ -112,12 +128,19 @@ body,
   scroll-behavior: smooth;
 }
 
+/* ── Keyboard offset (set by JS via visualViewport API on iOS) ──────────── */
+
+:root {
+  --keyboard-offset: 0px;
+}
+
 /* ── Chat input bar – stay above keyboard ───────────────────────────────── */
 
 .chat-input-bar {
-  padding-bottom: max(var(--safe-bottom), 8px);
+  padding-bottom: max(calc(var(--safe-bottom) + var(--keyboard-offset)), 8px);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
+  transition: padding-bottom 0.15s ease-out;
 }
 
 /* ── Message bubble animations ─────────────────────────────────────────── */

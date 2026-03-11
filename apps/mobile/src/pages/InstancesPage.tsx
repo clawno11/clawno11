@@ -87,7 +87,7 @@ export function InstancesPage() {
             return (
               <div
                 key={inst.id}
-                className="rounded-2xl border bg-white overflow-hidden"
+                className="rounded-2xl border bg-[hsl(var(--card))] overflow-hidden"
                 style={{
                   borderColor: isOnline ? "rgba(16,185,129,0.25)" : isOffline ? "rgba(239,68,68,0.2)" : "rgba(6,182,212,0.15)",
                 }}

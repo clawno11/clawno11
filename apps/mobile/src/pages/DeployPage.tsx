@@ -193,7 +193,7 @@ export function DeployPage() {
       <div className="flex-1 scrollable p-4 space-y-4 pb-8">
 
         {/* ── SSH Credentials ── */}
-        <section className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           <div className="px-4 py-3 border-b border-[hsl(var(--border))]"
             style={{ background: "rgba(6,182,212,0.04)" }}>
             <p className="font-semibold text-sm text-[hsl(var(--primary))]">{t("deploy.ssh.credentials")}</p>
@@ -210,7 +210,7 @@ export function DeployPage() {
                 onChange={(e) => setHost(e.target.value)}
                 placeholder="192.168.1.100"
                 disabled={phase !== "form"}
-                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
               />
             </div>
 
@@ -225,7 +225,7 @@ export function DeployPage() {
                   value={sshPort}
                   onChange={(e) => setSshPort(e.target.value)}
                   disabled={phase !== "form"}
-                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                 />
               </div>
               <div className="flex-1">
@@ -237,7 +237,7 @@ export function DeployPage() {
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   disabled={phase !== "form"}
-                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                 />
               </div>
             </div>
@@ -254,7 +254,7 @@ export function DeployPage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={t("deploy.ssh.passwordPlaceholder")}
                   disabled={phase !== "form"}
-                  className="w-full px-3 py-2.5 pr-10 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  className="w-full px-3 py-2.5 pr-10 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                 />
                 <button
                   type="button"
@@ -277,7 +277,7 @@ export function DeployPage() {
                   value={openclawPort}
                   onChange={(e) => setOpenclawPort(e.target.value)}
                   disabled={phase !== "form"}
-                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                 />
               </div>
               <div className="flex-1">
@@ -290,7 +290,7 @@ export function DeployPage() {
                   onChange={(e) => setInstanceName(e.target.value)}
                   placeholder={hostTrimmed || t("deploy.ssh.title")}
                   disabled={phase !== "form"}
-                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
+                  className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-50"
                 />
               </div>
             </div>
@@ -347,7 +347,7 @@ export function DeployPage() {
 
         {/* ── Progress (deploying phase) ── */}
         {(phase === "deploying" || phase === "failed") && (
-          <section className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+          <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
             <div className="px-4 py-3 border-b border-[hsl(var(--border))] flex items-center gap-2"
               style={{ background: phase === "failed" ? "rgba(239,68,68,0.04)" : "rgba(6,182,212,0.04)" }}>
               {phase === "deploying"

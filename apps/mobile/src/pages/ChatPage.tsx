@@ -13,7 +13,7 @@
  *  - Touch-optimized input with send button
  *  - Compact header with instance picker
  */
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Send, Bot, User, ChevronDown, Wifi, WifiOff, RefreshCw,
   ShieldCheck, ShieldOff, BookOpen, History, Plus, Search,
@@ -93,6 +93,19 @@ function estimateTokens(text: string): number {
 interface UIMessage extends ChatMessage {
   id: string;
   streaming?: boolean;
+  createdAt?: number;
+}
+
+/** Format a message timestamp as a short, human-friendly string. */
+function formatMsgTime(ts: number): string {
+  const d = new Date(ts);
+  const hm = d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const now = new Date();
+  if (now.toDateString() === d.toDateString()) return hm;
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (yesterday.toDateString() === d.toDateString()) return `昨天 ${hm}`;
+  return `${d.getMonth() + 1}/${d.getDate()} ${hm}`;
 }
 
 function trimToContextWindow(msgs: { role: string; content: string }[]) {
@@ -153,7 +166,7 @@ function HistoryDrawer({
       onClick={onClose}
     >
       <div
-        className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-white flex flex-col"
+        className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-[hsl(var(--card))] flex flex-col"
         style={{ maxHeight: "75vh" }}
         onClick={(e) => e.stopPropagation()}
       >
@@ -287,7 +300,7 @@ export function ChatPage() {
       loadMessages(lastId)
         .then((stored) => {
           if (!mountedRef.current) return;
-          setMessages(stored.map((m): UIMessage => ({ id: m.id, role: m.role, content: m.content })));
+          setMessages(stored.map((m): UIMessage => ({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt })));
           setCurrentSessionId(lastId);
         })
         .catch(() => persistSession(null));
@@ -339,6 +352,26 @@ export function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // iOS WKWebView: visualViewport resize when keyboard appears
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const offset = window.innerHeight - vv.height;
+      document.documentElement.style.setProperty("--keyboard-offset", `${offset}px`);
+      if (offset > 50) {
+        requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }));
+      }
+    };
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
+    return () => {
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
+      document.documentElement.style.setProperty("--keyboard-offset", "0px");
+    };
+  }, []);
+
   const selectedInst = instances.find((i) => i.id === selectedId) ?? null;
   const gatewayUrl   = selectedInst?.httpUrl ?? "";
   const isOnline     = selectedInst?.health === "online";
@@ -349,7 +382,7 @@ export function ChatPage() {
     if (mountedRef.current) setIsStreaming(false);
     const stored: StoredMessage[] = await loadMessages(session.id);
     if (!mountedRef.current) return;
-    setMessages(stored.map((m): UIMessage => ({ id: m.id, role: m.role, content: m.content })));
+    setMessages(stored.map((m): UIMessage => ({ id: m.id, role: m.role, content: m.content, createdAt: m.createdAt })));
     persistSession(session.id);
     setShowHistory(false);
   }, []);
@@ -455,10 +488,11 @@ export function ChatPage() {
 
       if (!mountedRef.current) return;
 
-      const userMsg: UIMessage      = { id: crypto.randomUUID(), role: "user",      content: rawContent };
+      const now = Date.now();
+      const userMsg: UIMessage      = { id: crypto.randomUUID(), role: "user",      content: rawContent, createdAt: now };
       const sendMsg: UIMessage      = { ...userMsg, content: finalContent };
       const assistantId             = crypto.randomUUID();
-      const assistantMsg: UIMessage = { id: assistantId, role: "assistant", content: "", streaming: true };
+      const assistantMsg: UIMessage = { id: assistantId, role: "assistant", content: "", streaming: true, createdAt: now };
 
       setMessages((prev) => [...prev, userMsg, assistantMsg]);
       setInput("");
@@ -495,17 +529,36 @@ export function ChatPage() {
             unlistenDone();
             if (!mountedRef.current) return;
 
-            if (event.payload.error && !cancelRef.current) {
+            if (event.payload.error && !cancelRef.current && !accumulatedText) {
               setMessages((prev) =>
                 prev.map((m) =>
                   m.id === assistantId ? { ...m, content: `${t("chat.error")}${event.payload.error}`, streaming: false } : m,
                 ),
               );
+              // If the error looks like real AI content, persist it
+              const errText = event.payload.error;
+              const looksLikeContent = errText.length > 100 || errText.includes("payloads") || errText.includes("text");
+              if (looksLikeContent && sessionId) {
+                try { await addMessage(sessionId, "assistant", `${t("chat.error")}${errText}`); } catch { /* non-fatal */ }
+              }
             } else {
-              setMessages((prev) =>
-                prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
-              );
-              if (sessionId && accumulatedText) addMessage(sessionId, "assistant", accumulatedText).catch(console.error);
+              if (event.payload.error && !cancelRef.current && accumulatedText) {
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+                );
+              } else {
+                setMessages((prev) =>
+                  prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)),
+                );
+              }
+            }
+
+            // Persist assistant response regardless of error flag
+            if (!cancelRef.current && sessionId && accumulatedText) {
+              try { await addMessage(sessionId, "assistant", accumulatedText); } catch (e) { console.error("Failed to save assistant message:", e); }
+            }
+
+            if (accumulatedText) {
               const promptText = [...messages, userMsg].map((m) => m.content).join(" ");
               recordTokenUsage({
                 instanceId: effectiveInstanceId ?? "unknown",
@@ -526,10 +579,14 @@ export function ChatPage() {
         ac.signal.addEventListener("abort", () => {
           unlistenChunk();
           unlistenDone();
+          if (sessionId && accumulatedText) {
+            addMessage(sessionId, "assistant", accumulatedText).catch(console.error);
+          }
           if (mountedRef.current) {
             setMessages((prev) => prev.map((m) => (m.id === assistantId ? { ...m, streaming: false } : m)));
             setIsStreaming(false);
           }
+          isSendingRef.current = false;
         }, { once: true });
 
         invoke("stream_chat", {
@@ -635,7 +692,7 @@ export function ChatPage() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setShowPicker(false)} />
           <div className="absolute right-3 top-14 w-64 rounded-2xl overflow-hidden z-50 shadow-xl"
-            style={{ border: "1px solid rgba(6,182,212,0.2)", background: "white" }}>
+            style={{ border: "1px solid rgba(6,182,212,0.2)", background: "hsl(var(--card))" }}>
             {instances.map((inst) => (
               <button key={inst.id}
                 onClick={() => {
@@ -688,46 +745,69 @@ export function ChatPage() {
           </div>
         )}
 
-        {messages.map((msg) => (
-          <div key={msg.id} className={`flex gap-2 bubble-enter ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
-            <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-              style={{
-                background: msg.role === "user" ? "hsl(var(--primary))" : "rgba(6,182,212,0.1)",
-              }}>
-              {msg.role === "user"
-                ? <User size={14} className="text-white" />
-                : <Bot  size={14} style={{ color: "hsl(var(--primary))" }} />}
-            </div>
-            <div
-              className="max-w-[80%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed"
-              style={msg.role === "user" ? {
-                background: "hsl(var(--primary))", color: "white",
-                borderTopRightRadius: 4,
-              } : {
-                background: "white", color: "hsl(var(--foreground))",
-                borderTopLeftRadius: 4,
-                border: "1px solid rgba(6,182,212,0.12)",
-                boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
-              }}
-            >
-              {msg.streaming && !msg.content ? (
-                <span className="flex items-center gap-1 py-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "hsl(var(--primary))", opacity: 0.6, animationDelay: "0ms" }} />
-                  <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "hsl(var(--primary))", opacity: 0.6, animationDelay: "150ms" }} />
-                  <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "hsl(var(--primary))", opacity: 0.6, animationDelay: "300ms" }} />
-                </span>
-              ) : (
-                <>
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
-                  {msg.streaming && (
-                    <span className="inline-block w-0.5 h-4 ml-0.5 rounded-sm animate-pulse"
-                      style={{ background: "hsl(var(--primary))", opacity: 0.7 }} />
-                  )}
-                </>
+        {messages.map((msg, idx) => {
+          const prevMsg = messages[idx - 1];
+          const showDateSep =
+            msg.createdAt &&
+            (!prevMsg?.createdAt ||
+              new Date(msg.createdAt).toDateString() !== new Date(prevMsg.createdAt).toDateString());
+          return (
+            <React.Fragment key={msg.id}>
+              {showDateSep && msg.createdAt && (
+                <div className="flex justify-center">
+                  <span className="text-[10px] text-[hsl(var(--muted-foreground))] bg-[hsl(var(--muted))]/40 px-3 py-0.5 rounded-full">
+                    {new Date(msg.createdAt).toLocaleDateString(undefined, { month: "long", day: "numeric", weekday: "short" })}
+                  </span>
+                </div>
               )}
-            </div>
-          </div>
-        ))}
+              <div className={`flex gap-2 bubble-enter ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+                <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
+                  style={{
+                    background: msg.role === "user" ? "hsl(var(--primary))" : "rgba(6,182,212,0.1)",
+                  }}>
+                  {msg.role === "user"
+                    ? <User size={14} className="text-white" />
+                    : <Bot  size={14} style={{ color: "hsl(var(--primary))" }} />}
+                </div>
+                <div className={`flex flex-col max-w-[80%] ${msg.role === "user" ? "items-end" : "items-start"}`}>
+                  <div
+                    className="rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed"
+                    style={msg.role === "user" ? {
+                      background: "hsl(var(--primary))", color: "white",
+                      borderTopRightRadius: 4,
+                    } : {
+                      background: "hsl(var(--card))", color: "hsl(var(--foreground))",
+                      borderTopLeftRadius: 4,
+                      border: "1px solid rgba(6,182,212,0.12)",
+                      boxShadow: "0 1px 4px rgba(0,0,0,0.06)",
+                    }}
+                  >
+                    {msg.streaming && !msg.content ? (
+                      <span className="flex items-center gap-1 py-0.5">
+                        <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "hsl(var(--primary))", opacity: 0.6, animationDelay: "0ms" }} />
+                        <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "hsl(var(--primary))", opacity: 0.6, animationDelay: "150ms" }} />
+                        <span className="w-1.5 h-1.5 rounded-full animate-bounce" style={{ background: "hsl(var(--primary))", opacity: 0.6, animationDelay: "300ms" }} />
+                      </span>
+                    ) : (
+                      <>
+                        <p className="whitespace-pre-wrap">{msg.content}</p>
+                        {msg.streaming && (
+                          <span className="inline-block w-0.5 h-4 ml-0.5 rounded-sm animate-pulse"
+                            style={{ background: "hsl(var(--primary))", opacity: 0.7 }} />
+                        )}
+                      </>
+                    )}
+                  </div>
+                  {msg.createdAt && !msg.streaming && (
+                    <span className="text-[10px] text-[hsl(var(--muted-foreground))]/60 mt-0.5 px-1">
+                      {formatMsgTime(msg.createdAt)}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </React.Fragment>
+          );
+        })}
         <div ref={bottomRef} />
       </div>
 
@@ -753,7 +833,7 @@ export function ChatPage() {
 
       {/* Input area */}
       <div className="chat-input-bar px-3 pt-2 flex-shrink-0"
-        style={{ borderTop: "1px solid rgba(6,182,212,0.1)", background: "white" }}>
+        style={{ borderTop: "1px solid rgba(6,182,212,0.1)", background: "hsl(var(--card))" }}>
         {/* Tool toggles */}
         <div className="flex items-center gap-1.5 mb-2 flex-wrap">
           <button
@@ -810,8 +890,8 @@ export function ChatPage() {
 
             {showModelPicker && (
               <div className="absolute bottom-full mb-1.5 left-0 w-60 rounded-2xl overflow-hidden z-50 max-h-72 overflow-y-auto"
-                style={{ border: "1px solid rgba(6,182,212,0.2)", background: "white", boxShadow: "0 8px 24px rgba(0,0,0,0.14)" }}>
-                <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 sticky top-0 bg-white">
+                style={{ border: "1px solid rgba(6,182,212,0.2)", background: "hsl(var(--card))", boxShadow: "0 8px 24px rgba(0,0,0,0.14)" }}>
+                <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground border-b border-border/50 sticky top-0 bg-[hsl(var(--card))]">
                   {t("model.pickerTitle")}
                 </div>
 
@@ -895,7 +975,7 @@ export function ChatPage() {
                 <div key={p.id} className="relative group">
                   <button
                     onClick={() => { setInput(p.content); setShowPrompts(false); }}
-                    className="touch-btn flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-[hsl(var(--border))] bg-white text-xs"
+                    className="touch-btn flex items-center gap-1 px-2.5 py-1.5 rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] text-xs"
                   >
                     <span>{p.emoji}</span>
                     <span>{p.label}</span>
@@ -947,7 +1027,8 @@ export function ChatPage() {
             className="flex-1 px-3.5 py-2.5 rounded-2xl text-sm disabled:opacity-50 resize-none"
             style={{
               border: "1px solid rgba(6,182,212,0.25)",
-              background: "white",
+              background: "hsl(var(--card))",
+              color: "hsl(var(--foreground))",
               lineHeight: "1.5",
               maxHeight: "120px",
               overflowY: "auto",

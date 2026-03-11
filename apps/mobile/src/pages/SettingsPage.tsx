@@ -283,7 +283,7 @@ function ApiKeyPanel() {
   }, [unmark]);
 
   return (
-    <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+    <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
       {/* Hint banner */}
       <div className="flex items-start gap-2.5 px-4 py-3 bg-blue-50 border-b border-blue-100">
         <Key size={14} className="text-blue-600 flex-shrink-0 mt-0.5" />
@@ -329,7 +329,7 @@ function SettingRow({
     <button
       onClick={onClick}
       disabled={!onClick}
-      className={`touch-btn w-full flex items-center gap-3 px-4 py-3.5 bg-white border-b border-[hsl(var(--border))]/50 last:border-0 text-left ${
+      className={`touch-btn w-full flex items-center gap-3 px-4 py-3.5 bg-[hsl(var(--card))] border-b border-[hsl(var(--border))]/50 last:border-0 text-left ${
         danger ? "text-red-600" : "text-[hsl(var(--foreground))]"
       }`}
     >
@@ -398,7 +398,7 @@ function BudgetEditor() {
             budget.enabled ? "bg-[hsl(var(--primary))]" : "bg-[hsl(var(--border))]"
           }`}
         >
-          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+          <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-[hsl(var(--card))] shadow transition-all ${
             budget.enabled ? "left-5" : "left-0.5"
           }`} />
         </button>
@@ -460,7 +460,7 @@ function ToggleRow({ storageKey, label, desc, defaultOn }: {
         onClick={() => { const n = !enabled; setEnabled(n); localStorage.setItem(storageKey, String(n)); }}
         className={`touch-btn relative w-11 h-6 rounded-full transition-colors flex-shrink-0 ${enabled ? "bg-[hsl(var(--primary))]" : "bg-[hsl(var(--border))]"}`}
       >
-        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${enabled ? "left-5" : "left-0.5"}`} />
+        <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-[hsl(var(--card))] shadow transition-all ${enabled ? "left-5" : "left-0.5"}`} />
       </button>
     </div>
   );
@@ -514,13 +514,13 @@ export function SettingsPage() {
 
         {/* ── Language ── */}
         <SectionHeader title={t("settings.sectionLang")} />
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden p-4">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden p-4">
           <LangSelector />
         </div>
 
         {/* ── Defaults ── */}
         <SectionHeader title={t("settings.sectionDefaults")} />
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           {[
             {
               key: "clawno-pii",
@@ -553,7 +553,7 @@ export function SettingsPage() {
 
         {/* ── Token budget ── */}
         <SectionHeader title={t("settings.sectionBudget")} />
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           <button
             onClick={() => setShowBudget((v) => !v)}
             className="touch-btn w-full flex items-center gap-3 px-4 py-3.5 text-left"
@@ -574,7 +574,7 @@ export function SettingsPage() {
 
         {/* ── AI 提供商推荐 ── */}
         <SectionHeader title={t("settings.sectionAiProviders")} />
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden mb-2">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden mb-2">
           {/* 引导说明 */}
           <div className="flex items-start gap-2.5 px-4 py-3 bg-amber-50 border-b border-amber-100">
             <Sparkles size={14} className="text-amber-600 flex-shrink-0 mt-0.5" />
@@ -616,7 +616,7 @@ export function SettingsPage() {
         {configured.length > 0 && (
           <>
             <SectionHeader title={t("settings.sectionProviders")} />
-            <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+            <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
               {configured.map((p) => (
                 <div key={p} className="flex items-center gap-3 px-4 py-3 border-b border-[hsl(var(--border))]/50 last:border-0">
                   <CheckCircle2 size={16} className="text-green-500 flex-shrink-0" />
@@ -629,7 +629,7 @@ export function SettingsPage() {
 
         {/* ── Storage ── */}
         <SectionHeader title={t("settings.sectionStorage")} />
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           <SettingRow
             icon={Database}
             label={purging ? t("tokens.purging") : purgeDone ? t("tokens.purgeShortcutDone") : t("settings.storage.purgeTitle")}
@@ -649,7 +649,7 @@ export function SettingsPage() {
 
         {/* ── About ── */}
         <SectionHeader title={t("settings.sectionAbout")} />
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           <div className="px-4 py-4 space-y-2">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-2xl flex items-center justify-center"

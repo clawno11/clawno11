@@ -85,7 +85,7 @@ export function SecurityPage() {
 
         {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
-          <div className="rounded-xl border border-[hsl(var(--border))] bg-white p-3 text-center">
+          <div className="rounded-xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] p-3 text-center">
             <p className="text-2xl font-bold text-[hsl(var(--foreground))]">{events.length}</p>
             <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-0.5">{t("security.totalEvents")}</p>
           </div>
@@ -108,7 +108,7 @@ export function SecurityPage() {
         </div>
 
         {/* Security features status */}
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           <div className="px-4 py-3 border-b border-[hsl(var(--border))]">
             <p className="font-semibold text-sm">{t("security.featuresTitle")}</p>
           </div>
@@ -142,7 +142,7 @@ export function SecurityPage() {
         </div>
 
         {/* Event log */}
-        <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+        <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
             <p className="font-semibold text-sm">{t("security.eventsTitle")}</p>
             {events.length > 0 && (

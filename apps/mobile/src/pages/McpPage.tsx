@@ -206,7 +206,7 @@ function ServerCard({
             server.enabled ? "bg-primary" : "bg-muted"
           }`}
         >
-          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${
+          <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-[hsl(var(--card))] shadow transition-all ${
             server.enabled ? "left-[18px]" : "left-0.5"
           }`} />
         </button>

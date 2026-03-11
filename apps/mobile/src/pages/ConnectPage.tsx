@@ -58,7 +58,7 @@ function GuideSteps({ steps }: { steps: string[] }) {
 
 function Section({ title, color, children }: { title: string; color: string; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-[hsl(var(--border))] overflow-hidden bg-white">
+    <section className="rounded-2xl border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]">
       <div className="px-4 py-3 border-b border-[hsl(var(--border))]"
         style={{ background: `${color}08` }}>
         <p className="font-semibold text-sm" style={{ color }}>{title}</p>
@@ -185,7 +185,7 @@ function PinConfirmModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="w-full max-w-sm rounded-2xl bg-white overflow-hidden shadow-2xl">
+      <div className="w-full max-w-sm rounded-2xl bg-[hsl(var(--card))] overflow-hidden shadow-2xl">
         {/* Header */}
         <div className="px-5 pt-5 pb-3 text-center">
           <div className="w-12 h-12 rounded-2xl bg-[hsl(var(--primary))]/10 flex items-center justify-center mx-auto mb-3">
@@ -320,7 +320,7 @@ function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
         />
       )}
 
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-white overflow-hidden">
+      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
         <div className="flex items-center gap-3 px-4 py-3 border-b border-[hsl(var(--border))]/60"
           style={{ background: "rgba(6,182,212,0.04)" }}>
           <QrCode size={16} className="text-[hsl(var(--primary))]" />
@@ -463,7 +463,7 @@ export function ConnectPage() {
                 onClick={() => setMethod(m.id)}
                 className="touch-btn flex flex-col items-center gap-1.5 py-3 rounded-2xl border transition-all"
                 style={{
-                  background: active ? m.bg : "white",
+                  background: active ? m.bg : "hsl(var(--card))",
                   borderColor: active ? m.color : "hsl(var(--border))",
                   boxShadow: active ? `0 0 0 1.5px ${m.color}40` : "none",
                 }}
@@ -635,7 +635,7 @@ export function ConnectPage() {
           )}
 
           {/* ── Add Server (universal, always visible) ── */}
-          <section className="rounded-2xl border border-[hsl(var(--border))] overflow-hidden bg-white">
+          <section className="rounded-2xl border border-[hsl(var(--border))] overflow-hidden bg-[hsl(var(--card))]">
             <div className="px-4 py-3 border-b border-[hsl(var(--border))]">
               <p className="font-semibold text-sm flex items-center gap-2">
                 <Plus size={16} style={{ color: "hsl(var(--primary))" }} />

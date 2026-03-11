@@ -17,7 +17,7 @@ export function TopBar({ title, subtitle, back, right }: TopBarProps) {
       className="top-bar flex items-center gap-2 py-3 flex-shrink-0"
       style={{
         borderBottom: "1px solid rgba(6,182,212,0.1)",
-        background: "rgba(255,255,255,0.97)",
+        background: "hsl(var(--background) / 0.97)",
         backdropFilter: "blur(12px)",
         WebkitBackdropFilter: "blur(12px)",
         paddingLeft: "max(env(safe-area-inset-left, 0px), 1rem)",

@@ -162,7 +162,7 @@ function RuleCard({
             {/* Enable toggle */}
             <button onClick={() => onUpdate(rule.id, { enabled: !rule.enabled })}
               className={`relative w-8 h-4 rounded-full transition-colors ${rule.enabled ? "bg-primary" : "bg-muted"}`}>
-              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-all ${rule.enabled ? "left-[18px]" : "left-0.5"}`} />
+              <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-[hsl(var(--card))] shadow transition-all ${rule.enabled ? "left-[18px]" : "left-0.5"}`} />
             </button>
             <button onClick={() => setEditing(true)}
               className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors">
