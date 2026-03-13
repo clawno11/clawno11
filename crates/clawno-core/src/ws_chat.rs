@@ -612,13 +612,13 @@ impl OpenClawWs {
                         let had_streaming_text = !text_parts.is_empty();
 
                         if !had_streaming_text {
-                            // Try summary.text, result.text, or direct text
                             for path in &["/summary/text", "/result/text"] {
                                 if let Some(t) = payload
                                     .pointer(path)
                                     .and_then(|v| v.as_str())
                                     .filter(|s| !s.is_empty())
                                 {
+                                    on_delta(t);
                                     text_parts.push(t.to_string());
                                     break;
                                 }
@@ -628,6 +628,7 @@ impl OpenClawWs {
                             {
                                 for p in payloads {
                                     if let Some(t) = p.get("text").and_then(|v| v.as_str()) {
+                                        on_delta(t);
                                         text_parts.push(t.to_string());
                                     }
                                 }
@@ -651,8 +652,8 @@ impl OpenClawWs {
                         break;
                     }
 
-                    // Legacy flat response: {payload:{text, tokens_used}}
                     if let Some(t) = payload.get("text").and_then(|v| v.as_str()) {
+                        on_delta(t);
                         text_parts.push(t.to_string());
                         tokens_used = payload.get("tokens_used").and_then(|v| v.as_u64());
                         break;
@@ -704,6 +705,7 @@ impl OpenClawWs {
                     }
                     let payload = frame.get("payload").cloned().unwrap_or_default();
                     if let Some(t) = payload.get("text").and_then(|v| v.as_str()) {
+                        on_delta(t);
                         text_parts.push(t.to_string());
                     }
                     tokens_used = payload.get("tokens_used").and_then(|v| v.as_u64());
@@ -727,8 +729,9 @@ impl OpenClawWs {
             }
         }
 
+        let final_text = text_parts.join("");
         Ok(WsChatResponse {
-            text: text_parts.join(""),
+            text: final_text,
             tokens_used,
             tool_calls,
         })
