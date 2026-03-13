@@ -162,15 +162,15 @@ export PATH="$HOME/.fnm:$HOME/.local/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"
 eval "$(~/.fnm/fnm env --shell bash 2>/dev/null)" 2>/dev/null || true"#;
 
 pub fn cmd_stop_gateway() -> String {
-    format!("{PATH_PREAMBLE}\npm2 stop openclaw-gateway 2>/dev/null || pm2 stop openclaw 2>/dev/null || true\necho gateway-stopped")
+    format!("{PATH_PREAMBLE}\npm2 stop openclaw 2>/dev/null || true\necho gateway-stopped")
 }
 
 pub fn cmd_start_gateway() -> String {
-    format!("{PATH_PREAMBLE}\npm2 start openclaw-gateway 2>/dev/null || pm2 start openclaw 2>/dev/null || true\necho gateway-started")
+    format!("{PATH_PREAMBLE}\npm2 start openclaw 2>/dev/null || true\necho gateway-started")
 }
 
 pub fn cmd_restart_gateway() -> String {
-    format!("{PATH_PREAMBLE}\npm2 restart openclaw-gateway 2>/dev/null || pm2 restart openclaw 2>/dev/null || true\necho gateway-restarted")
+    format!("{PATH_PREAMBLE}\npm2 restart openclaw 2>/dev/null || true\necho gateway-restarted")
 }
 
 pub fn cmd_gateway_status() -> String {
@@ -178,10 +178,11 @@ pub fn cmd_gateway_status() -> String {
 }
 
 pub fn cmd_configure_api_key(provider: &str, api_key: &str) -> String {
-    let escaped_key = shell_escape(api_key);
     let escaped_provider = shell_escape(provider);
+    let escaped_key = shell_escape(api_key);
+    // Pipe the key via heredoc to avoid exposing it in the process argument list
     format!(
-        "{PATH_PREAMBLE}\nopenclaw models auth {escaped_provider} {escaped_key} 2>&1 && echo api-key-configured || echo api-key-failed"
+        "{PATH_PREAMBLE}\necho {escaped_key} | openclaw models auth paste-token --provider {escaped_provider} 2>&1 && echo api-key-configured || echo api-key-failed"
     )
 }
 
@@ -214,7 +215,7 @@ eval "$(~/.fnm/fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
 if command -v node >/dev/null 2>&1; then
     VER=$(node --version)
     MAJOR=$(echo "$VER" | sed 's/v//' | cut -d. -f1)
-    if [ "$MAJOR" -ge 18 ] 2>/dev/null; then
+    if [ "$MAJOR" -ge 22 ] 2>/dev/null; then
         echo "already-installed:$VER"
         exit 0
     fi
@@ -275,16 +276,32 @@ export NVM_DIR="$HOME/.nvm"
 export PATH="$HOME/.fnm:$HOME/.local/bin:$PATH"
 eval "$(~/.fnm/fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
 
-npm install -g @openclaw/cli > /dev/null 2>&1
+_oc_check() {
+    NPM_BIN_DIR="$(npm prefix -g 2>/dev/null)/bin"
+    export PATH="$NPM_BIN_DIR:$HOME/.local/bin:$PATH"
+    command -v openclaw >/dev/null 2>&1
+}
 
-NPM_BIN_DIR="$(npm prefix -g 2>/dev/null)/bin"
-export PATH="$NPM_BIN_DIR:$PATH"
+# Attempt 1: default registry
+npm install -g openclaw 2>/dev/null && _oc_check && {
+    echo "installed:$(openclaw --version 2>/dev/null || echo unknown)"; exit 0; }
 
-if command -v openclaw >/dev/null 2>&1; then
-    VER=$(openclaw --version 2>/dev/null || echo "unknown")
-    echo "installed:$VER"
-    exit 0
-fi
+# Attempt 2: China mirror (npmmirror)
+npm install -g openclaw --registry https://registry.npmmirror.com 2>/dev/null && _oc_check && {
+    echo "installed:$(openclaw --version 2>/dev/null || echo unknown)"; exit 0; }
+
+# Attempt 3: permission fix — install to user prefix
+USER_PREFIX="$HOME/.local"
+mkdir -p "$USER_PREFIX/bin" 2>/dev/null
+npm install -g openclaw --prefix "$USER_PREFIX" 2>/dev/null && {
+    export PATH="$USER_PREFIX/bin:$PATH"
+    _oc_check && { echo "installed:$(openclaw --version 2>/dev/null || echo unknown)"; exit 0; }
+}
+
+# Attempt 4: clean cache + retry with mirror
+npm cache clean --force 2>/dev/null
+npm install -g openclaw --registry https://registry.npmmirror.com 2>/dev/null && _oc_check && {
+    echo "installed:$(openclaw --version 2>/dev/null || echo unknown)"; exit 0; }
 
 echo "openclaw-not-found-after-install"
 exit 1
@@ -315,9 +332,9 @@ if ! command -v pm2 >/dev/null 2>&1; then
 fi
 
 if command -v pm2 >/dev/null 2>&1; then
-    pm2 delete openclaw-gateway > /dev/null 2>&1 || true
+    pm2 delete openclaw > /dev/null 2>&1 || true
     pm2 start "$CLAW_BIN" \
-        --name openclaw-gateway \
+        --name openclaw \
         --interpreter none \
         -- gateway --port {port} --allow-unconfigured > /dev/null 2>&1
     pm2 save > /dev/null 2>&1 || true
@@ -328,7 +345,7 @@ else
         > ~/openclaw-logs/gateway.log 2>&1 &
 fi
 
-for i in $(seq 1 15); do
+for i in $(seq 1 30); do
     if nc -z localhost {port} > /dev/null 2>&1 || \
        curl -sf "http://localhost:{port}/" > /dev/null 2>&1; then
         echo "gateway-ready:{port}"
@@ -337,7 +354,7 @@ for i in $(seq 1 15); do
     sleep 1
 done
 
-echo "gateway-start-failed:port {port} not listening after 15s"
+echo "gateway-start-failed:port {port} not listening after 30s"
 exit 1
 "#
     )
@@ -584,7 +601,144 @@ mod exec {
 
         Ok((exit_code, output.trim().to_string()))
     }
+
+    /// Execute a script over SSH with line-by-line streaming output.
+    ///
+    /// Each line of stdout/stderr is passed to `on_line` as it arrives,
+    /// enabling real-time progress display in the frontend.
+    /// The full output is still collected and returned.
+    pub async fn ssh_exec_streaming<F>(
+        args: &SshArgs,
+        script: &str,
+        on_line: F,
+    ) -> Result<(u32, String), String>
+    where
+        F: Fn(&str) + Send + 'static,
+    {
+        use russh::ChannelMsg;
+
+        let kh_path = default_known_hosts_path();
+        let hid = host_key_id(&args.host, args.port);
+        let known = load_known_hosts(&kh_path);
+        let expected_fp = known.get(&hid).cloned();
+        let actual_fp = Arc::new(std::sync::Mutex::new(None));
+        let rejected = Arc::new(AtomicBool::new(false));
+
+        let handler = TofuHandler {
+            expected_fp: expected_fp.clone(),
+            actual_fp: Arc::clone(&actual_fp),
+            rejected: Arc::clone(&rejected),
+        };
+
+        let config = Arc::new(russh::client::Config::default());
+
+        let mut session = tokio::time::timeout(
+            Duration::from_secs(15),
+            russh::client::connect(config, (args.host.as_str(), args.port), handler),
+        )
+        .await
+        .map_err(|_| "ssh-connect-timeout".to_string())?
+        .map_err(|e| {
+            if rejected.load(Ordering::SeqCst) {
+                format!("ssh-host-key-changed:{hid} — the server's host key has changed.")
+            } else {
+                format!("ssh-connect-failed:{e}")
+            }
+        })?;
+
+        let mut authed = false;
+        if let Some(ref pem) = args.private_key {
+            if !pem.trim().is_empty() {
+                match russh_keys::decode_secret_key(pem, None) {
+                    Ok(key_pair) => {
+                        if let Ok(ok) = session
+                            .authenticate_publickey(&args.username, Arc::new(key_pair))
+                            .await
+                        {
+                            authed = ok;
+                        }
+                    }
+                    Err(e) => return Err(format!("ssh-key-parse-failed:{e}")),
+                }
+            }
+        }
+        if !authed {
+            if let Some(ref pass) = args.password {
+                if !pass.is_empty() {
+                    authed = session
+                        .authenticate_password(&args.username, pass)
+                        .await
+                        .unwrap_or(false);
+                }
+            }
+        }
+        if !authed {
+            return Err("ssh-auth-failed".to_string());
+        }
+
+        if expected_fp.is_none() {
+            if let Ok(guard) = actual_fp.lock() {
+                if let Some(ref fp) = *guard {
+                    save_known_host(&kh_path, &hid, fp);
+                }
+            }
+        }
+
+        let bash_cmd = wrap_bash_heredoc(script);
+        let mut channel = session
+            .channel_open_session()
+            .await
+            .map_err(|e| format!("ssh-channel-failed:{e}"))?;
+
+        channel
+            .exec(true, bash_cmd)
+            .await
+            .map_err(|e| format!("ssh-exec-failed:{e}"))?;
+
+        let mut output = String::new();
+        let mut line_buf = String::new();
+        let mut exit_code = 0u32;
+
+        loop {
+            match channel.wait().await {
+                Some(ChannelMsg::Data { ref data }) => {
+                    let text = String::from_utf8_lossy(data);
+                    output.push_str(&text);
+                    line_buf.push_str(&text);
+                    while let Some(pos) = line_buf.find('\n') {
+                        let line = line_buf[..pos].trim_end_matches('\r').to_string();
+                        on_line(&line);
+                        line_buf = line_buf[pos + 1..].to_string();
+                    }
+                }
+                Some(ChannelMsg::ExtendedData { ref data, .. }) => {
+                    let text = String::from_utf8_lossy(data);
+                    output.push_str(&text);
+                    line_buf.push_str(&text);
+                    while let Some(pos) = line_buf.find('\n') {
+                        let line = line_buf[..pos].trim_end_matches('\r').to_string();
+                        on_line(&line);
+                        line_buf = line_buf[pos + 1..].to_string();
+                    }
+                }
+                Some(ChannelMsg::ExitStatus { exit_status }) => {
+                    exit_code = exit_status;
+                }
+                None => break,
+                _ => {}
+            }
+        }
+
+        // Flush any remaining partial line
+        if !line_buf.trim().is_empty() {
+            on_line(line_buf.trim());
+        }
+
+        Ok((exit_code, output.trim().to_string()))
+    }
 }
 
 #[cfg(feature = "ssh-exec")]
 pub use exec::ssh_exec;
+#[cfg(feature = "ssh-exec")]
+pub use exec::ssh_exec_streaming;

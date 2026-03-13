@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Server, RefreshCw } from "lucide-react";
 import {
@@ -13,15 +13,25 @@ export function InstancesPage() {
   const navigate = useNavigate();
   const { instances, setHealth, remove } = useInstanceStore();
 
+  // Keep a ref to the latest instances so checkAll never goes stale
+  // and doesn't need `instances` in its dependency array.
+  const instancesRef = useRef(instances);
+  instancesRef.current = instances;
+
   const checkAll = useCallback(async () => {
-    instances.forEach((i) => setHealth(i.id, "unknown"));
+    const current = instancesRef.current;
+    if (current.length === 0) return;
+    current.forEach((i) => setHealth(i.id, "unknown"));
     await Promise.all(
-      instances.map(async (inst) => {
+      current.map(async (inst) => {
+        // Re-check: instance may have been removed while we were probing
+        if (!instancesRef.current.some((i) => i.id === inst.id)) return;
         const { health, latencyMs } = await probeHealth(inst);
+        if (!instancesRef.current.some((i) => i.id === inst.id)) return;
         setHealth(inst.id, health, latencyMs);
       }),
     );
-  }, [instances, setHealth]);
+  }, [setHealth]);
 
   useEffect(() => {
     const autoHealth = localStorage.getItem("clawno-auto-health");
@@ -30,9 +40,7 @@ export function InstancesPage() {
   }, []); // eslint-disable-line react-hooks/exhaustive-deps — initial probe only
 
   useEffect(() => {
-    const timer = setInterval(() => {
-      if (instances.length > 0) checkAll();
-    }, 30_000);
+    const timer = setInterval(checkAll, 30_000);
     return () => clearInterval(timer);
   }, [checkAll]);
 
@@ -87,9 +95,17 @@ export function InstancesPage() {
         "确认要继续吗？"
       );
       if (!confirmed) return;
-      await uninstallLocalInstance();
     }
+    // Remove from store FIRST so the UI updates immediately
     remove(inst.id);
+    // Backend cleanup is best-effort — even if it fails, the instance is already gone from UI
+    if (inst.kind === "local") {
+      try {
+        await uninstallLocalInstance();
+      } catch (e) {
+        console.warn("uninstall_local_instance error (instance already removed from UI):", e);
+      }
+    }
   };
 
   return (

@@ -28,7 +28,13 @@ pub(super) fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
         let line = "\nexport OLLAMA_API_KEY=\"ollama-local\"\n";
         let home = user_home();
         let mut wrote = false;
-        for rc in &[".zshrc", ".bashrc", ".profile"] {
+        for rc in &[
+            ".zshrc",
+            ".bashrc",
+            ".zprofile",
+            ".bash_profile",
+            ".profile",
+        ] {
             let path = format!("{}/{}", home, rc);
             if std::path::Path::new(&path).exists() {
                 if let Ok(existing) = std::fs::read_to_string(&path) {

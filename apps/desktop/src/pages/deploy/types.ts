@@ -16,11 +16,40 @@ export interface StepDef {
   hint?: string;
 }
 
+export interface DownloadProgress {
+  phase: string;
+  bytesDownloaded: number;
+  bytesTotal: number;
+  speedBps: number;
+}
+
+/** Unified progress event from the Rust self-healing engine. */
+export interface StepProgress {
+  stepId: string;
+  phase: string;
+  strategyName: string;
+  strategyIdx: number;
+  strategyTotal: number;
+  bytesDone: number;
+  bytesTotal: number;
+  speedBps: number;
+  pct: number;
+  etaSecs: number;
+  message: string;
+  isRetrying: boolean;
+  errorSig?: string;
+  remedy?: string;
+}
+
 export interface StepState extends StepDef {
   status: StepStatus;
   detail?: string;
   fixes_applied: string[];
   elapsedSec: number;
+  /** Legacy download-only progress (backward compat). */
+  downloadProgress?: DownloadProgress;
+  /** New unified step progress from the self-healing engine. */
+  progress?: StepProgress;
 }
 
 export interface FinalResult {
@@ -77,4 +106,30 @@ export const SSH_USER_PRESETS = [
 export function fmtSec(s: number) {
   if (s < 60) return `${s}s`;
   return `${Math.floor(s / 60)}m ${s % 60}s`;
+}
+
+export function fmtBytes(b: number): string {
+  if (b < 1024) return `${b}B`;
+  if (b < 1048576) return `${(b / 1024).toFixed(1)}KB`;
+  if (b < 1073741824) return `${(b / 1048576).toFixed(1)}MB`;
+  return `${(b / 1073741824).toFixed(2)}GB`;
+}
+
+export function fmtSpeed(bps: number): string {
+  if (bps <= 0) return "0KB/s";
+  if (bps < 1048576) return `${(bps / 1024).toFixed(0)}KB/s`;
+  return `${(bps / 1048576).toFixed(1)}MB/s`;
+}
+
+export function fmtEta(dl: DownloadProgress): string {
+  if (dl.speedBps <= 0 || dl.bytesTotal <= 0) return "--";
+  const remaining = (dl.bytesTotal - dl.bytesDownloaded) / dl.speedBps;
+  if (remaining < 1) return "<1s";
+  return fmtSec(Math.ceil(remaining));
+}
+
+export function fmtEtaFromProgress(p: StepProgress): string {
+  if (p.etaSecs <= 0) return "--";
+  if (p.etaSecs < 1) return "<1s";
+  return fmtSec(Math.ceil(p.etaSecs));
 }

@@ -26,6 +26,8 @@ interface DeployResultProps {
   handleOpenDashboard: () => void;
   ollamaPhase: "idle" | "installing" | "ok" | "fail";
   onReset: () => void;
+  onRetryFromFailed?: () => void;
+  failedStepIdx?: number;
 }
 
 export function DeployResult(props: DeployResultProps) {
@@ -36,7 +38,7 @@ export function DeployResult(props: DeployResultProps) {
     aiProvider, setAiProvider, aiApiKey, setAiApiKey,
     isConfiguringAI, aiConfigResult, aiVerifyStatus, setAiVerifyStatus, aiVerifyMsg,
     handleConfigureAI, handleOpenDashboard,
-    ollamaPhase, onReset,
+    ollamaPhase, onReset, onRetryFromFailed, failedStepIdx,
   } = props;
 
   return (
@@ -204,20 +206,37 @@ export function DeployResult(props: DeployResultProps) {
         </div>
       )}
 
-      {/* After deploy: reset button */}
-      <button
-        onClick={onReset}
-        disabled={isDeploying}
-        className="w-full py-3 px-4 bg-primary text-primary-foreground rounded-xl font-semibold
-                   hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed
-                   transition-colors flex items-center justify-center gap-2"
-      >
-        {finalResult.success && finalResult.serviceStarted
-          ? t("deploy.redeploy")
-          : finalResult.success && !finalResult.serviceStarted
-          ? t("deploy.retryStart")
-          : t("deploy.startDeploy")}
-      </button>
+      {/* After deploy: retry / reset buttons */}
+      <div className="flex gap-2">
+        {!finalResult.success && onRetryFromFailed && failedStepIdx !== undefined && failedStepIdx >= 0 && (
+          <button
+            onClick={onRetryFromFailed}
+            disabled={isDeploying}
+            className="flex-1 py-3 px-4 bg-primary text-primary-foreground rounded-xl font-semibold
+                       hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed
+                       transition-colors flex items-center justify-center gap-2"
+          >
+            <RefreshCw size={14} />
+            {t("deploy.retryStart")}
+          </button>
+        )}
+        <button
+          onClick={onReset}
+          disabled={isDeploying}
+          className={`py-3 px-4 rounded-xl font-semibold transition-colors flex items-center justify-center gap-2
+                     disabled:opacity-50 disabled:cursor-not-allowed ${
+            !finalResult.success && onRetryFromFailed && failedStepIdx !== undefined && failedStepIdx >= 0
+              ? "flex-1 border border-border text-foreground hover:bg-muted/60"
+              : "w-full bg-primary text-primary-foreground hover:bg-primary/90"
+          }`}
+        >
+          {finalResult.success && finalResult.serviceStarted
+            ? t("deploy.redeploy")
+            : finalResult.success && !finalResult.serviceStarted
+            ? t("deploy.retryStart")
+            : t("deploy.startDeploy")}
+        </button>
+      </div>
     </>
   );
 }

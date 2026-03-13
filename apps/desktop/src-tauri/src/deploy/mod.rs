@@ -10,7 +10,10 @@
 ///   • deploy_remote         — remote deployment (stub, not yet implemented)
 ///   • configure_api_key     — write AI provider token via CLI (stdin pipe)
 mod auth;
+pub mod diagnosis;
+pub mod executor;
 pub mod models;
+pub mod watchdog;
 
 use serde::Deserialize;
 use std::process::Command;
@@ -147,11 +150,67 @@ pub async fn get_remote_service_info(
     port: u16,
     username: String,
     password: Option<String>,
+    private_key: Option<String>,
 ) -> crate::types::ServiceInfo {
-    let _ = (host, port, username, password);
+    use clawno_core::ssh::{self, SshArgs};
+
+    if ssh::validate_ssh_input(&host, &username, port).is_err() {
+        return crate::types::ServiceInfo {
+            name: "openclaw".to_string(),
+            status: "invalid-args".to_string(),
+            pid: None,
+            uptime: None,
+            restarts: None,
+        };
+    }
+
+    let args = SshArgs {
+        host,
+        port,
+        username,
+        password,
+        private_key,
+        gateway_port: 18789,
+    };
+
+    let script = ssh::cmd_gateway_status();
+    match ssh::ssh_exec(&args, &script).await {
+        Ok((_, out)) => parse_pm2_jlist(&out),
+        Err(_) => crate::types::ServiceInfo {
+            name: "openclaw".to_string(),
+            status: "unreachable".to_string(),
+            pid: None,
+            uptime: None,
+            restarts: None,
+        },
+    }
+}
+
+fn parse_pm2_jlist(raw: &str) -> crate::types::ServiceInfo {
+    if let Ok(procs) = serde_json::from_str::<Vec<serde_json::Value>>(raw) {
+        for p in &procs {
+            let name = p["name"].as_str().unwrap_or("");
+            if name.contains("openclaw") {
+                return crate::types::ServiceInfo {
+                    name: name.to_string(),
+                    status: p["pm2_env"]["status"]
+                        .as_str()
+                        .unwrap_or("unknown")
+                        .to_string(),
+                    pid: p["pid"].as_u64().map(|v| v as u32),
+                    uptime: p["pm2_env"]["pm_uptime"].as_u64(),
+                    restarts: p["pm2_env"]["restart_time"].as_u64().map(|v| v as u32),
+                };
+            }
+        }
+    }
     crate::types::ServiceInfo {
         name: "openclaw".to_string(),
-        status: "unknown".to_string(),
+        status: if raw.contains("no-pm2") {
+            "no-pm2".to_string()
+        } else {
+            "not-found".to_string()
+        },
         pid: None,
         uptime: None,
         restarts: None,

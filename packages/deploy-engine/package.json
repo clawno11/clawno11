@@ -1,7 +1,9 @@
 {
   "name": "@clawno/deploy-engine",
   "version": "0.1.0",
-  "description": "Local and SSH remote deployment engine for OpenClaw",
+  "private": true,
+  "deprecated": "Superseded by Rust-side deploy in apps/desktop/src-tauri/src/deploy/ and crates/clawno-core/src/ssh.rs",
+  "description": "[DEPRECATED] Local and SSH remote deployment engine for OpenClaw — replaced by Rust implementation",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

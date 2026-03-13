@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import {
   deployCheckNode, deployInstallPm2,
@@ -7,22 +7,24 @@ import {
   deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
   deployRemoteOnboard, deployRemoteStartGateway,
   ollamaEnsureInstalled,
-  type StepResult, type SshArgs,
+  type StepResult,
 } from "../../ipc";
-import i18n from "../../i18n";
 import { useInstanceStore, type ClawInstance } from "../../store/instances";
 import { useAiConfigStore } from "../../store/aiConfig";
 import { verifyProviderKey, DIRECT_PROVIDER_IDS } from "../../store/aiVerify";
 import { translateDetail } from "./translations";
-import type { DeployMode, DeployAction, SshAuthMethod, StepDef, StepState, VerifyStatus, DeployStatus } from "./types";
+import type {
+  DeployMode, DeployAction, StepDef, StepState,
+  VerifyStatus, DeployStatus, FinalResult,
+} from "./types";
 import { STEP_DEFS_BY_ACTION, REMOTE_STEP_DEFS } from "./types";
+import { useStepProgress, computeOverallPct } from "./useStepProgress";
+import { useSshForm } from "./useSshForm";
+import { useAiSetup } from "./useAiSetup";
 
 const STEP_FNS_BY_ACTION: Record<DeployAction, Array<(port?: number) => Promise<StepResult>>> = {
   full: [
     () => deployCheckNode(),
-    // Use updateOpenclaw (not deployInstallOpenclaw) so the full reinstall
-    // always upgrades to the latest version instead of skipping when openclaw
-    // is already installed at an older version.
     () => updateOpenclaw(),
     () => deployInstallPm2(),
     () => deployOnboard(),
@@ -40,35 +42,25 @@ const STEP_FNS_BY_ACTION: Record<DeployAction, Array<(port?: number) => Promise<
 
 export function useDeployState() {
   const { t } = useTranslation();
-  const [mode, setMode]               = useState<DeployMode>("local");
-  const [steps, setSteps]             = useState<StepState[]>([]);
+  const [mode, setMode] = useState<DeployMode>("local");
+  const [steps, setSteps] = useState<StepState[]>([]);
+  const stepsRef = useRef<StepState[]>([]);
+  stepsRef.current = steps;
   const [isDeploying, setIsDeploying] = useState(false);
-  const [finalResult, setFinalResult] = useState<{
-    success: boolean;
-    serviceStarted: boolean;
-    message: string;
-    inst?: ClawInstance;
-  } | null>(null);
+  const [finalResult, setFinalResult] = useState<FinalResult | null>(null);
   const [ollamaPhase, setOllamaPhase] = useState<"idle" | "installing" | "ok" | "fail">("idle");
-  const [activeIdx, setActiveIdx]     = useState<number>(-1);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [activeIdx, setActiveIdx] = useState<number>(-1);
   const addOrUpdate = useInstanceStore((s) => s.addOrUpdate);
 
-  // ── SSH form state ──────────────────────────────────────────────────────────
-  const [sshHost, setSshHost]             = useState("");
-  const [sshPort, setSshPort]             = useState(22);
-  const [sshUser, setSshUser]             = useState("root");
-  const [sshAuthMethod, setSshAuthMethod] = useState<SshAuthMethod>("password");
-  const [sshPassword, setSshPassword]     = useState("");
-  const [sshPrivateKey, setSshPrivateKey] = useState("");
-  const [sshGatewayPort, setSshGatewayPort] = useState(18789);
-  const [showPassword, setShowPassword]   = useState(false);
-  const [isTestingConn, setIsTestingConn] = useState(false);
-  const [connTestResult, setConnTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
-  const keyFileRef = useRef<HTMLInputElement>(null);
+  // Delegate to focused hooks
+  const ssh = useSshForm();
+  const ai = useAiSetup();
 
-  // ── Pre-deploy status check ─────────────────────────────────────────────────
-  const [checkPhase, setCheckPhase]   = useState<"checking" | "fresh" | "installed">("checking");
+  // Unified progress listener
+  useStepProgress(activeIdx, isDeploying, setSteps);
+
+  // Pre-deploy status check
+  const [checkPhase, setCheckPhase] = useState<"checking" | "fresh" | "installed">("checking");
   const [deployStatus, setDeployStatus] = useState<DeployStatus | null>(null);
   const [isRechecking, setIsRechecking] = useState(false);
 
@@ -88,53 +80,61 @@ export function useDeployState() {
 
   useEffect(() => { runStatusCheck(); }, [runStatusCheck]);
 
-  // ── AI config state ─────────────────────────────────────────────────────────
-  const [aiProvider, setAiProvider]         = useState<string>("anthropic");
-  const [aiApiKey, setAiApiKey]             = useState("");
+  // AI config state
   const [isConfiguringAI, setIsConfiguringAI] = useState(false);
   const [aiConfigResult, setAiConfigResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [aiVerifyStatus, setAiVerifyStatus] = useState<VerifyStatus>("idle");
-  const [aiVerifyMsg, setAiVerifyMsg]       = useState<string | undefined>();
-
-  // elapsed ticker
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (activeIdx < 0 || !isDeploying) return;
-
-    timerRef.current = setInterval(() => {
-      setSteps((prev) =>
-        prev.map((s, i) =>
-          i === activeIdx ? { ...s, elapsedSec: s.elapsedSec + 1 } : s,
-        ),
-      );
-    }, 1000);
-
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [activeIdx, isDeploying]);
+  const [aiVerifyMsg, setAiVerifyMsg] = useState<string | undefined>();
 
   const updateStep = (index: number, patch: Partial<StepState>) => {
     setSteps((prev) => prev.map((s, i) => (i === index ? { ...s, ...patch } : s)));
   };
 
-  // ── Shared pipeline engine ─────────────────────────────────────────────────
+  // Pipeline engine
+  const lastPipelineRef = useRef<{
+    stepDefs: StepDef[];
+    stepFns: Array<() => Promise<StepResult>>;
+    onStepSuccess: (i: number, result: StepResult) => void;
+    onAbort: (i: number, result: StepResult | string) => void;
+    failedIdx: number;
+  } | null>(null);
+
+  const [failedStepIdx, setFailedStepIdx] = useState<number>(-1);
+  const autoRetryCountRef = useRef<Record<number, number>>({});
 
   const runDeployPipeline = async (
     stepDefs: StepDef[],
     stepFns: Array<() => Promise<StepResult>>,
     onStepSuccess: (i: number, result: StepResult) => void,
     onAbort: (i: number, result: StepResult | string) => void,
+    startFrom = 0,
   ): Promise<void> => {
-    const fresh: StepState[] = stepDefs.map((d) => ({
-      ...d, status: "pending" as const, elapsedSec: 0, fixes_applied: [],
-    }));
-    setSteps(fresh);
+    lastPipelineRef.current = { stepDefs, stepFns, onStepSuccess, onAbort, failedIdx: -1 };
+    setFailedStepIdx(-1);
+    if (startFrom === 0) autoRetryCountRef.current = {};
+
+    if (startFrom === 0) {
+      setSteps(stepDefs.map((d) => ({
+        ...d, status: "pending" as const, elapsedSec: 0, fixes_applied: [],
+      })));
+    } else {
+      setSteps((prev) => prev.map((s, i) => {
+        if (i < startFrom) return s;
+        const { detail: _, ...rest } = s;
+        return { ...rest, status: "pending" as const, elapsedSec: 0, fixes_applied: [] };
+      }));
+    }
     setFinalResult(null);
     setIsDeploying(true);
 
-    for (let i = 0; i < stepFns.length; i++) {
+    for (let i = startFrom; i < stepFns.length; i++) {
       setActiveIdx(i);
       setSteps((prev) =>
-        prev.map((s, idx) => (idx === i ? { ...s, status: "running", elapsedSec: 0, fixes_applied: [] } : s)),
+        prev.map((s, idx) => {
+          if (idx !== i) return s;
+          const { progress: _, downloadProgress: __, ...rest } = s;
+          return { ...rest, status: "running" as const, elapsedSec: 0, fixes_applied: [] };
+        }),
       );
 
       try {
@@ -144,7 +144,27 @@ export function useDeployState() {
           updateStep(i, { status: "done", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
           onStepSuccess(i, res);
         } else {
-          updateStep(i, { status: "error", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
+          // Backend now handles retries via strategy chain — only retry once
+          // from frontend for commands that don't have backend self-healing.
+          const retries = autoRetryCountRef.current[i] ?? 0;
+          const currentStep = stepsRef.current[i];
+          const hasBackendProgress = currentStep?.progress != null || currentStep?.downloadProgress != null;
+          if (retries < 1 && !hasBackendProgress) {
+            autoRetryCountRef.current[i] = retries + 1;
+            updateStep(i, { status: "running", elapsedSec: 0, detail: "", fixes_applied: [...(res.fixes_applied ?? []), "auto-retry"] });
+            await new Promise((r) => setTimeout(r, 2000));
+            const res2 = await stepFns[i]!();
+            if (res2.ok) {
+              updateStep(i, { status: "done", detail: res2.detail, fixes_applied: [...(res.fixes_applied ?? []), "auto-retry-success", ...(res2.fixes_applied ?? [])] });
+              onStepSuccess(i, res2);
+              continue;
+            }
+            updateStep(i, { status: "error", detail: res2.detail, fixes_applied: [...(res.fixes_applied ?? []), "auto-retry-failed", ...(res2.fixes_applied ?? [])] });
+          } else {
+            updateStep(i, { status: "error", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
+          }
+          setFailedStepIdx(i);
+          if (lastPipelineRef.current) lastPipelineRef.current.failedIdx = i;
           onAbort(i, res);
           setIsDeploying(false);
           setActiveIdx(-1);
@@ -153,6 +173,8 @@ export function useDeployState() {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         updateStep(i, { status: "error", detail: msg, fixes_applied: [] });
+        setFailedStepIdx(i);
+        if (lastPipelineRef.current) lastPipelineRef.current.failedIdx = i;
         onAbort(i, msg);
         setIsDeploying(false);
         setActiveIdx(-1);
@@ -164,8 +186,7 @@ export function useDeployState() {
     setIsDeploying(false);
   };
 
-  // ── Local deploy ────────────────────────────────────────────────────────────
-
+  // Local deploy
   const handleLocalDeploy = async (action: DeployAction = "full") => {
     const port = 18789;
     const stepDefs: StepDef[] = STEP_DEFS_BY_ACTION[action].map((k) => ({
@@ -216,44 +237,11 @@ export function useDeployState() {
     );
   };
 
-  // ── Test SSH connection ─────────────────────────────────────────────────────
-
-  const buildSshArgs = (): SshArgs => ({
-    host: sshHost.trim(),
-    port: sshPort,
-    username: sshUser.trim() || "root",
-    ...(sshAuthMethod === "password" && sshPassword ? { password: sshPassword } : {}),
-    ...(sshAuthMethod === "key" && sshPrivateKey ? { privateKey: sshPrivateKey } : {}),
-    gatewayPort: sshGatewayPort,
-  });
-
-  const handleTestConnection = async () => {
-    if (!sshHost.trim()) return;
-    const sshArgs = buildSshArgs();
-    setIsTestingConn(true);
-    setConnTestResult(null);
-    try {
-      const res = await deployRemoteConnect(sshArgs);
-      setConnTestResult({
-        ok:  res.ok,
-        msg: res.ok
-          ? (i18n.language === "en" ? "Connection successful" : "连接成功")
-          : translateDetail(res.detail),
-      });
-    } catch (e) {
-      setConnTestResult({ ok: false, msg: String(e) });
-    } finally {
-      setIsTestingConn(false);
-    }
-  };
-
-  // ── Remote (SSH) deploy ─────────────────────────────────────────────────────
-
+  // Remote deploy
   const handleRemoteDeploy = async () => {
-    if (!sshHost.trim()) return;
-    const sshArgs = buildSshArgs();
-
-    const port = sshGatewayPort;
+    if (!ssh.sshHost.trim()) return;
+    const sshArgs = ssh.buildSshArgs();
+    const port = ssh.sshGatewayPort;
     const stepDefs: StepDef[] = REMOTE_STEP_DEFS.map((k) => ({
       label: t(k.labelKey), estimatedSec: k.estimatedSec,
     }));
@@ -294,16 +282,16 @@ export function useDeployState() {
   };
 
   const handleDeploy = (action: DeployAction = "full") => {
-    if (mode === "local") {
-      handleLocalDeploy(action);
-    } else {
-      handleRemoteDeploy();
-    }
+    if (mode === "local") handleLocalDeploy(action);
+    else handleRemoteDeploy();
   };
 
   const reset = () => {
-    setSteps([]); setFinalResult(null); setActiveIdx(-1);
-    setAiApiKey(""); setAiConfigResult(null);
+    setSteps([]);
+    setFinalResult(null);
+    setActiveIdx(-1);
+    ai.setApiKey("");
+    setAiConfigResult(null);
     setOllamaPhase("idle");
   };
 
@@ -312,22 +300,28 @@ export function useDeployState() {
     runStatusCheck();
   };
 
+  const retryFromFailed = () => {
+    const ctx = lastPipelineRef.current;
+    if (!ctx || ctx.failedIdx < 0) return;
+    runDeployPipeline(ctx.stepDefs, ctx.stepFns, ctx.onStepSuccess, ctx.onAbort, ctx.failedIdx);
+  };
+
   const { markConfigured: markAiConfigured } = useAiConfigStore();
 
   const handleConfigureAI = async () => {
-    if (!aiApiKey.trim()) return;
+    if (!ai.apiKey.trim()) return;
     setIsConfiguringAI(true);
     setAiConfigResult(null);
     setAiVerifyStatus("idle");
-    const key = aiApiKey.trim();
+    const key = ai.apiKey.trim();
     try {
-      const res = await configureApiKey(aiProvider, key);
+      const res = await configureApiKey(ai.selectedProvider, key);
       setAiConfigResult({ ok: res.ok, msg: translateDetail(res.detail) });
       if (res.ok) {
-        setAiApiKey("");
-        await markAiConfigured(aiProvider);
+        ai.setApiKey("");
+        await markAiConfigured(ai.selectedProvider);
         setAiVerifyStatus("verifying");
-        const v = await verifyProviderKey(aiProvider, key, DIRECT_PROVIDER_IDS.has(aiProvider));
+        const v = await verifyProviderKey(ai.selectedProvider, key, DIRECT_PROVIDER_IDS.has(ai.selectedProvider));
         setAiVerifyStatus(v.status);
         setAiVerifyMsg(v.message);
       }
@@ -351,25 +345,38 @@ export function useDeployState() {
     }
   };
 
-  const totalEstSec   = steps.reduce((s, d) => s + d.estimatedSec, 0);
-  const doneSec       = steps.filter((s) => s.status === "done" || s.status === "error").reduce((s, d) => s + d.elapsedSec, 0);
-  const activeSec     = steps[activeIdx]?.elapsedSec ?? 0;
-  const overallPct    = steps.length === 0 ? 0 : Math.min(99, ((doneSec + activeSec) / totalEstSec) * 100);
-  const freshEstSec   = STEP_DEFS_BY_ACTION.full.reduce((s, d) => s + d.estimatedSec, 0);
+  const overallPct = computeOverallPct(steps, activeIdx);
+  const totalEstSec = steps.reduce((s, d) => s + d.estimatedSec, 0);
+  const doneSec = steps.filter((s) => s.status === "done" || s.status === "error").reduce((s, d) => s + d.elapsedSec, 0);
+  const activeSec = steps[activeIdx]?.elapsedSec ?? 0;
+  const freshEstSec = STEP_DEFS_BY_ACTION.full.reduce((s, d) => s + d.estimatedSec, 0);
 
   return {
     mode, setMode,
     steps, isDeploying, finalResult, activeIdx,
     ollamaPhase,
-    sshHost, setSshHost, sshPort, setSshPort, sshUser, setSshUser,
-    sshAuthMethod, setSshAuthMethod, sshPassword, setSshPassword,
-    sshPrivateKey, setSshPrivateKey, sshGatewayPort, setSshGatewayPort,
-    showPassword, setShowPassword, isTestingConn, connTestResult, setConnTestResult, keyFileRef,
+    // SSH form — spread for backward compat
+    sshHost: ssh.sshHost, setSshHost: ssh.setSshHost,
+    sshPort: ssh.sshPort, setSshPort: ssh.setSshPort,
+    sshUser: ssh.sshUser, setSshUser: ssh.setSshUser,
+    sshAuthMethod: ssh.sshAuthMethod, setSshAuthMethod: ssh.setSshAuthMethod,
+    sshPassword: ssh.sshPassword, setSshPassword: ssh.setSshPassword,
+    sshPrivateKey: ssh.sshPrivateKey, setSshPrivateKey: ssh.setSshPrivateKey,
+    sshGatewayPort: ssh.sshGatewayPort, setSshGatewayPort: ssh.setSshGatewayPort,
+    showPassword: ssh.showPassword, setShowPassword: ssh.setShowPassword,
+    isTestingConn: ssh.isTestingConn, connTestResult: ssh.connTestResult,
+    setConnTestResult: ssh.setConnTestResult, keyFileRef: ssh.keyFileRef,
+    // Pre-deploy check
     checkPhase, deployStatus, isRechecking, runStatusCheck,
-    aiProvider, setAiProvider, aiApiKey, setAiApiKey,
+    // AI config — spread for backward compat
+    aiProvider: ai.selectedProvider, setAiProvider: ai.setSelectedProvider,
+    aiApiKey: ai.apiKey, setAiApiKey: ai.setApiKey,
     isConfiguringAI, aiConfigResult, aiVerifyStatus, setAiVerifyStatus, aiVerifyMsg,
-    handleDeploy, handleTestConnection, handleRemoteDeploy, handleConfigureAI, handleOpenDashboard,
-    reset, resetAndRecheck,
+    // Actions
+    handleDeploy, handleTestConnection: ssh.handleTestConnection,
+    handleRemoteDeploy, handleConfigureAI, handleOpenDashboard,
+    reset, resetAndRecheck, retryFromFailed, failedStepIdx,
+    // Progress metrics
     totalEstSec, doneSec, activeSec, overallPct, freshEstSec,
   };
 }

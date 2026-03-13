@@ -58,6 +58,7 @@ export function translateDetail(raw: string): string {
     ["cache-clean-failed:", (v) => `清缓存后仍失败：${v}`],
     ["ssl-fix-failed:", (v) => `SSL 修复失败：${v}`],
     ["disk-full:", (v) => `磁盘空间不足：${v}`],
+    ["disk-low:", (v) => `磁盘空间不足：${v}`],
     ["install-failed:", (v) => `安装失败：${v}`],
     ["user-prefix-failed:", (v) => `用户目录安装失败：${v}`],
     ["config-reset-failed:", (v) => `配置重置失败：${v}`],

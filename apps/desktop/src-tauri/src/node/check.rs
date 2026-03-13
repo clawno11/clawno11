@@ -1,4 +1,4 @@
-use super::scan::{openclaw_semver, scan_openclaw_bin_dir};
+use super::scan::{inject_dir, openclaw_semver, scan_openclaw_bin_dir};
 /// Deploy status checks and provider listing Tauri commands.
 use crate::platform::shell_output;
 
@@ -18,15 +18,7 @@ pub async fn check_deploy_status() -> crate::types::DeployStatus {
     if !openclaw_installed {
         if let Some(bin_dir) = scan_openclaw_bin_dir() {
             openclaw_installed = true;
-            let sep = if cfg!(target_os = "windows") {
-                ";"
-            } else {
-                ":"
-            };
-            let current = std::env::var("PATH").unwrap_or_default();
-            if !current.contains(&bin_dir) {
-                std::env::set_var("PATH", format!("{}{}{}", bin_dir, sep, current));
-            }
+            inject_dir(&bin_dir);
             let ver2 = shell_output("openclaw --version");
             let sv2 = openclaw_semver(&ver2);
             if !sv2.is_empty() {

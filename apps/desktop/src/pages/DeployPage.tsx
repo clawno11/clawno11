@@ -12,7 +12,7 @@ export function DeployPage() {
   const state = useDeployState();
   const {
     mode, setMode, steps, isDeploying, finalResult, activeIdx,
-    ollamaPhase, reset, resetAndRecheck,
+    ollamaPhase, reset, resetAndRecheck, retryFromFailed, failedStepIdx,
     totalEstSec, doneSec, activeSec, overallPct, freshEstSec,
   } = state;
 
@@ -135,6 +135,8 @@ export function DeployPage() {
           handleOpenDashboard={state.handleOpenDashboard}
           ollamaPhase={ollamaPhase}
           onReset={mode === "local" ? resetAndRecheck : reset}
+          onRetryFromFailed={retryFromFailed}
+          failedStepIdx={failedStepIdx}
         />
       )}
     </div>

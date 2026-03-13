@@ -2,6 +2,7 @@
 ///
 /// All platform-specific constants and helpers live here so that other modules
 /// only import from `crate::platform` and remain platform-agnostic in their logic.
+use serde::{Deserialize, Serialize};
 use std::process::Command;
 
 #[cfg(target_os = "windows")]
@@ -92,7 +93,7 @@ pub fn augmented_path() -> String {
             format!("{home}\\scoop\\shims"),
             r"C:\scoop\shims".to_string(),
             format!("{roaming}\\npm-global\\bin"),
-            format!("{local}\\clawno-npm-global\\bin"),
+            format!("{local}\\clawno-npm-global"),
         ];
         // fnm on Windows: actual node binaries live in version subdirectories,
         // NOT directly in %LOCALAPPDATA%\fnm.
@@ -128,8 +129,9 @@ pub fn augmented_path() -> String {
         let mut v: Vec<String> = vec![
             // Volta (cross-platform version manager)
             format!("{home}/.volta/bin"),
-            // fnm (Fast Node Manager)
+            // fnm (Fast Node Manager) — check both common locations
             format!("{home}/.fnm/current/bin"),
+            format!("{home}/.local/share/fnm/aliases/default/bin"),
             // Standard system binary locations
             "/opt/homebrew/bin".to_string(),
             "/usr/local/bin".to_string(),
@@ -166,6 +168,29 @@ pub fn augmented_path() -> String {
             versions.sort(); // ascending: v20 < v22 < v24 → last insert wins at pos 0
             for ver in versions {
                 v.insert(0, format!("{nvm_dir}/{ver}/bin"));
+            }
+        }
+        // fnm: scan version directories (same logic as nvm)
+        for fnm_base in &[
+            format!("{home}/.local/share/fnm/node-versions"),
+            format!("{home}/.fnm/node-versions"),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(fnm_base) {
+                let mut fnm_bins: Vec<String> = entries
+                    .flatten()
+                    .filter_map(|e| {
+                        let s = e.file_name().to_string_lossy().to_string();
+                        if s.starts_with('v') {
+                            Some(format!("{fnm_base}/{s}/installation/bin"))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                fnm_bins.sort();
+                for bin in fnm_bins {
+                    v.insert(0, bin);
+                }
             }
         }
         v
@@ -245,6 +270,182 @@ pub fn first_line(s: &str) -> &str {
 }
 
 // ── Unit tests ──────────────────────────────────────────────────────────────
+
+/// Returns free disk space in MB for the drive containing `path`.
+/// Returns 0 if detection fails.
+pub fn free_disk_mb(path: &str) -> u64 {
+    #[cfg(target_os = "windows")]
+    {
+        let drive = path.chars().next().unwrap_or('C');
+        let out = shell_output(&format!(
+            "powershell -NoProfile -Command \"(Get-PSDrive {}).Free\"",
+            drive
+        ));
+        out.trim()
+            .parse::<u64>()
+            .map(|b| b / 1_048_576)
+            .unwrap_or(0)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let safe_path = path.replace('\'', "'\\''");
+        // Use df -Pm for POSIX-portable output in 1MB blocks.
+        // -P forces single-line output (no wrapping on long mount points).
+        // The "Available" column is always the 4th field in POSIX mode.
+        let out = shell_output(&format!("df -Pm '{}' 2>/dev/null | tail -1", safe_path));
+        out.split_whitespace()
+            .nth(3)
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(0)
+    }
+}
+
+// ── Platform capability detection ────────────────────────────────────────────
+
+/// One-shot snapshot of the platform environment, used by the strategy-chain
+/// executor to rank available install methods and choose registries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PlatformProfile {
+    pub os: String,
+    pub arch: String,
+    pub is_chinese_locale: bool,
+    pub has_winget: bool,
+    pub has_choco: bool,
+    pub has_brew: bool,
+    pub has_nvm: bool,
+    pub has_fnm: bool,
+    pub has_volta: bool,
+    pub has_apt: bool,
+    pub has_dnf: bool,
+    pub has_pacman: bool,
+    pub free_disk_mb: u64,
+    pub is_admin: bool,
+    pub http_proxy: Option<String>,
+}
+
+pub fn detect_platform() -> PlatformProfile {
+    let home = user_home();
+
+    PlatformProfile {
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        is_chinese_locale: detect_chinese_locale(),
+        has_winget: has_command("winget --version"),
+        has_choco: has_command("choco --version"),
+        has_brew: has_command("brew --version"),
+        has_nvm: detect_nvm(),
+        has_fnm: has_command("fnm --version"),
+        has_volta: has_command("volta --version"),
+        has_apt: has_command_unix("which apt-get"),
+        has_dnf: has_command_unix("which dnf"),
+        has_pacman: has_command_unix("which pacman"),
+        free_disk_mb: free_disk_mb(&home),
+        is_admin: detect_admin(),
+        http_proxy: std::env::var("HTTP_PROXY")
+            .or_else(|_| std::env::var("http_proxy"))
+            .ok()
+            .filter(|s| !s.is_empty()),
+    }
+}
+
+fn has_command(cmd: &str) -> bool {
+    !shell_output(cmd).is_empty()
+}
+
+#[allow(unused_variables)]
+fn has_command_unix(cmd: &str) -> bool {
+    #[cfg(target_os = "windows")]
+    return false;
+    #[cfg(not(target_os = "windows"))]
+    shell_ok(cmd)
+}
+
+pub fn detect_chinese_locale() -> bool {
+    if let Ok(lang) = std::env::var("LANG") {
+        if lang.starts_with("zh") {
+            return true;
+        }
+    }
+    if let Ok(tz) = std::env::var("TZ") {
+        if tz.contains("Shanghai") || tz.contains("Chongqing") || tz.contains("Asia/Beijing") {
+            return true;
+        }
+    }
+    #[cfg(target_os = "windows")]
+    {
+        let locale = shell_output("powershell -NoProfile -Command \"(Get-Culture).Name\"");
+        if locale.trim().starts_with("zh") {
+            return true;
+        }
+    }
+    false
+}
+
+fn detect_nvm() -> bool {
+    #[cfg(target_os = "windows")]
+    return !shell_output("nvm version").is_empty();
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let nvm_dir = std::env::var("NVM_DIR")
+            .ok()
+            .filter(|d| !d.is_empty())
+            .unwrap_or_else(|| format!("{}/.nvm", user_home()));
+        std::path::Path::new(&format!("{}/nvm.sh", nvm_dir)).exists()
+    }
+}
+
+fn detect_admin() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        shell_ok("net session >nul 2>&1")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        shell_output("id -u").trim() == "0"
+    }
+}
+
+impl PlatformProfile {
+    /// Return the nodejs.org download URL for this platform.
+    pub fn node_download_url(&self, version: &str) -> String {
+        let os_part = match self.os.as_str() {
+            "windows" => "win",
+            "macos" => "darwin",
+            _ => "linux",
+        };
+        let arch_part = match self.arch.as_str() {
+            "aarch64" => "arm64",
+            "x86_64" => "x64",
+            "x86" => "x86",
+            other => other,
+        };
+        let ext = if self.os == "windows" {
+            "zip"
+        } else {
+            "tar.gz"
+        };
+        format!("https://nodejs.org/dist/{version}/node-{version}-{os_part}-{arch_part}.{ext}")
+    }
+
+    /// Preferred npm registry based on locale.
+    pub fn primary_registry(&self) -> &str {
+        if self.is_chinese_locale {
+            "https://registry.npmmirror.com"
+        } else {
+            "https://registry.npmjs.org"
+        }
+    }
+
+    /// Fallback npm registry (the opposite of primary).
+    pub fn fallback_registry(&self) -> &str {
+        if self.is_chinese_locale {
+            "https://registry.npmjs.org"
+        } else {
+            "https://registry.npmmirror.com"
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {

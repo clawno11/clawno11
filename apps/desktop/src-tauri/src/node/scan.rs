@@ -89,6 +89,25 @@ pub fn find_node_exe() -> String {
     if !path_hint_v22.is_empty() {
         return path_hint_v22;
     }
+    // No v22+ found via PATH — try filesystem scan of known install locations.
+    // This covers GUI apps where PATH is stripped by macOS/Windows.
+    if let Some(dir) = scan_node_paths() {
+        #[cfg(target_os = "windows")]
+        let bin = format!("{}\\node.exe", dir);
+        #[cfg(not(target_os = "windows"))]
+        let bin = format!("{}/node", dir);
+        if let Ok(o) = std::process::Command::new(&bin).arg("--version").output() {
+            let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if node_major(&ver) >= 22 {
+                return bin;
+            }
+        } else if major_from_path(&bin) >= 22 {
+            return bin;
+        }
+    }
+    // Fallback: return whatever we found (may be < v22), or bare name.
+    // The caller (CJS wrapper) will see the version mismatch error from openclaw
+    // and the user gets a clear "Node v22+ required" message.
     if !first_executable.is_empty() {
         return first_executable;
     }
@@ -98,6 +117,22 @@ pub fn find_node_exe() -> String {
     exe_name.to_string()
 }
 
+/// Inject a directory into the current process PATH if not already present.
+pub(super) fn inject_dir(dir: &str) {
+    if dir.is_empty() {
+        return;
+    }
+    let sep = if cfg!(target_os = "windows") {
+        ";"
+    } else {
+        ":"
+    };
+    let current = std::env::var("PATH").unwrap_or_default();
+    if !current.contains(dir) {
+        std::env::set_var("PATH", format!("{}{}{}", dir, sep, current));
+    }
+}
+
 /// Inject a binary's parent directory into the current process PATH.
 /// Returns the injected directory path.
 pub(super) fn inject_bin_dir(bin_path: &str) -> String {
@@ -105,17 +140,7 @@ pub(super) fn inject_bin_dir(bin_path: &str) -> String {
         .parent()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
-    if !parent.is_empty() {
-        let sep = if cfg!(target_os = "windows") {
-            ";"
-        } else {
-            ":"
-        };
-        let current = std::env::var("PATH").unwrap_or_default();
-        if !current.contains(&parent) {
-            std::env::set_var("PATH", format!("{}{}{}", parent, sep, current));
-        }
-    }
+    inject_dir(&parent);
     parent
 }
 
@@ -193,7 +218,7 @@ pub fn scan_openclaw_bin_dir() -> Option<String> {
         let roaming = crate::platform::data_roaming();
         let mut candidates = vec![
             format!("{roaming}\\npm"),
-            format!("{local}\\clawno-npm-global\\bin"),
+            format!("{local}\\clawno-npm-global"),
             format!("{local}\\Programs\\nodejs"),
             r"C:\Program Files\nodejs".to_string(),
         ];
@@ -507,18 +532,29 @@ pub fn scan_node_paths() -> Option<String> {
 
 /// Parse the openclaw semver from CLI output like `openclaw/1.2.3 linux-x64 node-v22.0.0\n1.2.3`.
 pub(super) fn openclaw_semver(raw: &str) -> String {
-    raw.lines()
-        .find(|l| {
-            let t = l.trim();
-            t.contains('.')
-                && t.chars()
-                    .next()
-                    .map(|c| c.is_ascii_digit())
-                    .unwrap_or(false)
-        })
-        .unwrap_or("")
-        .trim()
-        .to_string()
+    for line in raw.lines() {
+        let t = line.trim();
+        // "1.2.3" or "2026.3.12" — line starts with a digit
+        if t.contains('.')
+            && t.chars()
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(false)
+        {
+            return t.to_string();
+        }
+        // "OpenClaw 2026.3.12 (hash)" — extract version after "OpenClaw "
+        if let Some(rest) = t
+            .strip_prefix("OpenClaw ")
+            .or_else(|| t.strip_prefix("openclaw/"))
+        {
+            let ver = rest.split_whitespace().next().unwrap_or("");
+            if ver.contains('.') {
+                return ver.to_string();
+            }
+        }
+    }
+    String::new()
 }
 
 #[cfg(test)]
@@ -547,5 +583,11 @@ mod tests {
     fn openclaw_semver_parses() {
         let raw = "openclaw/1.2.3 linux-x64 node-v22.0.0\n1.2.3";
         assert_eq!(openclaw_semver(raw), "1.2.3");
+    }
+
+    #[test]
+    fn openclaw_semver_parses_new_format() {
+        assert_eq!(openclaw_semver("OpenClaw 2026.3.12 (6472949)"), "2026.3.12");
+        assert_eq!(openclaw_semver("OpenClaw 2026.3.12"), "2026.3.12");
     }
 }

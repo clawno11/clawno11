@@ -23,7 +23,7 @@ pub fn find_pm2_cmd() -> Option<String> {
         let roaming = data_roaming();
         let candidates = vec![
             format!("{roaming}\\npm\\pm2.cmd"),
-            format!("{local}\\clawno-npm-global\\bin\\pm2.cmd"),
+            format!("{local}\\clawno-npm-global\\pm2.cmd"),
             format!("{local}\\Programs\\nodejs\\pm2.cmd"),
             r"C:\Program Files\nodejs\pm2.cmd".to_string(),
         ];
@@ -204,27 +204,80 @@ pub async fn deploy_step_install_pm2() -> StepResult {
         return StepResult::ok(format!("already-installed:v{}", ver));
     }
 
-    let (ok, detail, mut fixes) = npm_install_with_fallback("pm2");
+    let (ok, _detail, mut fixes) = npm_install_with_fallback("pm2");
     if !ok {
+        // Self-healing: rebuild .pm2 home and retry
         let pm2_home = path_join(&crate::platform::user_home(), ".pm2");
         if std::path::Path::new(&pm2_home).exists() {
             let _ = std::fs::rename(&pm2_home, format!("{pm2_home}.bak"));
             fixes.push("rebuild-pm2-home".to_string());
-            let (ok2, detail2, fixes2) = npm_install_with_fallback("pm2");
-            let mut all = fixes;
-            all.extend(fixes2);
+            let (ok2, _detail2, fixes2) = npm_install_with_fallback("pm2");
+            fixes.extend(fixes2);
             if ok2 {
                 let (_, raw2, _) = run_pm2(&["--version"]);
                 let ver2 = clean_pm2_version(&raw2);
-                return StepResult::ok_fixed(format!("installed:v{}", ver2), all);
+                return StepResult::ok_fixed(format!("installed:v{}", ver2), fixes);
             }
-            return StepResult::err_fixed(detail2, all);
         }
-        return StepResult::err_fixed(detail, fixes);
+
+        // Self-healing: even if npm reported failure, check if pm2 is
+        // actually usable (npm exit code can be misleading)
+        let (_, raw_retry, _) = run_pm2(&["--version"]);
+        let ver_retry = clean_pm2_version(&raw_retry);
+        if !ver_retry.is_empty() {
+            fixes.push("npm-reported-fail-but-pm2-works".to_string());
+            return StepResult::ok_fixed(format!("installed:v{}", ver_retry), fixes);
+        }
+
+        // Self-healing: scan common global bin directories for pm2
+        // VERIFY: not just find the file — execute it to confirm it works
+        if let Some(pm2_path) = find_pm2_cmd() {
+            if let Ok(o) = std::process::Command::new(&pm2_path)
+                .arg("--version")
+                .env("PATH", augmented_path())
+                .output()
+            {
+                let v = clean_pm2_version(&String::from_utf8_lossy(&o.stdout));
+                if !v.is_empty() {
+                    fixes.push("found-pm2-via-scan-verified".to_string());
+                    return StepResult::ok_fixed(format!("installed:v{}", v), fixes);
+                }
+            }
+            // Binary file exists but execution failed — cannot trust it
+            fixes.push("found-pm2-file-but-exec-failed".to_string());
+        }
+
+        fixes.push("pm2-install-failed".to_string());
+        return StepResult::err_fixed(
+            "pm2-not-found: check npm permissions or install manually".to_string(),
+            fixes,
+        );
     }
+    // npm reported success — VERIFY pm2 actually responds
     let (_, raw2, _) = run_pm2(&["--version"]);
     let ver2 = clean_pm2_version(&raw2);
-    StepResult::ok_fixed(format!("installed:v{}", ver2), fixes)
+    if !ver2.is_empty() {
+        return StepResult::ok_fixed(format!("installed:v{}", ver2), fixes);
+    }
+    // npm said OK but pm2 doesn't respond — try scanning for the binary
+    fixes.push("npm-ok-but-pm2-not-responding".to_string());
+    if let Some(pm2_path) = find_pm2_cmd() {
+        if let Ok(o) = std::process::Command::new(&pm2_path)
+            .arg("--version")
+            .env("PATH", augmented_path())
+            .output()
+        {
+            let v = clean_pm2_version(&String::from_utf8_lossy(&o.stdout));
+            if !v.is_empty() {
+                fixes.push("found-pm2-via-scan-verified".to_string());
+                return StepResult::ok_fixed(format!("installed:v{}", v), fixes);
+            }
+        }
+    }
+    StepResult::err_fixed(
+        "pm2-installed-but-not-responding: check npm global bin path".to_string(),
+        fixes,
+    )
 }
 
 #[tauri::command]

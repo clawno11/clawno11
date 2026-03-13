@@ -53,12 +53,27 @@ fn query_openclaw_models() -> (Vec<String>, Vec<String>, String) {
     (allowed, providers, default_model)
 }
 
+/// Reject model names that contain shell metacharacters.
+fn is_safe_model_name(name: &str) -> bool {
+    !name.is_empty()
+        && !name.contains(|c: char| {
+            c.is_whitespace()
+                || c == ';'
+                || c == '|'
+                || c == '&'
+                || c == '`'
+                || c == '$'
+                || c == '\''
+                || c == '"'
+        })
+}
+
 /// Pick the first non-Ollama cloud model from the allowed list.
 fn first_cloud_model(allowed: &[String]) -> Option<&str> {
     allowed
         .iter()
         .map(|s| s.as_str())
-        .find(|m| !m.starts_with("ollama/"))
+        .find(|m| !m.starts_with("ollama/") && is_safe_model_name(m))
 }
 
 /// Automatically select the best active model based on what OpenClaw
@@ -91,7 +106,7 @@ pub fn auto_select_active_model(fixes: &mut Vec<String>) {
     }
 
     // No cloud models or cloud set failed — try the first available model
-    if let Some(fallback) = allowed.first() {
+    if let Some(fallback) = allowed.iter().find(|m| is_safe_model_name(m)) {
         let (ok, _) = super::run_silent(&format!("openclaw models set {}", fallback));
         if ok {
             fixes.push(format!("fallback-model-active:{}", fallback));
@@ -208,8 +223,7 @@ pub async fn repair_model_config(port: u16) -> StepResult {
                 fixes.push(format!("switched-to:{}", cloud));
             }
             ok
-        } else if !allowed.is_empty() {
-            let fallback = &allowed[0];
+        } else if let Some(fallback) = allowed.iter().find(|m| is_safe_model_name(m)) {
             let (ok, _) = super::run_silent(&format!("openclaw models set {}", fallback));
             if ok {
                 fixes.push(format!("switched-to-only-available:{}", fallback));
@@ -221,7 +235,7 @@ pub async fn repair_model_config(port: u16) -> StepResult {
         };
 
         if switched {
-            let _ = super::run_silent("pm2 restart openclaw");
+            crate::pm2::run_pm2(&["restart", "openclaw"]);
             fixes.push("gateway-restarted".to_string());
         }
     }
