@@ -147,6 +147,7 @@ fn load_device_identity() -> Option<DeviceIdentity> {
 /// Build the V2 device auth payload and sign it with Ed25519.
 ///
 /// OpenClaw verifies: `v2|{deviceId}|{clientId}|{clientMode}|{role}|{scopes}|{signedAtMs}|{token}|{nonce}`
+#[allow(clippy::too_many_arguments)]
 fn build_and_sign_payload(
     key: &ed25519_dalek::SigningKey,
     device_id: &str,
@@ -187,8 +188,10 @@ struct ActiveConn {
 /// protocol.  Designed as a long-lived singleton: connect once, send many
 /// messages, reconnect transparently if the connection drops.
 ///
-/// Model switching is simply a parameter in the `agent` request — it does
-/// NOT require disconnecting or re-handshaking.
+/// Model selection is managed server-side via OpenClaw agent configuration.
+/// The `model` parameter accepted by API methods is for logging and routing
+/// decisions only — it is NOT sent in the WS `agent` request because the
+/// gateway rejects unknown properties.
 pub struct OpenClawWs {
     #[allow(dead_code)]
     gateway_url: String,
@@ -279,12 +282,44 @@ impl OpenClawWs {
     where
         F: Fn(&str) + Send,
     {
+        let result = self
+            .chat_streaming_inner(message, model, session_key, &on_delta)
+            .await;
+
+        match &result {
+            Err(e)
+                if e.contains("ws-send-error")
+                    || e.contains("ws-closed")
+                    || e.contains("ws-recv-error") =>
+            {
+                eprintln!("[ws-chat] connection lost ({e}), reconnecting and retrying…");
+                {
+                    let mut guard = self.conn.lock().await;
+                    *guard = None;
+                }
+                self.connect().await?;
+                self.chat_streaming_inner(message, model, session_key, &on_delta)
+                    .await
+            }
+            _ => result,
+        }
+    }
+
+    async fn chat_streaming_inner<F>(
+        &self,
+        message: &str,
+        model: Option<&str>,
+        session_key: Option<&str>,
+        on_delta: &F,
+    ) -> Result<WsChatResponse, String>
+    where
+        F: Fn(&str) + Send,
+    {
         self.ensure_connected().await?;
 
         let req_id = gen_id();
         let idem_key = uuid_v4();
 
-        let agent_id = model.unwrap_or("main");
         let effective_session_key = match session_key {
             Some(k) if !k.is_empty() => format!("clawno11-{k}"),
             _ => format!("clawno11-{}", uuid_v4()),
@@ -292,7 +327,7 @@ impl OpenClawWs {
         let params = serde_json::json!({
             "message": message,
             "idempotencyKey": idem_key,
-            "agentId": agent_id,
+            "agentId": "main",
             "sessionKey": effective_session_key,
         });
 
@@ -302,6 +337,8 @@ impl OpenClawWs {
             "method": "agent",
             "params": params,
         });
+
+        eprintln!("[ws-chat] sending req_id={req_id}, model={model:?} (model is for logging only, not sent to gateway)");
 
         let mut guard = self.conn.lock().await;
         let conn = guard.as_mut().ok_or("ws-not-connected")?;
@@ -314,7 +351,7 @@ impl OpenClawWs {
             return Err(format!("ws-send-error: {e}"));
         }
 
-        match Self::collect_agent_response(&mut conn.ws, &req_id, &on_delta).await {
+        match Self::collect_agent_response(&mut conn.ws, &req_id, on_delta).await {
             Ok(resp) => Ok(resp),
             Err(e) => {
                 if e.contains("ws-closed") || e.contains("ws-recv-error") {
@@ -372,7 +409,18 @@ impl OpenClawWs {
     }
 
     pub async fn is_connected(&self) -> bool {
-        self.conn.lock().await.is_some()
+        let mut guard = self.conn.lock().await;
+        match guard.as_mut() {
+            Some(conn) => {
+                if conn.ws.send(Message::Ping(Vec::new())).await.is_err() {
+                    *guard = None;
+                    false
+                } else {
+                    true
+                }
+            }
+            None => false,
+        }
     }
 
     // ── Handshake ────────────────────────────────────────────────────────────
@@ -736,39 +784,6 @@ impl OpenClawWs {
             tool_calls,
         })
     }
-}
-
-// ── Convenience one-shot functions (backward-compatible API) ─────────────────
-
-/// One-shot WS chat: connect → handshake → send → receive → disconnect.
-///
-/// For repeated calls, prefer creating an `OpenClawWs` instance and keeping
-/// the persistent connection open.
-pub async fn ws_chat(
-    gateway_url: &str,
-    message: &str,
-    model: Option<&str>,
-    session_key: Option<&str>,
-) -> Result<WsChatResponse, String> {
-    let client = OpenClawWs::new(gateway_url);
-    client.connect().await?;
-    let result = client.chat(message, model, session_key).await;
-    client.disconnect().await;
-    result
-}
-
-/// One-shot WS chat with full message history.
-pub async fn ws_chat_full(
-    gateway_url: &str,
-    messages: &[serde_json::Value],
-    model: Option<&str>,
-    session_key: Option<&str>,
-) -> Result<WsChatResponse, String> {
-    let client = OpenClawWs::new(gateway_url);
-    client.connect().await?;
-    let result = client.chat_full(messages, model, session_key).await;
-    client.disconnect().await;
-    result
 }
 
 #[cfg(test)]

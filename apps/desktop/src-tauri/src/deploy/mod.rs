@@ -20,10 +20,7 @@ use crate::platform::{
 };
 use crate::types::{RemoteDeployResult, StepResult};
 
-pub use models::{
-    auto_select_active_model, provider_cheapest_model, provider_default_model,
-    restore_default_model,
-};
+pub use models::{auto_select_active_model, restore_default_model, select_model_for_provider};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -255,101 +252,24 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
     auth::ensure_auth_in_agent_file(&provider, &api_key, &mut fixes);
     auth::sync_auth_to_agents(&mut fixes);
 
-    if let Some(model) = models::provider_default_model(&provider) {
-        let set_cmd = format!("openclaw models set {}", model);
-        let (ok, out) = run_silent(&set_cmd);
-        if ok {
-            fixes.push(format!("model-set:{}", model));
-        } else {
-            fixes.push(format!(
-                "model-set-skipped:{}",
-                out.trim().chars().take(80).collect::<String>()
-            ));
-        }
-
-        let fb_cmd = format!("openclaw models fallbacks add {}", model);
-        let (fb_ok, fb_out) = run_silent(&fb_cmd);
-        if fb_ok {
-            fixes.push(format!("fallback-added:{}", model));
-        } else {
-            fixes.push(format!(
-                "fallback-add-skipped:{}",
-                fb_out.trim().chars().take(60).collect::<String>()
-            ));
-        }
-    }
+    models::select_model_for_provider(&provider, &mut fixes);
 
     StepResult::ok_fixed("api-key-configured".to_string(), fixes)
 }
 
 // ── Model config auto-fix ─────────────────────────────────────────────────────
 
-/// Run on app startup: detect missing-auth models, auto-switch default,
-/// and build the fallback chain from all providers that have auth configured.
+/// Run on app startup: ensure a working model is set as default.
 ///
-/// Returns a summary string for telemetry / logging only.
+/// Delegates to `auto_select_active_model` which dynamically queries
+/// OpenClaw's configuration — no hardcoded model names needed.
 #[tauri::command]
 pub fn fix_model_config() -> String {
-    let (ok, out) = run_silent("openclaw models");
-    if !ok {
-        return format!("skip:openclaw-not-ready");
-    }
-
-    // ── 1. Collect models that have auth ──
-    let mut auth_providers: Vec<&str> = Vec::new();
-    for line in out.lines() {
-        if line.trim_start().starts_with("- ") {
-            let rest = line.trim_start_matches("- ").trim();
-            if let Some(pname) = rest.split_whitespace().next() {
-                let p = pname.trim_end_matches(':');
-                if !p.is_empty() && !auth_providers.contains(&p) {
-                    auth_providers.push(p);
-                }
-            }
-        }
-    }
-
-    // ── 2. Check if current default model has auth ──
-    let default_model = out
-        .lines()
-        .find(|l| l.trim_start().starts_with("Default"))
-        .and_then(|l| l.splitn(2, ':').nth(1))
-        .map(|s| s.trim().to_string())
-        .unwrap_or_default();
-
-    let default_provider = default_model.split('/').next().unwrap_or("").to_string();
-
-    let default_has_auth =
-        auth_providers.contains(&default_provider.as_str()) || default_provider == "openrouter";
-
-    let mut actions: Vec<String> = Vec::new();
-
-    // ── 3. If default has no auth, switch to first model with auth ──
-    if !default_has_auth && !auth_providers.is_empty() {
-        let candidate = auth_providers
-            .iter()
-            .find_map(|&p| models::provider_default_model(p));
-        if let Some(new_model) = candidate {
-            let (ok2, _) = run_silent(&format!("openclaw models set {}", new_model));
-            if ok2 {
-                actions.push(format!("switched-default:{}", new_model));
-            }
-        }
-    }
-
-    // ── 4. Ensure every auth-bearing provider is in the fallback chain ──
-    for p in &auth_providers {
-        if let Some(model) = models::provider_default_model(p) {
-            let (ok3, _) = run_silent(&format!("openclaw models fallbacks add {}", model));
-            if ok3 {
-                actions.push(format!("fallback-ensured:{}", model));
-            }
-        }
-    }
-
-    if actions.is_empty() {
+    let mut fixes = Vec::new();
+    models::auto_select_active_model(&mut fixes);
+    if fixes.is_empty() {
         "ok:no-changes-needed".to_string()
     } else {
-        actions.join(";")
+        fixes.join(";")
     }
 }

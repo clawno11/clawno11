@@ -1,6 +1,7 @@
 // Sub-modules — each has a single, focused responsibility.
 pub mod bots; // Telegram + Discord background bots
-pub mod chat; // streaming chat proxy (SSE → Tauri events)
+              // Desktop embeds OpenClaw Web UI via Tauri multiwebview (see gateway.rs).
+              // Mobile has its own stream_chat in apps/mobile/src-tauri/src/chat.rs.
 pub mod chat_proxy; // LAN-facing REST proxy for mobile chat
 pub mod connectors; // IM connectors (Feishu, Tailscale)
 pub mod deploy; // deployment coordinator + API-key config
@@ -16,7 +17,7 @@ pub mod secure_store; // encrypted KV store (API keys, secrets)
 pub mod security; // port scanning, firewall rules, security report
 pub mod ssh_deploy; // SSH remote deployment (step-by-step)
 pub mod token_log; // SQLite schema migrations
-pub mod types; // shared serializable types (StepResult, ServiceInfo, …) // local Ollama model engine (install / pull / manage)
+pub mod types; // shared serializable types (StepResult, ServiceInfo, …)
 
 use tauri::Manager;
 
@@ -61,6 +62,7 @@ pub fn run() {
             deploy::configure_api_key,
             deploy::fix_model_config,
             deploy::models::restore_default_model,
+            deploy::models::repair_model_config,
             // ── SSH remote deploy pipeline ────────────────────────────────────
             ssh_deploy::deploy_remote_connect,
             ssh_deploy::deploy_remote_check_node,
@@ -74,6 +76,10 @@ pub fn run() {
             gateway::start_local_service,
             gateway::get_browser_url,
             gateway::open_in_browser,
+            gateway::mount_chat_webview,
+            gateway::unmount_chat_webview,
+            gateway::hide_chat_webview,
+            gateway::resize_chat_webview,
             gateway::probe_instance_health,
             gateway::get_main_agent_model,
             // ── Remote (stub) ────────────────────────────────────────────────
@@ -134,8 +140,8 @@ pub fn run() {
             mcp::toggle_openclaw_plugin,
             // ── RAG ──────────────────────────────────────────────────────────
             rag::read_text_file,
-            // ── Chat proxy ───────────────────────────────────────────────────
-            chat::stream_chat,
+            // ── Chat (desktop no longer calls stream_chat — OpenClaw Web UI
+            //    handles chat directly; mobile has its own stream_chat) ────
             // ── Ollama local model engine ─────────────────────────────────────
             ollama::ollama_check_status,
             ollama::ollama_ensure_installed,

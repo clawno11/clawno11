@@ -63,7 +63,7 @@ fn subnet_prefix_for_ip(target_ip: &str) -> Option<u8> {
             }
         } else {
             if t.contains("Subnet Mask") || t.contains("子网掩码") {
-                if let Some(mask_str) = t.split(':').last() {
+                if let Some(mask_str) = t.split(':').next_back() {
                     return mask_to_prefix(mask_str.trim());
                 }
             }

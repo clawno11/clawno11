@@ -63,6 +63,15 @@ export const proxyConfigureApiKey = (
   apiKey: string,
 ) => invoke<ConfigureResult>("proxy_configure_api_key", { proxyUrl, token, provider, apiKey });
 
+export interface RepairResult {
+  ok: boolean;
+  detail: string;
+  fixes_applied: string[];
+}
+
+export const proxyRepairModel = (proxyUrl: string, token: string) =>
+  invoke<RepairResult>("proxy_repair_model", { proxyUrl, token });
+
 
 // ── SSH remote management (mobile-only management commands) ───────────────
 

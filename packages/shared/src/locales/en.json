@@ -9,6 +9,8 @@
     "rag": "Knowledge",
     "mcp": "Plugins",
     "router": "Router",
+    "localModels": "Local Models",
+    "remoteSessions": "Remote",
     "settings": "Settings"
   },
   "instances": {
@@ -135,6 +137,8 @@
     "connectedTo": "Connected to {{url}}",
     "instanceOffline": "Instance is {{status}} — messages may fail",
     "unknown": "unknown",
+    "reconnect": "Reconnect",
+    "reconnecting": "Connecting…",
     "switchInstanceConfirm": "Switching instances will clear the current conversation. Continue?"
   },
   "security": {
@@ -628,5 +632,19 @@
     "disable": "Disable",
     "yes": "Yes",
     "no": "No"
+  },
+  "remoteSessions": {
+    "title": "Remote Sessions",
+    "empty": "No remote sessions yet",
+    "emptyHint": "When mobile clients send messages through Chat Proxy, sessions will appear here in real time",
+    "totalExchanges": "{{count}} exchanges",
+    "clear": "Clear",
+    "unknownSession": "Unknown session",
+    "exchangeCount": "{{count}} messages",
+    "mobileUser": "Mobile User",
+    "assistant": "AI Assistant",
+    "streaming": "Responding…",
+    "error": "Error",
+    "noContent": "(no content)"
   }
 }

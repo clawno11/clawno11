@@ -2,7 +2,6 @@
 ///
 /// Risk analysis delegates to `clawno_core::mcp` for heuristic scanning.
 /// This module adds HTTP probing and OpenClaw plugin management (desktop-only).
-
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt as _;
 #[cfg(target_os = "windows")]
@@ -39,24 +38,22 @@ pub async fn list_openclaw_plugins() -> Vec<OpenClawPlugin> {
     };
 
     arr.iter()
-        .filter_map(|p| {
-            Some(OpenClawPlugin {
-                id: p["id"].as_str().unwrap_or("").to_string(),
-                name: p["name"].as_str().unwrap_or("").to_string(),
-                description: p["description"].as_str().unwrap_or("").to_string(),
-                version: p["version"].as_str().unwrap_or("").to_string(),
-                origin: p["origin"].as_str().unwrap_or("bundled").to_string(),
-                enabled: p["enabled"].as_bool().unwrap_or(false),
-                status: p["status"].as_str().unwrap_or("disabled").to_string(),
-                tool_names: p["toolNames"]
-                    .as_array()
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            })
+        .map(|p| OpenClawPlugin {
+            id: p["id"].as_str().unwrap_or("").to_string(),
+            name: p["name"].as_str().unwrap_or("").to_string(),
+            description: p["description"].as_str().unwrap_or("").to_string(),
+            version: p["version"].as_str().unwrap_or("").to_string(),
+            origin: p["origin"].as_str().unwrap_or("bundled").to_string(),
+            enabled: p["enabled"].as_bool().unwrap_or(false),
+            status: p["status"].as_str().unwrap_or("disabled").to_string(),
+            tool_names: p["toolNames"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default(),
         })
         .collect()
 }

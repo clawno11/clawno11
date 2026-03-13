@@ -8,10 +8,6 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // deploy-engine uses native Node modules (ssh2/cpu-features) that
-      // cannot be bundled for the browser renderer. The renderer communicates
-      // with the deploy logic via Tauri IPC commands instead.
-      "@clawno/deploy-engine": path.resolve(__dirname, "./src/tauri-shims/deploy-engine.ts"),
       // Point to TS source so Vite bundles it as ESM (avoids "exports is not
       // defined" that occurs when the CJS dist is loaded in a browser context).
       "@clawno/openclaw-client": path.resolve(__dirname, "../../packages/openclaw-client/src/index.ts"),

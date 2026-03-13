@@ -466,6 +466,40 @@ pub async fn ollama_pull_model(app: AppHandle, name: String) -> StepResult {
     StepResult::ok(format!("pulled:{}", name))
 }
 
+/// Check if an Ollama model supports tool/function calling by querying
+/// its model info from the Ollama `/api/show` endpoint.
+///
+/// Returns `Ok(true)` if the model supports tools, `Ok(false)` if not,
+/// or `Err` if the query fails (Ollama not running, model not found, etc.).
+pub async fn ollama_model_supports_tools(model_name: &str) -> Result<bool, String> {
+    let body = serde_json::json!({ "name": model_name });
+    let resp = quick_client()
+        .post("http://localhost:11434/api/show")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("ollama-show-failed:{e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("ollama-show-status:{}", resp.status()));
+    }
+
+    let text = resp.text().await.unwrap_or_default();
+
+    // Heuristic: models that support tools typically have tool-related
+    // markers in their template or modelfile (e.g. "<tool_call>", "tools",
+    // "{{.ToolCalls}}", "Action:").  Models without these markers will
+    // fail at runtime with "does not support tools".
+    let lower = text.to_lowercase();
+    let supports = lower.contains("tool_call")
+        || lower.contains("toolcalls")
+        || lower.contains(".tools")
+        || lower.contains("<tool>")
+        || lower.contains("\"tools\"")
+        || lower.contains("action:");
+    Ok(supports)
+}
+
 /// Register an Ollama model in the OpenClaw fallback chain.
 ///
 /// Ollama is treated as a fallback-only provider: it is never set as the
@@ -474,12 +508,15 @@ pub async fn ollama_pull_model(app: AppHandle, name: String) -> StepResult {
 ///   1. The device is offline (all cloud providers fail).
 ///   2. The user explicitly selects it in the chat input.
 ///   3. The user requests it inside the ClawNo.11 chat.
+///
+/// Before adding, we check if the model supports tool calling.  Models
+/// that don't support tools are still added but a warning is returned so
+/// the frontend can inform the user.
 #[tauri::command]
-pub fn set_ollama_model(model_name: String) -> StepResult {
+pub async fn set_ollama_model(model_name: String) -> StepResult {
     if model_name.trim().is_empty() {
         return StepResult::err("model-name-empty".to_string());
     }
-    // Sanitise: reject anything that looks like shell injection.
     if model_name.contains('"')
         || model_name.contains('\'')
         || model_name.contains(';')
@@ -488,10 +525,18 @@ pub fn set_ollama_model(model_name: String) -> StepResult {
         return StepResult::err("model-name-invalid".to_string());
     }
 
+    // Pre-check: warn if the model lacks tool-calling support
+    let tools_warning = match ollama_model_supports_tools(&model_name).await {
+        Ok(true) => None,
+        Ok(false) => Some(format!(
+            "warning:model-no-tools:{}:该模型不支持工具调用，OpenClaw 的工具功能将不可用",
+            model_name
+        )),
+        Err(_) => None, // can't check → proceed optimistically
+    };
+
     let model_str = format!("ollama/{}", model_name);
 
-    // Add to the fallback chain only — never override the active primary model.
-    // Cloud API stays primary; Ollama kicks in when cloud is unreachable.
     let fb_cmd = format!("openclaw models fallbacks add {}", model_str);
     let (fb_ok, fb_out, fb_err) = shell_result(&fb_cmd);
     if !fb_ok {
@@ -502,5 +547,12 @@ pub fn set_ollama_model(model_name: String) -> StepResult {
         ));
     }
 
-    StepResult::ok(format!("ollama-model-added-to-fallback:{}", model_name))
+    if let Some(warning) = tools_warning {
+        StepResult::ok(format!(
+            "ollama-model-added-to-fallback:{};{}",
+            model_name, warning
+        ))
+    } else {
+        StepResult::ok(format!("ollama-model-added-to-fallback:{}", model_name))
+    }
 }

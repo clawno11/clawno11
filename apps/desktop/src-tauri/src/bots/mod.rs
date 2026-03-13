@@ -28,6 +28,12 @@ pub struct BotManager {
     running: Mutex<HashMap<String, Arc<AtomicBool>>>,
 }
 
+impl Default for BotManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BotManager {
     pub fn new() -> Self {
         BotManager {

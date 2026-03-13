@@ -129,7 +129,7 @@ fn install_node_auto(mut fixes: Vec<String>) -> StepResult {
             fixes.push("found-via-scan-after-winget".to_string());
             return StepResult::ok_fixed(ver_direct, fixes);
         }
-        return StepResult::err_fixed("node-installed-restart-required".to_string(), fixes);
+        StepResult::err_fixed("node-installed-restart-required".to_string(), fixes)
     }
 
     #[cfg(not(target_os = "windows"))]

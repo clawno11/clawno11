@@ -67,7 +67,7 @@ fn apply_restricted_rules(port: u16, allow_rule_name: &str, remoteip: &str) -> R
 #[tauri::command]
 pub fn get_network_access_mode(port: u16) -> String {
     let json = read_ip_allowlist_json();
-    json.get(&format!("access_mode_{port}"))
+    json.get(format!("access_mode_{port}"))
         .and_then(|v| v.as_str())
         .unwrap_or("off")
         .to_string()

@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Bot, ChevronDown, Wifi, WifiOff, RefreshCw,
-  History, Plus, Search, Trash2, X, MessageSquare, Sparkles,
+  History, Plus, Search, Trash2, X, MessageSquare, Sparkles, Wrench,
 } from "lucide-react";
 import { PROVIDER_CLOUD_MODELS, MOBILE_PROVIDER_KEYS } from "@clawno/shared/chat/types";
 import { relativeDate } from "@clawno/shared/chat/helpers";
@@ -21,7 +21,7 @@ import { ChatBanners } from "@clawno/shared/components/chat/ChatBanners";
 import { MessageList } from "@clawno/shared/components/chat/MessageList";
 import { ChatInput } from "@clawno/shared/components/chat/ChatInput";
 import { useInstanceStore } from "../store/instances";
-import { fetchChatProxyToken, getMainAgentModel } from "../ipc";
+import { fetchChatProxyToken, getMainAgentModel, proxyRepairModel, discoverChatProxy, proxyFetchProviders, probeInstanceHealth } from "../ipc";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { useAiConfigStore } from "../store/aiConfig";
@@ -32,9 +32,6 @@ import { listRules, matchRule } from "@clawno/shared/modelRouter";
 import { TopBar } from "../components/TopBar";
 import { MicButton } from "../components/MicButton";
 import type { AudioPayload } from "@clawno/shared/chat/useChatEngine";
-
-const CHAT_PROXY_PORT = 18800;
-const CHAT_PROXY_PORT_RANGE = 10;
 
 const MOBILE_CLOUD_MODELS = Object.fromEntries(
   MOBILE_PROVIDER_KEYS.filter((k) => k in PROVIDER_CLOUD_MODELS).map((k) => [k, PROVIDER_CLOUD_MODELS[k]]),
@@ -173,59 +170,43 @@ export function ChatPage() {
 
   // ── Chat proxy port discovery ──────────────────────────────────────────
 
-  const [discoveredPort, setDiscoveredPort] = useState<number | null>(null);
-
-  const getChatProxyUrl = useCallback((gUrl: string): string => {
-    try {
-      const u = new URL(gUrl);
-      u.port = String(discoveredPort ?? CHAT_PROXY_PORT);
-      return u.origin;
-    } catch { return gUrl; }
-  }, [discoveredPort]);
+  const [proxyOrigin, setProxyOrigin] = useState<string | null>(null);
+  const [proxyToken, setProxyToken] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!gatewayUrl || discoveredPort !== null) return;
+    if (!gatewayUrl || proxyOrigin !== null) return;
     let cancelled = false;
-    (async () => {
-      try {
-        const baseUrl = new URL(gatewayUrl);
-        for (let p = CHAT_PROXY_PORT; p < CHAT_PROXY_PORT + CHAT_PROXY_PORT_RANGE; p++) {
-          if (cancelled) return;
-          baseUrl.port = String(p);
+    discoverChatProxy(gatewayUrl)
+      .then((d) => {
+        if (cancelled || !d.found) return;
+        setProxyOrigin(d.proxy_url);
+        if (d.token) {
+          setProxyToken(d.token);
+          setGlobalChatProxyToken(d.token);
           try {
-            const r = await fetch(`${baseUrl.origin}/health`, { signal: AbortSignal.timeout(2000) });
-            if (r.ok) { if (!cancelled) setDiscoveredPort(p); return; }
-          } catch { /* next */ }
+            const host = new URL(gatewayUrl).host;
+            if (host) updateTokenByHost(host, d.token);
+          } catch { /* ignore */ }
         }
-      } catch { /* invalid URL */ }
-    })();
+      })
+      .catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };
-  }, [gatewayUrl, discoveredPort]);
+  }, [gatewayUrl, proxyOrigin, setGlobalChatProxyToken, updateTokenByHost]);
 
   // ── Sync providers from desktop instance ────────────────────────────────
 
   useEffect(() => {
-    if (!gatewayUrl || discoveredPort === null) return;
+    if (!proxyOrigin) return;
     let cancelled = false;
-    const token = selectedInst?.chatProxyToken ?? lastChatProxyToken ?? "";
-    (async () => {
-      try {
-        const baseUrl = new URL(gatewayUrl);
-        baseUrl.port = String(discoveredPort);
-        const r = await fetch(`${baseUrl.origin}/providers`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          signal: AbortSignal.timeout(5000),
-        });
-        if (!r.ok || cancelled) return;
-        const data = await r.json();
-        const providers: string[] = data?.providers ?? [];
-        for (const id of providers) {
-          if (!cancelled) await markConfigured(id);
-        }
-      } catch { /* non-fatal */ }
-    })();
+    const token = proxyToken ?? selectedInst?.chatProxyToken ?? lastChatProxyToken ?? "";
+    proxyFetchProviders(proxyOrigin, token)
+      .then((providers) => {
+        if (cancelled) return;
+        for (const id of providers) markConfigured(id);
+      })
+      .catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };
-  }, [gatewayUrl, discoveredPort, selectedInst, lastChatProxyToken, markConfigured]);
+  }, [proxyOrigin, proxyToken, selectedInst, lastChatProxyToken, markConfigured]);
 
   // ── Audio / voice state ────────────────────────────────────────────────
 
@@ -283,7 +264,8 @@ export function ChatPage() {
 
     return {
       rawContent,
-      gatewayUrl: getChatProxyUrl(effectiveGatewayUrl),
+      gatewayUrl: effectiveGatewayUrl,
+      proxyUrl: proxyOrigin,
       model: effectiveModel,
       instanceId: effectiveInstanceId,
       authToken,
@@ -293,7 +275,7 @@ export function ChatPage() {
   }, [
     gatewayUrl, selectedId, selectedModel, routingEnabled, instances,
     t,
-    getChatProxyUrl, setRoutedWithTimer, selectedInst, lastChatProxyToken,
+    proxyOrigin, setRoutedWithTimer, selectedInst, lastChatProxyToken,
     setGlobalChatProxyToken, updateTokenByHost,
   ]);
 
@@ -319,6 +301,66 @@ export function ChatPage() {
   }, [isStreaming, input, engine, buildSendOpts, setInput]);
 
   useEffect(() => { sendWithAudioRef.current = handleSendWithAudio; }, [handleSendWithAudio]);
+
+  // ── Reconnect / health polling ─────────────────────────────────────────
+
+  const { setHealth } = useInstanceStore();
+  const [reconnecting, setReconnecting] = useState(false);
+
+  const handleReconnect = useCallback(async () => {
+    if (!selectedInst || reconnecting) return;
+    setReconnecting(true);
+    try {
+      const result = await probeInstanceHealth(selectedInst.httpUrl);
+      setHealth(selectedInst.id, result.online ? "online" : "offline", result.online ? result.latency_ms : undefined);
+      if (result.online) setProxyOrigin(null); // reset so proxy re-discovery triggers
+    } catch {
+      setHealth(selectedInst.id, "offline");
+    } finally {
+      setReconnecting(false);
+    }
+  }, [selectedInst, reconnecting, setHealth]);
+
+  useEffect(() => {
+    if (!selectedInst || isOnline) return;
+    const timer = setInterval(async () => {
+      try {
+        const result = await probeInstanceHealth(selectedInst.httpUrl);
+        if (result.online) {
+          setHealth(selectedInst.id, "online", result.latency_ms);
+          setProxyOrigin(null);
+        }
+      } catch { /* stay offline */ }
+    }, 15_000);
+    return () => clearInterval(timer);
+  }, [selectedInst, isOnline, setHealth]);
+
+  // ── Model repair ──────────────────────────────────────────────────────
+
+  const [repairing, setRepairing] = useState(false);
+  const [repairResult, setRepairResult] = useState<string | null>(null);
+
+  const handleRepair = useCallback(async () => {
+    if (!proxyOrigin) return;
+    setRepairing(true);
+    setRepairResult(null);
+    try {
+      const token = proxyToken ?? selectedInst?.chatProxyToken ?? lastChatProxyToken ?? "";
+      const result = await proxyRepairModel(proxyOrigin, token);
+      const msg = result.ok
+        ? result.detail.includes("no-repair-needed")
+          ? "模型配置正常"
+          : `已修复: ${result.detail}`
+        : `修复失败: ${result.detail}`;
+      setRepairResult(msg);
+      setTimeout(() => setRepairResult(null), 5000);
+    } catch (e) {
+      setRepairResult(`修复失败: ${e}`);
+      setTimeout(() => setRepairResult(null), 5000);
+    } finally {
+      setRepairing(false);
+    }
+  }, [proxyOrigin, proxyToken, selectedInst, lastChatProxyToken]);
 
   // ── Empty state ────────────────────────────────────────────────────────
 
@@ -410,6 +452,13 @@ export function ChatPage() {
         </button>
         <Bot size={16} style={{ color: "hsl(var(--primary))" }} />
         <span className="font-semibold text-sm flex-1 truncate">{t("chat.title")}</span>
+        {isOnline && proxyOrigin && (
+          <button onClick={handleRepair} disabled={repairing}
+            className="touch-btn p-1.5 rounded-full"
+            title="修复模型">
+            <Wrench size={14} className={repairing ? "animate-spin text-amber-500" : "text-[hsl(var(--muted-foreground))]"} />
+          </button>
+        )}
         <button onClick={() => setShowPicker((v) => !v)}
           className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs touch-btn"
           style={{ border: "1px solid rgba(6,182,212,0.25)", background: "rgba(6,182,212,0.05)" }}>
@@ -452,12 +501,34 @@ export function ChatPage() {
         </>
       )}
 
-      {/* Offline warning */}
+      {/* Offline warning with reconnect */}
       {selectedInst && !isOnline && (
         <div className="mx-3 mt-2 flex items-center gap-2 px-3 py-2 rounded-xl text-xs flex-shrink-0"
           style={{ background: "rgba(239,68,68,0.06)", border: "1px solid rgba(239,68,68,0.2)", color: "#dc2626" }}>
           <WifiOff size={11} className="flex-shrink-0" />
-          <span>{t("chat.instanceOffline", { status: selectedInst.health === "offline" ? t("chat.offline") : t("chat.unknown") })}</span>
+          <span className="flex-1">{t("chat.instanceOffline", { status: selectedInst.health === "offline" ? t("chat.offline") : t("chat.unknown") })}</span>
+          <button onClick={handleReconnect} disabled={reconnecting}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-medium flex-shrink-0"
+            style={{ background: "rgba(6,182,212,0.1)", border: "1px solid rgba(6,182,212,0.3)", color: "hsl(var(--primary))" }}>
+            <RefreshCw size={10} className={reconnecting ? "animate-spin" : ""} />
+            {reconnecting ? t("chat.reconnecting") : t("chat.reconnect")}
+          </button>
+        </div>
+      )}
+
+      {/* Repair result toast */}
+      {repairResult && (
+        <div className="mx-3 mt-2 flex items-center gap-2 px-3 py-2 rounded-xl text-xs flex-shrink-0"
+          style={{
+            background: repairResult.startsWith("已修复") || repairResult === "模型配置正常"
+              ? "rgba(16,185,129,0.06)" : "rgba(239,68,68,0.06)",
+            border: repairResult.startsWith("已修复") || repairResult === "模型配置正常"
+              ? "1px solid rgba(16,185,129,0.2)" : "1px solid rgba(239,68,68,0.2)",
+            color: repairResult.startsWith("已修复") || repairResult === "模型配置正常"
+              ? "#059669" : "#dc2626",
+          }}>
+          <Wrench size={11} className="flex-shrink-0" />
+          <span className="truncate">{repairResult}</span>
         </div>
       )}
 

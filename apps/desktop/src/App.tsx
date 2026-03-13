@@ -12,7 +12,11 @@ import { McpPage } from "./pages/McpPage.tsx";
 import { RouterPage } from "./pages/RouterPage.tsx";
 import { SettingsPage } from "./pages/SettingsPage.tsx";
 import { LocalModelPage } from "./pages/LocalModelPage.tsx";
+import { RemoteSessionsPage } from "./pages/RemoteSessionsPage.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
+import { initRemoteSessionListeners } from "./store/remoteSessions.ts";
+
+initRemoteSessionListeners();
 
 // ── Error boundary — prevents one page crash from taking down the whole app ──
 
@@ -96,6 +100,7 @@ export function App() {
               <Route path="/mcp" element={<McpPage />} />
               <Route path="/router" element={<RouterPage />} />
               <Route path="/local-models" element={<LocalModelPage />} />
+              <Route path="/remote-sessions" element={<RemoteSessionsPage />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>
           </PageErrorBoundary>

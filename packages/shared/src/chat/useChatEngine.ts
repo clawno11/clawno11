@@ -85,6 +85,7 @@ export interface AudioPayload {
 export interface SendOptions {
   rawContent: string;
   gatewayUrl: string;
+  proxyUrl?: string | null;
   model: string | null;
   instanceId: string | null;
   authToken?: string | null;
@@ -106,9 +107,12 @@ export function useChatEngine() {
   const isSendingRef = useRef(false);
   const cancelRef = useRef(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const activeReqIdRef = useRef<string | null>(null);
+  const messagesRef = useRef<UIMessage[]>([]);
 
   const sessionRef = useRef(currentSessionId);
   useEffect(() => { sessionRef.current = currentSessionId; }, [currentSessionId]);
+  useEffect(() => { messagesRef.current = state.messages; }, [state.messages]);
 
   // ── Lifecycle ──────────────────────────────────────────────────────────
 
@@ -166,6 +170,10 @@ export function useChatEngine() {
   const stop = useCallback(() => {
     cancelRef.current = true;
     abortControllerRef.current?.abort();
+    if (activeReqIdRef.current) {
+      invoke("stop_chat_stream", { reqId: activeReqIdRef.current }).catch(() => {});
+      activeReqIdRef.current = null;
+    }
     if (mountedRef.current) dispatch({ type: "STOP_STREAMING" });
   }, []);
 
@@ -181,7 +189,7 @@ export function useChatEngine() {
 
     try {
       const {
-        rawContent, gatewayUrl, model: effectiveModel,
+        rawContent, gatewayUrl, proxyUrl, model: effectiveModel,
         instanceId: effectiveInstanceId,
         authToken, audioData, t,
       } = opts;
@@ -223,10 +231,14 @@ export function useChatEngine() {
           ]
         : rawContent;
 
-      const contextMsgs = [{ role: "user", content: userContent as string }];
+      const previousMsgs = messagesRef.current
+        .filter((m) => m.content && !m.streaming)
+        .map((m) => ({ role: m.role, content: m.content }));
+      const contextMsgs = [...previousMsgs, { role: "user", content: userContent as string }];
 
       let accumulatedText = "";
       const reqId = assistantId;
+      activeReqIdRef.current = reqId;
 
       // Event listeners
       const unlistenChunk = await listen<{ req_id: string; delta: string }>(
@@ -297,6 +309,7 @@ export function useChatEngine() {
       invokeStarted = true;
       invoke("stream_chat", {
         gatewayUrl,
+        ...(proxyUrl ? { proxyUrl } : {}),
         messages: contextMsgs,
         reqId,
         model: effectiveModel,

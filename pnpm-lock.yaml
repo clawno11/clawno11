@@ -8,6 +8,9 @@ importers:
 
   .:
     devDependencies:
+      husky:
+        specifier: ^9.0.0
+        version: 9.1.7
       turbo:
         specifier: ^2.3.3
         version: 2.8.13
@@ -217,9 +220,6 @@ importers:
       '@clawno/shared':
         specifier: workspace:*
         version: link:../../packages/shared
-      i18next:
-        specifier: ^25.4.3
-        version: 25.8.14(typescript@5.9.3)
       lucide-react:
         specifier: ^0.487.0
         version: 0.487.0(react@19.2.4)
@@ -232,16 +232,7 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.2.4(react@19.2.4)
-      react-i18next:
-        specifier: ^16.5.3
-        version: 16.5.6(i18next@25.8.14(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
-      zustand:
-        specifier: ^5.0.0
-        version: 5.0.11(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
     devDependencies:
-      '@tauri-apps/api':
-        specifier: ^2.0.0
-        version: 2.10.1
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.15
@@ -1456,6 +1447,11 @@ packages:
   human-signals@8.0.1:
     resolution: {integrity: sha512-eKCa6bwnJhvxj14kZk5NCPc6Hb6BdsU9DZcOnmQKSnO1VKrfV0zCvtttPZUsBvjmNDn8rpcJfpwSYnHBjc95MQ==}
     engines: {node: '>=18.18.0'}
+
+  husky@9.1.7:
+    resolution: {integrity: sha512-5gs5ytaNjBrh5Ow3zrvdUUY+0VxIuWVL4i9irt6friV+BqdCfmV11CQTWMiBYWHbXhco+J1kHfTOUkePhCDvMA==}
+    engines: {node: '>=18'}
+    hasBin: true
 
   i18next@25.8.14:
     resolution: {integrity: sha512-paMUYkfWJMsWPeE/Hejcw+XLhHrQPehem+4wMo+uELnvIwvCG019L9sAIljwjCmEMtFQQO3YeitJY8Kctei3iA==}
@@ -3301,6 +3297,8 @@ snapshots:
   html-url-attributes@3.0.1: {}
 
   human-signals@8.0.1: {}
+
+  husky@9.1.7: {}
 
   i18next@25.8.14(typescript@5.9.3):
     dependencies:

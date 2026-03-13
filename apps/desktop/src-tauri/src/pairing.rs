@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 ///    - Returns `PairQrPayload { qr_data, pin, expires_at }` to the frontend.
 ///
 /// 2. `qr_data` encodes the connection info in a **non-plaintext** format:
-///    ```
+///    ```text
 ///    clawno11://pair?h=BASE64(ip:port)&n=BASE64(name)&t=TOKEN&exp=UNIX_TS&vp=PORT
 ///    ```
 ///    `h` and `n` are Base64-encoded so they are NOT immediately readable
@@ -111,7 +111,7 @@ pub fn b64_encode(data: &[u8]) -> String {
     // Use only std — avoid pulling in the base64 crate.
     // We implement the RFC 4648 URL-safe alphabet manually.
     const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
-    let mut out = String::with_capacity((data.len() * 4 + 2) / 3);
+    let mut out = String::with_capacity((data.len() * 4).div_ceil(3));
     let mut i = 0;
     while i < data.len() {
         let b0 = data[i] as u32;

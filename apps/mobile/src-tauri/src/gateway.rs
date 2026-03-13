@@ -138,6 +138,52 @@ pub struct ConfigureResult {
     pub detail: String,
 }
 
+/// Trigger model auto-repair on the desktop instance via the chat proxy.
+#[tauri::command]
+pub async fn proxy_repair_model(proxy_url: String, token: String) -> Result<RepairResult, String> {
+    let client = http_client(30)?;
+    let resp = client
+        .post(format!("{}/api/repair-model", proxy_url))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("repair request failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Ok(RepairResult {
+            ok: false,
+            detail: format!("HTTP {}", resp.status()),
+            fixes_applied: vec![],
+        });
+    }
+
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(RepairResult {
+        ok: json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+        detail: json
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        fixes_applied: json
+            .get("fixes_applied")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
+    })
+}
+
+#[derive(Serialize)]
+pub struct RepairResult {
+    pub ok: bool,
+    pub detail: String,
+    pub fixes_applied: Vec<String>,
+}
+
 /// Configure an API key on the desktop instance via the chat proxy.
 #[tauri::command]
 pub async fn proxy_configure_api_key(

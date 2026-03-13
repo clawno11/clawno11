@@ -91,10 +91,15 @@ export const stopLocalService       = ()                         => invoke<void>
 export const restartLocalService    = ()                         => invoke<void>("restart_local_service");
 export const getBrowserUrl          = ()                         => invoke<string>("get_browser_url", {});
 export const openInBrowser          = (url: string)              => invoke<void>("open_in_browser", { url });
+export const mountChatWebview       = (x: number, y: number, width: number, height: number) => invoke<void>("mount_chat_webview", { x, y, width, height });
+export const unmountChatWebview     = ()                         => invoke<void>("unmount_chat_webview", {});
+export const hideChatWebview        = ()                         => invoke<void>("hide_chat_webview", {});
+export const resizeChatWebview      = (x: number, y: number, width: number, height: number) => invoke<void>("resize_chat_webview", { x, y, width, height });
 export const probeInstanceHealth    = (port: number)             => invoke<ProbeResult>("probe_instance_health", { port });
 export const getMainAgentModel      = (port: number)             => invoke<string | null>("get_main_agent_model", { port });
 export const configureApiKey        = (provider: string, apiKey: string) => invoke<StepResult>("configure_api_key", { provider, apiKey });
 export const fixModelConfig         = ()                               => invoke<string>("fix_model_config");
+export const repairModelConfig      = (port: number)                    => invoke<StepResult>("repair_model_config", { port });
 
 // ── Security commands ───────────────────────────────────────────────────────
 

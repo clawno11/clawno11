@@ -22,7 +22,7 @@ fn major_from_path(path: &str) -> u32 {
         let digits = segment.trim_start_matches('v');
         if let Some(m_str) = digits.split('.').next() {
             if let Ok(m) = m_str.parse::<u32>() {
-                if m >= 10 && m < 100 {
+                if (10..100).contains(&m) {
                     return m;
                 }
             }

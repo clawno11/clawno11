@@ -33,11 +33,13 @@ pub fn run() {
         )
         .invoke_handler(tauri::generate_handler![
             chat::stream_chat,
+            chat::stop_chat_stream,
             gateway::probe_instance_health,
             gateway::get_main_agent_model,
             gateway::discover_chat_proxy,
             gateway::proxy_fetch_providers,
             gateway::proxy_configure_api_key,
+            gateway::proxy_repair_model,
             rag::read_text_file,
             connectors::get_tailscale_status,
             connectors::probe_gateway_url,

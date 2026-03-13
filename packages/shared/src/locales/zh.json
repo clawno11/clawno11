@@ -9,6 +9,8 @@
     "rag": "知识库",
     "mcp": "插件",
     "router": "路由",
+    "localModels": "本地模型",
+    "remoteSessions": "远程会话",
     "settings": "设置"
   },
   "instances": {
@@ -152,6 +154,8 @@
     "connectedTo": "已连接 {{url}}",
     "instanceOffline": "实例当前{{status}}，发送消息可能失败",
     "unknown": "状态未知",
+    "reconnect": "重新连接",
+    "reconnecting": "连接中…",
     "switchInstanceConfirm": "切换实例将清空当前对话，确认继续？"
   },
   "security": {
@@ -628,5 +632,19 @@
     "disable": "禁用",
     "yes": "是",
     "no": "否"
+  },
+  "remoteSessions": {
+    "title": "远程会话",
+    "empty": "暂无远程会话",
+    "emptyHint": "当移动端通过 Chat Proxy 发送消息时，会话将在此处实时显示",
+    "totalExchanges": "共 {{count}} 条对话",
+    "clear": "清空",
+    "unknownSession": "未知会话",
+    "exchangeCount": "{{count}} 条消息",
+    "mobileUser": "移动端用户",
+    "assistant": "AI 助手",
+    "streaming": "正在回复…",
+    "error": "错误",
+    "noContent": "（无内容）"
   }
 }

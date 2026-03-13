@@ -5,6 +5,8 @@
 use std::process::Command;
 use std::time::Duration;
 
+use tauri::Manager;
+
 use crate::platform::{first_line, path_join, shell_output, user_home};
 use crate::pm2::{cleanup_pm2_openclaw, pm2_last_log, pm2_start_with_retry, run_pm2};
 use crate::types::StepResult;
@@ -459,6 +461,84 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
     }
 
     Err(format!("Failed to open URL: {}", url))
+}
+
+// ── Embed OpenClaw dashboard as a child webview ──────────────────────────────
+//
+// OpenClaw sets `X-Frame-Options: DENY` + `frame-ancestors 'none'`, so it
+// cannot be loaded in an iframe.  We use Tauri's multiwebview API to embed
+// a child WebView inside the main window at the exact position of the
+// ChatPage's placeholder area.  Requires the `unstable` feature flag.
+
+const CHAT_WEBVIEW_LABEL: &str = "openclaw-chat";
+
+#[tauri::command]
+pub async fn mount_chat_webview(
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
+        wv.set_position(tauri::LogicalPosition::new(x, y))
+            .map_err(|e| format!("{e}"))?;
+        wv.set_size(tauri::LogicalSize::new(width, height))
+            .map_err(|e| format!("{e}"))?;
+        return Ok(());
+    }
+
+    let url = get_browser_url(None).await;
+    let window = app.get_window("main").ok_or("main window not found")?;
+
+    window
+        .add_child(
+            tauri::webview::WebviewBuilder::new(
+                CHAT_WEBVIEW_LABEL,
+                tauri::WebviewUrl::External(url.parse().map_err(|e| format!("{e}"))?),
+            ),
+            tauri::LogicalPosition::new(x, y),
+            tauri::LogicalSize::new(width, height),
+        )
+        .map_err(|e| format!("mount failed: {e}"))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unmount_chat_webview(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
+        wv.close().map_err(|e| format!("{e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn hide_chat_webview(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
+        wv.set_position(tauri::LogicalPosition::new(-9999.0, -9999.0))
+            .map_err(|e| format!("{e}"))?;
+        wv.set_size(tauri::LogicalSize::new(0.0, 0.0))
+            .map_err(|e| format!("{e}"))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn resize_chat_webview(
+    app: tauri::AppHandle,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> Result<(), String> {
+    if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
+        wv.set_position(tauri::LogicalPosition::new(x, y))
+            .map_err(|e| format!("{e}"))?;
+        wv.set_size(tauri::LogicalSize::new(width, height))
+            .map_err(|e| format!("{e}"))?;
+    }
+    Ok(())
 }
 
 // ── Active model query ───────────────────────────────────────────────────────
