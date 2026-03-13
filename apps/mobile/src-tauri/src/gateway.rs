@@ -1,21 +1,30 @@
 /**
- * Gateway health probing and model info — HTTP-based (no subprocess).
+ * Gateway health probing, model info, and chat proxy bridge — HTTP-based.
  *
  * Mobile connects to remote openclaw instances. All detection is done
- * via HTTP requests to the gateway's REST API.
+ * via HTTP requests from the Rust side (reqwest), which bypasses WebView
+ * CORS / mixed-content restrictions that block browser-side fetch().
  */
 use crate::types::ProbeResult;
+use serde::Serialize;
 
-/// Probe an instance gateway at the given URL and return health status + latency.
+const PROXY_PORT_START: u16 = 18800;
+const PROXY_PORT_RANGE: u16 = 10;
+
+fn http_client(timeout_secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+// ── Gateway probing ──────────────────────────────────────────────────────
+
 #[tauri::command]
 pub async fn probe_instance_health(gateway_url: String) -> Result<ProbeResult, String> {
     let url = format!("{}/health", gateway_url.trim_end_matches('/'));
     let start = std::time::Instant::now();
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(8))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = http_client(8)?;
 
     match client.get(&url).send().await {
         Ok(resp) if resp.status().is_success() || resp.status().as_u16() < 500 => {
@@ -32,91 +41,136 @@ pub async fn probe_instance_health(gateway_url: String) -> Result<ProbeResult, S
     }
 }
 
-/// Fetch the active model name from the gateway's /agents endpoint.
 #[tauri::command]
 pub async fn get_main_agent_model(gateway_url: String) -> Result<Option<String>, String> {
     let url = format!("{}/agents", gateway_url.trim_end_matches('/'));
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(5))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let client = http_client(5)?;
+    let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
 
     if !resp.status().is_success() {
         return Ok(None);
     }
 
-    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
-
-    // Try to extract model from agents array
-    if let Some(agents) = json.as_array() {
-        for agent in agents {
-            if let Some(name) = agent.get("name").and_then(|n| n.as_str()) {
-                if name == "main" {
-                    if let Some(model) = agent
-                        .get("config")
-                        .and_then(|c| c.get("model"))
-                        .and_then(|m| m.as_str())
-                    {
-                        return Ok(Some(model.to_string()));
-                    }
-                }
-            }
-        }
-        // If no "main" agent found, return first agent's model
-        if let Some(first) = agents.first() {
-            if let Some(model) = first
-                .get("config")
-                .and_then(|c| c.get("model"))
-                .and_then(|m| m.as_str())
-            {
-                return Ok(Some(model.to_string()));
-            }
-        }
-    }
-
-    Ok(None)
+    let agents: Vec<serde_json::Value> = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(clawno_core::chat::parse_agents_model(&agents))
 }
 
-/// Read a text file by absolute path (for RAG ingestion via file picker).
+// ── Chat proxy discovery & bridge ────────────────────────────────────────
+
+#[derive(Serialize)]
+pub struct ProxyDiscovery {
+    pub found: bool,
+    pub proxy_url: String,
+    pub token: String,
+}
+
+/// Scan ports 18800-18810 on the same host as the gateway to find the chat proxy.
+/// Returns the proxy origin URL and the auth token (from the /health `ck` field).
 #[tauri::command]
-pub fn read_text_file(path: String) -> Result<String, String> {
-    use std::path::Path;
+pub async fn discover_chat_proxy(gateway_url: String) -> Result<ProxyDiscovery, String> {
+    let base = reqwest::Url::parse(gateway_url.trim_end_matches('/'))
+        .map_err(|e| format!("invalid gateway URL: {e}"))?;
+    let host = base.host_str().unwrap_or("127.0.0.1");
+    let scheme = base.scheme();
+    let client = http_client(2)?;
 
-    let p = Path::new(&path);
-
-    // Whitelist of safe extensions
-    let allowed = [
-        "txt", "md", "markdown", "csv", "tsv", "json", "yaml", "yml",
-        "html", "htm", "xml", "rs", "py", "js", "ts", "go", "java",
-        "c", "cpp", "h", "hpp", "sh", "toml", "ini", "conf", "log",
-    ];
-
-    let ext = p
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
-    if !allowed.contains(&ext.as_str()) {
-        return Err(format!("不支持的文件类型: .{}", ext));
+    for port in PROXY_PORT_START..(PROXY_PORT_START + PROXY_PORT_RANGE) {
+        let origin = format!("{scheme}://{host}:{port}");
+        let url = format!("{origin}/health");
+        if let Ok(resp) = client.get(&url).send().await {
+            if resp.status().is_success() {
+                let token = resp
+                    .json::<serde_json::Value>()
+                    .await
+                    .ok()
+                    .and_then(|v| v.get("ck").and_then(|c| c.as_str()).map(String::from))
+                    .unwrap_or_default();
+                return Ok(ProxyDiscovery {
+                    found: true,
+                    proxy_url: origin,
+                    token,
+                });
+            }
+        }
     }
 
-    // 移动端限制 5 MiB，防止 OOM（iOS/Android WebView 内存更紧张）
-    const MAX_BYTES: u64 = 5 * 1024 * 1024;
-    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
-    if meta.len() > MAX_BYTES {
-        return Err(format!(
-            "文件过大（{:.1} MiB），最大支持 5 MiB",
-            meta.len() as f64 / 1024.0 / 1024.0
-        ));
+    Ok(ProxyDiscovery {
+        found: false,
+        proxy_url: String::new(),
+        token: String::new(),
+    })
+}
+
+/// Fetch the list of configured AI providers from the desktop chat proxy.
+#[tauri::command]
+pub async fn proxy_fetch_providers(
+    proxy_url: String,
+    token: String,
+) -> Result<Vec<String>, String> {
+    let client = http_client(10)?;
+    let resp = client
+        .get(format!("{}/providers", proxy_url))
+        .header("Authorization", format!("Bearer {token}"))
+        .send()
+        .await
+        .map_err(|e| format!("providers fetch failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err(format!("HTTP {}", resp.status()));
     }
 
-    std::fs::read_to_string(&path).map_err(|e| e.to_string())
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let providers = json
+        .get("providers")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(providers)
+}
+
+#[derive(Serialize)]
+pub struct ConfigureResult {
+    pub ok: bool,
+    pub detail: String,
+}
+
+/// Configure an API key on the desktop instance via the chat proxy.
+#[tauri::command]
+pub async fn proxy_configure_api_key(
+    proxy_url: String,
+    token: String,
+    provider: String,
+    api_key: String,
+) -> Result<ConfigureResult, String> {
+    let client = http_client(15)?;
+    let body = serde_json::json!({ "provider": provider, "api_key": api_key });
+    let resp = client
+        .post(format!("{}/configure-api-key", proxy_url))
+        .header("Authorization", format!("Bearer {token}"))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| format!("configure failed: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Ok(ConfigureResult {
+            ok: false,
+            detail: format!("HTTP {}", resp.status()),
+        });
+    }
+
+    let json: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(ConfigureResult {
+        ok: json.get("ok").and_then(|v| v.as_bool()).unwrap_or(false),
+        detail: json
+            .get("detail")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+    })
 }

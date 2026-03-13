@@ -214,6 +214,12 @@ importers:
 
   apps/web:
     dependencies:
+      '@clawno/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
+      i18next:
+        specifier: ^25.4.3
+        version: 25.8.14(typescript@5.9.3)
       lucide-react:
         specifier: ^0.487.0
         version: 0.487.0(react@19.2.4)
@@ -226,7 +232,16 @@ importers:
       react-dom:
         specifier: ^19.1.0
         version: 19.2.4(react@19.2.4)
+      react-i18next:
+        specifier: ^16.5.3
+        version: 16.5.6(i18next@25.8.14(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+      zustand:
+        specifier: ^5.0.0
+        version: 5.0.11(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
     devDependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.10.1
       '@types/node':
         specifier: ^22.0.0
         version: 22.19.15
@@ -280,12 +295,37 @@ importers:
 
   packages/shared:
     dependencies:
+      '@tauri-apps/api':
+        specifier: ^2.0.0
+        version: 2.10.1
       '@tauri-apps/plugin-sql':
         specifier: ^2.0.0
         version: 2.3.2
+      react:
+        specifier: ^18.0.0 || ^19.0.0
+        version: 19.2.4
       zustand:
         specifier: ^5.0.0
         version: 5.0.11(@types/react@19.2.14)(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
+    devDependencies:
+      '@tauri-apps/plugin-dialog':
+        specifier: ^2.2.0
+        version: 2.6.0
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
+      i18next:
+        specifier: ^25.4.3
+        version: 25.8.14(typescript@5.9.3)
+      lucide-react:
+        specifier: ^0.487.0
+        version: 0.487.0(react@19.2.4)
+      react-i18next:
+        specifier: ^16.5.3
+        version: 16.5.6(i18next@25.8.14(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3)
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@22.19.15)(@vitest/ui@4.0.18)(jiti@1.21.7)(lightningcss@1.27.0)(terser@5.46.0)
 
 packages:
 

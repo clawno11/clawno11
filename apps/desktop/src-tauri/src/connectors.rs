@@ -1,3 +1,4 @@
+use crate::secure_store::STORE_FILE;
 /// IM connector helpers — Feishu/Lark and Tailscale integration.
 ///
 /// ## Adding a new connector
@@ -8,10 +9,8 @@
 /// 3. Register them in `lib.rs → invoke_handler!`.
 /// 4. Add a frontend panel in `ConnectorsPage.tsx`.
 /// 5. Update `ipc.ts` with the new typed wrapper functions.
-
 use serde::{Deserialize, Serialize};
 use tauri_plugin_store::StoreExt;
-use crate::secure_store::STORE_FILE;
 
 // ── Connector design contract ─────────────────────────────────────────────────
 
@@ -27,7 +26,9 @@ pub trait Connector {
     type TestResult: serde::Serialize;
     type Status: serde::Serialize;
 
-    fn test(config: &Self::Config) -> impl std::future::Future<Output = Result<Self::TestResult, String>> + Send;
+    fn test(
+        config: &Self::Config,
+    ) -> impl std::future::Future<Output = Result<Self::TestResult, String>> + Send;
     fn save(app: &tauri::AppHandle, config: Self::Config) -> Result<String, String>;
     fn status() -> impl std::future::Future<Output = Self::Status> + Send;
 }
@@ -49,13 +50,7 @@ pub struct FeishuTestResult {
     pub missing_scopes: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct TailscaleStatus {
-    pub installed: bool,
-    pub running: bool,
-    pub ip: Option<String>,
-    pub version: Option<String>,
-}
+pub use clawno_core::types::TailscaleStatus;
 
 // ── Feishu Connector ──────────────────────────────────────────────────────────
 
@@ -135,7 +130,10 @@ async fn feishu_test_impl(app_id: &str, app_secret: &str) -> Result<FeishuTestRe
             // Token acquired — now probe for required scope (im:message:send_as_bot).
             // We attempt a no-op bot message API call; a 99991401 response means the
             // scope is missing even though the credentials are valid.
-            let token = json["tenant_access_token"].as_str().unwrap_or("").to_string();
+            let token = json["tenant_access_token"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             let missing = probe_missing_scopes(&client, &token).await;
             if missing.is_empty() {
                 Ok(FeishuTestResult {
@@ -218,15 +216,25 @@ async fn probe_missing_scopes(client: &reqwest::Client, token: &str) -> Vec<Stri
 }
 
 /// Core Feishu save logic — shared by the `Connector` impl and the Tauri command.
-fn feishu_save_impl(app: &tauri::AppHandle, app_id: String, app_secret: String) -> Result<String, String> {
+fn feishu_save_impl(
+    app: &tauri::AppHandle,
+    app_id: String,
+    app_secret: String,
+) -> Result<String, String> {
     if app_id.trim().is_empty() || app_secret.trim().is_empty() {
         return Err("App ID 和 App Secret 不能为空".into());
     }
     let store = app
         .store(STORE_FILE)
         .map_err(|e| format!("打开加密存储失败：{e}"))?;
-    store.set("feishu_app_id".to_string(), serde_json::Value::String(app_id));
-    store.set("feishu_app_secret".to_string(), serde_json::Value::String(app_secret));
+    store.set(
+        "feishu_app_id".to_string(),
+        serde_json::Value::String(app_id),
+    );
+    store.set(
+        "feishu_app_secret".to_string(),
+        serde_json::Value::String(app_secret),
+    );
     store.save().map_err(|e| format!("保存飞书凭据失败：{e}"))?;
     Ok("飞书凭据已保存".to_string())
 }
@@ -261,7 +269,9 @@ pub fn get_feishu_config(app: tauri::AppHandle) -> Result<Option<String>, String
     let store = app
         .store(STORE_FILE)
         .map_err(|e| format!("打开加密存储失败：{e}"))?;
-    Ok(store.get("feishu_app_id").and_then(|v| v.as_str().map(str::to_owned)))
+    Ok(store
+        .get("feishu_app_id")
+        .and_then(|v| v.as_str().map(str::to_owned)))
 }
 
 // ── Tailscale Connector ───────────────────────────────────────────────────────
@@ -297,9 +307,9 @@ impl Connector for TailscaleConnector {
 
 /// Core Tailscale detection logic — shared by the `Connector` impl and the Tauri command.
 fn tailscale_status_impl() -> TailscaleStatus {
-    use std::process::Command;
     #[cfg(target_os = "windows")]
     use std::os::windows::process::CommandExt;
+    use std::process::Command;
     #[cfg(target_os = "windows")]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
 
@@ -312,7 +322,11 @@ fn tailscale_status_impl() -> TailscaleStatus {
             // Treat non-zero exit code as "no output" — e.g. tailscale ip -4 exits 1 when not running
             if o.status.success() {
                 let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if s.is_empty() { None } else { Some(s) }
+                if s.is_empty() {
+                    None
+                } else {
+                    Some(s)
+                }
             } else {
                 None
             }
@@ -331,11 +345,9 @@ fn tailscale_status_impl() -> TailscaleStatus {
     }
 
     // Try IPv4 first, fall back to IPv6
-    let ip_v4 = run(&["ip", "-4"])
-        .filter(|s| s.parse::<std::net::Ipv4Addr>().is_ok());
+    let ip_v4 = run(&["ip", "-4"]).filter(|s| s.parse::<std::net::Ipv4Addr>().is_ok());
     let ip_v6 = if ip_v4.is_none() {
-        run(&["ip", "-6"])
-            .filter(|s| s.parse::<std::net::Ipv6Addr>().is_ok())
+        run(&["ip", "-6"]).filter(|s| s.parse::<std::net::Ipv6Addr>().is_ok())
     } else {
         None
     };

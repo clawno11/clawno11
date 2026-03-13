@@ -1,13 +1,15 @@
 import { useState, useEffect } from "react";
 import { Settings, Info, Shield, Database, ExternalLink, Trash2, Check, ArrowRight, Wallet, ChevronDown, ChevronUp, Plus, X } from "lucide-react";
 import { useTranslation } from "react-i18next";
+import { ToggleRow } from "@clawno/shared/components/common/ToggleRow";
+import { LangSelector } from "@clawno/shared/components/common/LangSelector";
 import { useNavigate } from "react-router-dom";
 import { getVersion } from "@tauri-apps/api/app";
-import { purgeOldRecords } from "../store/tokenLog";
 import {
+  purgeOldRecords,
   getBudget, saveBudget, getInstanceBudget, saveInstanceBudget, clearInstanceBudget,
   type TokenBudget,
-} from "../store/tokenBudget";
+} from "@clawno/shared/stores/tokenLogStore";
 import {
   getDisplayCurrency, setDisplayCurrency, getExchangeRate, setExchangeRate,
   getUserPriceOverrides, setUserPriceOverride, removeUserPriceOverride, BUILTIN_MODEL_KEYS,
@@ -40,45 +42,18 @@ function TabBtn({ label, icon: Icon, active, onClick }: {
 // ── General Tab ────────────────────────────────────────────────────────────
 
 function GeneralTab() {
-  const { t, i18n } = useTranslation();
-  const langs = [
-    { code: "zh", label: "简体中文" },
-    { code: "en", label: "English" },
-  ];
-  const [lang, setLang] = useState(() => localStorage.getItem("clawno-lang") ?? i18n.language);
-  const [saved, setSaved] = useState(false);
-
-  const save = () => {
-    localStorage.setItem("clawno-lang", lang);
-    i18n.changeLanguage(lang);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
-  };
+  const { t } = useTranslation();
 
   return (
     <div className="space-y-6">
       <Section title={t("settings.lang.title")} desc={t("settings.lang.desc")}>
-        <div className="flex gap-2">
-          {langs.map((l) => (
-            <button
-              key={l.code}
-              onClick={() => setLang(l.code)}
-              className={`px-4 py-2 rounded-lg text-sm border transition-colors ${
-                lang === l.code
-                  ? "border-primary bg-primary/10 text-primary font-medium"
-                  : "border-border hover:bg-muted/60"
-              }`}
-            >
-              {l.label}
-            </button>
-          ))}
-        </div>
-        <button
-          onClick={save}
-          className="mt-3 flex items-center gap-1.5 px-3 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm hover:bg-primary/90 transition-colors"
-        >
-          {saved ? <><Check size={13} /> {t("common.saved")}</> : t("common.save")}
-        </button>
+        <LangSelector
+          langs={[
+            { code: "zh", label: "简体中文" },
+            { code: "en", label: "English" },
+          ]}
+          immediate={false}
+        />
       </Section>
 
       <Section title={t("settings.startup.title")} desc={t("settings.startup.desc")}>
@@ -86,13 +61,13 @@ function GeneralTab() {
           label={t("settings.startup.autoHealth")}
           desc={t("settings.startup.autoHealthDesc")}
           storageKey="clawno-auto-health"
-          defaultVal={true}
+          defaultOn={true}
         />
         <ToggleRow
           label={t("settings.startup.homeInstances")}
           desc={t("settings.startup.homeInstancesDesc")}
           storageKey="clawno-home-instances"
-          defaultVal={true}
+          defaultOn={true}
         />
       </Section>
     </div>
@@ -741,27 +716,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-function ToggleRow({ label, desc, storageKey, defaultVal }: {
-  label: string; desc: string; storageKey: string; defaultVal: boolean;
-}) {
-  const [on, setOn] = useState(() => {
-    const v = localStorage.getItem(storageKey);
-    return v === null ? defaultVal : v === "1";
-  });
-  const toggle = () => { const next = !on; setOn(next); localStorage.setItem(storageKey, next ? "1" : "0"); };
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-border/50 last:border-0">
-      <div>
-        <p className="text-sm font-medium">{label}</p>
-        <p className="text-xs text-muted-foreground">{desc}</p>
-      </div>
-      <button onClick={toggle}
-        className={`w-10 h-5 rounded-full transition-colors flex items-center ${on ? "bg-primary" : "bg-muted"}`}>
-        <span className={`w-4 h-4 bg-white rounded-full shadow transition-transform mx-0.5 ${on ? "translate-x-5" : "translate-x-0"}`} />
-      </button>
-    </div>
-  );
-}
+// ToggleRow imported from @clawno/shared
 
 // ── Main Page ──────────────────────────────────────────────────────────────
 

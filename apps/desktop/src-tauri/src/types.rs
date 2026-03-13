@@ -1,32 +1,7 @@
 /// Shared data types used across multiple Rust modules.
-
 use serde::{Deserialize, Serialize};
 
-// ── Deploy step result ───────────────────────────────────────────────────────
-
-#[derive(Serialize, Deserialize, Clone)]
-pub struct StepResult {
-    pub ok: bool,
-    /// English key or message; the frontend translates it for display.
-    pub detail: String,
-    /// Fix-action keys applied automatically (translated by the frontend).
-    pub fixes_applied: Vec<String>,
-}
-
-impl StepResult {
-    pub fn ok(detail: String) -> Self {
-        Self { ok: true, detail, fixes_applied: vec![] }
-    }
-    pub fn ok_fixed(detail: String, fixes: Vec<String>) -> Self {
-        Self { ok: true, detail, fixes_applied: fixes }
-    }
-    pub fn err(detail: String) -> Self {
-        Self { ok: false, detail, fixes_applied: vec![] }
-    }
-    pub fn err_fixed(detail: String, fixes: Vec<String>) -> Self {
-        Self { ok: false, detail, fixes_applied: fixes }
-    }
-}
+pub use clawno_core::types::StepResult;
 
 // ── Service info ─────────────────────────────────────────────────────────────
 
@@ -43,11 +18,8 @@ pub struct ServiceInfo {
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct DeployStatus {
-    /// Whether `openclaw` CLI is installed and reachable.
     pub openclaw_installed: bool,
-    /// Installed version string, e.g. "1.2.3". Empty when not installed.
     pub openclaw_version: String,
-    /// Whether the pm2-managed `openclaw` process is currently online.
     pub service_running: bool,
 }
 

@@ -1,0 +1,37 @@
+[workspace]
+members = [
+    "crates/clawno-core",
+    "apps/desktop/src-tauri",
+    "apps/mobile/src-tauri",
+]
+resolver = "2"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+dirs-next = "2"
+futures-util = "0.3"
+tokio-tungstenite = "0.24"
+russh = "0.44"
+russh-keys = "0.44"
+async-trait = "0.1"
+reqwest = { version = "0.12", default-features = false }
+tauri = { version = "2" }
+tauri-build = { version = "2", features = [] }
+tauri-plugin-store = "2"
+tauri-plugin-sql = { version = "2", features = ["sqlite"] }
+tauri-plugin-http = "2"
+tauri-plugin-fs = "2"
+tauri-plugin-dialog = "2"
+
+[profile.dev]
+opt-level = 1
+incremental = true
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

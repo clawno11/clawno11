@@ -1,20 +1,7 @@
-import i18n from "i18next";
-import { initReactI18next } from "react-i18next";
-import zh from "./locales/zh.json";
+import { createI18n } from "@clawno/shared/i18n";
 import en from "./locales/en.json";
+import zh from "./locales/zh.json";
 
-const savedLang = localStorage.getItem("clawno-lang");
-const browserLang = navigator.language.startsWith("zh") ? "zh" : "en";
-const defaultLang = savedLang ?? browserLang;
-
-i18n.use(initReactI18next).init({
-  resources: {
-    zh: { translation: zh },
-    en: { translation: en },
-  },
-  lng: defaultLang,
-  fallbackLng: "en",
-  interpolation: { escapeValue: false },
-});
+const i18n = createI18n({ en, zh });
 
 export default i18n;

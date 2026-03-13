@@ -1,101 +1,73 @@
 /**
  * Mobile IPC bridge — type-safe wrappers for all Tauri backend commands.
  *
- * Key differences from desktop:
- *  - No deploy / pm2 / firewall commands (mobile is a remote client)
- *  - probe_instance_health / get_main_agent_model take gateway_url (not port)
- *  - stream_chat uses direct HTTP SSE to the gateway (not subprocess)
- *  - Added probe_gateway_url for ConnectPage URL validation
+ * Shared types and functions are imported from @clawno/shared/ipc/types.
+ * Mobile-only commands (probe by URL, chat proxy, SSH management) remain here.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
-// ── Shared types ─────────────────────────────────────────────────────────
+export type {
+  ProbeResult, McpScanResult, TailscaleStatus, StepResult, SshArgs,
+} from "@clawno/shared/ipc/types";
 
-export interface ProbeResult {
-  online: boolean;
-  latency_ms: number;
-}
+export {
+  setSecureValue, getSecureValue, deleteSecureValue, listSecureKeys, wipeSecureStore,
+  scanMcpServer, readTextFile, getTailscaleStatus,
+  deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
+  deployRemoteOnboard, deployRemoteStartGateway,
+  sshKillSwitch,
+} from "@clawno/shared/ipc/types";
 
-export interface TailscaleStatus {
-  installed: boolean;
-  running: boolean;
-  ip: string | null;
-  version: string | null;
-}
+import type { ProbeResult, StepResult, SshArgs } from "@clawno/shared/ipc/types";
 
-export interface McpScanResult {
-  risk_level: "safe" | "caution" | "danger";
-  factors: string[];
-  reachable: boolean;
-}
+// ── Gateway / Instance commands (mobile: by URL, not port) ───────────────
 
-// ── Gateway / Instance commands ──────────────────────────────────────────
-
-/** Probe a gateway by full URL and return online status + latency. */
 export const probeInstanceHealth = (gatewayUrl: string) =>
   invoke<ProbeResult>("probe_instance_health", { gatewayUrl });
 
-/** Fetch the active model string from a running gateway. */
 export const getMainAgentModel = (gatewayUrl: string) =>
   invoke<string | null>("get_main_agent_model", { gatewayUrl });
 
-/** Read a text file by absolute path (for RAG ingestion). */
-export const readTextFile = (path: string) =>
-  invoke<string>("read_text_file", { path });
+// ── Mobile-only connectivity ─────────────────────────────────────────────
 
-// ── Tailscale / Connectivity ─────────────────────────────────────────────
-
-/** Detect Tailscale VPN status on this device. */
-export const getTailscaleStatus = () =>
-  invoke<TailscaleStatus>("get_tailscale_status");
-
-/** Probe whether a gateway URL is reachable (used by ConnectPage). */
 export const probeGatewayUrl = (url: string) =>
   invoke<boolean>("probe_gateway_url", { url });
 
-/** Fetch the chat proxy auth token from the desktop's chat proxy health endpoint. */
 export const fetchChatProxyToken = (gatewayUrl: string) =>
   invoke<string | null>("fetch_chat_proxy_token", { gatewayUrl });
 
-// ── Secure store ─────────────────────────────────────────────────────────
+// ── Chat proxy bridge (Rust-side HTTP, bypasses WebView CORS) ────────────
 
-export const setSecureValue = (key: string, value: string) =>
-  invoke<void>("set_secure_value", { key, value });
+export interface ProxyDiscovery {
+  found: boolean;
+  proxy_url: string;
+  token: string;
+}
 
-export const getSecureValue = (key: string) =>
-  invoke<string | null>("get_secure_value", { key });
+export const discoverChatProxy = (gatewayUrl: string) =>
+  invoke<ProxyDiscovery>("discover_chat_proxy", { gatewayUrl });
 
-export const deleteSecureValue = (key: string) =>
-  invoke<void>("delete_secure_value", { key });
+export const proxyFetchProviders = (proxyUrl: string, token: string) =>
+  invoke<string[]>("proxy_fetch_providers", { proxyUrl, token });
 
-export const listSecureKeys = () =>
-  invoke<string[]>("list_secure_keys");
+export interface ConfigureResult {
+  ok: boolean;
+  detail: string;
+}
 
-export const wipeSecureStore = () =>
-  invoke<void>("wipe_secure_store");
+export const proxyConfigureApiKey = (
+  proxyUrl: string,
+  token: string,
+  provider: string,
+  apiKey: string,
+) => invoke<ConfigureResult>("proxy_configure_api_key", { proxyUrl, token, provider, apiKey });
 
-// ── MCP ──────────────────────────────────────────────────────────────────
 
-export const scanMcpServer = (endpoint: string, transport: string) =>
-  invoke<McpScanResult>("scan_mcp_server", { endpoint, transport });
+// ── SSH remote management (mobile-only management commands) ───────────────
 
-// ── SSH remote deployment ─────────────────────────────────────────────────
-
-/** Test SSH connection. Returns remote `uname -a` string on success. */
-export const sshTestConnection = (
-  host: string,
-  sshPort: number,
-  username: string,
-  password: string,
-) => invoke<string>("ssh_test_connection", { host, sshPort, username, password });
-
-/** Deploy OpenClaw on a remote server via SSH. Emits `deploy-progress` events.
- *  Returns the gateway URL (e.g. "http://1.2.3.4:18789") on success. */
-export const sshDeploy = (
-  host: string,
-  sshPort: number,
-  username: string,
-  password: string,
-  openclawPort: number,
-) => invoke<string>("ssh_deploy", { host, sshPort, username, password, openclawPort });
+export const sshStopInstance       = (args: SshArgs) => invoke<StepResult>("ssh_stop_instance", { args });
+export const sshStartInstance      = (args: SshArgs) => invoke<StepResult>("ssh_start_instance", { args });
+export const sshRestartInstance    = (args: SshArgs) => invoke<StepResult>("ssh_restart_instance", { args });
+export const sshConfigureApiKey    = (args: SshArgs, provider: string, apiKey: string) =>
+  invoke<StepResult>("ssh_configure_api_key", { args, provider, apiKey });

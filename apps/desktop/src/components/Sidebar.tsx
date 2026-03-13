@@ -3,7 +3,7 @@ import { NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
 import { LayoutDashboard, Rocket, MessageSquare, ShieldCheck, Activity, Plug, BookOpen, Puzzle, GitBranch, Cpu, Settings } from "lucide-react";
-import { useTokenAnomalyStore } from "../store/tokenAnomalyStore";
+import { useTokenAnomalyStore } from "@clawno/shared/tokenAnomalyStore";
 
 function NavItem({
   to,

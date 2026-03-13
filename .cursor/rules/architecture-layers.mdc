@@ -1,0 +1,37 @@
+---
+description: 四层架构依赖方向规则和模块规模约束
+alwaysApply: true
+---
+
+# 架构层级规则
+
+## 依赖方向（只能向下，禁止向上）
+
+```
+Layer 4: apps/desktop, apps/mobile     → 可依赖 Layer 3, 2
+Layer 3: packages/shared               → 可依赖 Tauri plugin API
+Layer 2: crates/clawno-core            → 只依赖 Rust 第三方 crate
+Layer 1: Foundation (Cargo/Tauri/SQLite) → 无依赖
+```
+
+## 绝对禁止
+
+- `clawno-core` import `tauri`（用 macro/callback 替代）
+- `@clawno/shared` import from `apps/`
+- `apps/desktop` import from `apps/mobile`（反之亦然）
+
+## 模块规模阈值（超出必须拆分）
+
+| 指标 | 阈值 |
+|------|------|
+| Rust 单文件 | ≤500 行 |
+| TSX 页面组件 | ≤400 行 |
+| 单模块 Tauri 命令数 | ≤10 个 |
+| shared store 总数 | ≤10 个 |
+
+## 关键文档位置
+
+- 架构规格: `docs/ARCHITECTURE-V2.md`
+- 模块边界: `docs/MODULE-BOUNDARIES.md`
+- 共享契约: `docs/SHARED-CONTRACT.md`
+- 决策记录: `docs/DECISIONS.md`

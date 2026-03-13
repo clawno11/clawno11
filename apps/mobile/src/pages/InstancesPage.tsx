@@ -1,16 +1,26 @@
 /**
  * InstancesPage — mobile version.
  * Shows all configured remote instances with health status.
- * No local deploy/pm2 controls; management is done on the desktop.
+ * Supports remote AI provider configuration via the desktop chat proxy.
  */
 import { useState, useEffect, useCallback } from "react";
 import {
-  Server, Wifi, WifiOff, RefreshCw, Trash2, MessageSquare,
-  AlertCircle, Plus, Zap,
+  Server, RefreshCw, Trash2, MessageSquare,
+  Plus, Zap, KeyRound, CircleAlert,
 } from "lucide-react";
+// Mobile uses window.open for external URLs (no plugin-shell dependency)
 import { useTranslation } from "react-i18next";
+import { HealthBadge } from "@clawno/shared/components/common/HealthBadge";
+import { ConfigureAIPanel } from "@clawno/shared/components/ai/ConfigureAIPanel";
 import { useInstanceStore } from "../store/instances";
-import { probeInstanceHealth } from "../ipc";
+import { useAiConfigStore } from "../store/aiConfig";
+import {
+  probeInstanceHealth,
+  discoverChatProxy,
+  proxyFetchProviders,
+  proxyConfigureApiKey,
+} from "../ipc";
+import type { ProxyDiscovery } from "../ipc";
 import { TopBar } from "../components/TopBar";
 import { useNavigate } from "react-router-dom";
 
@@ -18,8 +28,11 @@ export function InstancesPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { instances, remove, setHealth } = useInstanceStore();
+  const { configured, isConfigured, markConfigured } = useAiConfigStore();
   const [probing, setProbing] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [showConfigAI, setShowConfigAI] = useState<string | null>(null);
+  const [proxyInfo, setProxyInfo] = useState<Record<string, ProxyDiscovery>>({});
 
   const probeOne = useCallback(async (id: string, httpUrl: string) => {
     setProbing((p) => new Set([...p, id]));
@@ -37,10 +50,45 @@ export function InstancesPage() {
     instances.forEach((inst) => probeOne(inst.id, inst.httpUrl));
   }, [instances, probeOne]);
 
-  // Auto-probe on mount
   useEffect(() => {
     if (instances.length > 0) probeAll();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Discover chat proxy via Rust-side HTTP (bypasses WebView CORS)
+  useEffect(() => {
+    let cancelled = false;
+    instances.forEach(async (inst) => {
+      if (proxyInfo[inst.id]) return;
+      try {
+        const discovery = await discoverChatProxy(inst.gatewayUrl || inst.httpUrl);
+        if (!cancelled && discovery.found) {
+          setProxyInfo((prev) => ({ ...prev, [inst.id]: discovery }));
+          // Sync configured providers from desktop
+          try {
+            const providers = await proxyFetchProviders(discovery.proxy_url, discovery.token);
+            providers.forEach((p) => markConfigured(p));
+          } catch { /* non-critical */ }
+        }
+      } catch { /* discovery failed */ }
+    });
+    return () => { cancelled = true; };
+  }, [instances, proxyInfo, markConfigured]);
+
+  const makeConfigure = useCallback((instId: string) => {
+    return async (provider: string, key: string): Promise<{ ok: boolean; detail: string }> => {
+      const info = proxyInfo[instId];
+      if (!info?.found) return { ok: false, detail: "无法连接桌面实例（chat proxy 未发现）" };
+      try {
+        return await proxyConfigureApiKey(info.proxy_url, info.token, provider, key);
+      } catch (e) {
+        return { ok: false, detail: e instanceof Error ? e.message : String(e) };
+      }
+    };
+  }, [proxyInfo]);
+
+  const handleOpenUrl = useCallback((url: string) => {
+    window.open(url, "_blank", "noopener");
+  }, []);
 
   return (
     <div className="flex flex-col h-full">
@@ -83,6 +131,8 @@ export function InstancesPage() {
             const isProbng = probing.has(inst.id);
             const isOnline = inst.health === "online";
             const isOffline = inst.health === "offline";
+            const isConfigOpen = showConfigAI === inst.id;
+            const hasAI = configured.length > 0;
 
             return (
               <div
@@ -109,34 +159,40 @@ export function InstancesPage() {
                     </p>
                   </div>
 
-                  {/* Health badge */}
                   <div className="flex-shrink-0">
-                    {isProbng ? (
-                      <span className="flex items-center gap-1 text-[11px] text-[hsl(var(--muted-foreground))]">
-                        <RefreshCw size={12} className="animate-spin" />
-                        {t("instances.health.unknown")}
-                      </span>
-                    ) : isOnline ? (
-                      <span className="flex items-center gap-1 text-[11px] text-green-600 font-medium">
-                        <Wifi size={12} />
-                        {t("instances.health.online")}
-                        {inst.latencyMs !== undefined && (
-                          <span className="text-[10px] font-mono opacity-70">{inst.latencyMs}ms</span>
-                        )}
-                      </span>
-                    ) : isOffline ? (
-                      <span className="flex items-center gap-1 text-[11px] text-red-500 font-medium">
-                        <WifiOff size={12} />
-                        {t("instances.health.offline")}
-                      </span>
-                    ) : (
-                      <span className="flex items-center gap-1 text-[11px] text-[hsl(var(--muted-foreground))]">
-                        <AlertCircle size={12} />
-                        {t("instances.health.unknown")}
-                      </span>
-                    )}
+                    <HealthBadge
+                      health={isProbng ? "probing" : inst.health}
+                      latencyMs={inst.latencyMs}
+                    />
                   </div>
                 </div>
+
+                {/* 未配置 AI 引导横幅 */}
+                {isOnline && !hasAI && !isConfigOpen && (
+                  <div className="mx-3 mb-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800">
+                    <CircleAlert size={13} className="flex-shrink-0 text-amber-500" />
+                    <span className="flex-1">{t("instances.ai.title")}</span>
+                    <button
+                      onClick={() => setShowConfigAI(inst.id)}
+                      className="flex-shrink-0 font-medium text-amber-700 underline underline-offset-2"
+                    >
+                      {t("instances.actions.configureAI")}
+                    </button>
+                  </div>
+                )}
+
+                {/* Configure AI panel */}
+                {isConfigOpen && (
+                  <ConfigureAIPanel
+                    onClose={() => setShowConfigAI(null)}
+                    onConfigure={makeConfigure(inst.id)}
+                    onOpenUrl={handleOpenUrl}
+                    configured={configured}
+                    isConfigured={isConfigured}
+                    markConfigured={markConfigured}
+                    compact
+                  />
+                )}
 
                 {/* Actions */}
                 <div className="flex border-t border-[hsl(var(--border))]/60">
@@ -146,6 +202,27 @@ export function InstancesPage() {
                   >
                     <Zap size={12} /> {t("instances.probe")}
                   </button>
+
+                  <button
+                    onClick={() => setShowConfigAI(isConfigOpen ? null : inst.id)}
+                    className={`touch-btn flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs border-r border-[hsl(var(--border))]/60 ${
+                      isConfigOpen ? "text-[hsl(var(--primary))] font-semibold"
+                        : hasAI ? "text-[hsl(var(--muted-foreground))]"
+                        : "text-amber-600 font-semibold"
+                    }`}
+                  >
+                    <KeyRound size={12} />
+                    {t("instances.actions.configureAI")}
+                    {!hasAI && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-orange-500 flex-shrink-0" />
+                    )}
+                    {hasAI && (
+                      <span className="text-[9px] text-green-600 bg-green-50 border border-green-200 rounded-full px-1 font-medium">
+                        {configured.length}
+                      </span>
+                    )}
+                  </button>
+
                   <button
                     onClick={() => { navigate("/chat"); }}
                     className="touch-btn flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs text-[hsl(var(--primary))] border-r border-[hsl(var(--border))]/60"

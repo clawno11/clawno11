@@ -1,26 +1,27 @@
 /**
  * Centralized type-safe IPC bridge for all Tauri backend commands.
  *
- * All `invoke()` calls should go through this module so that:
- *  - Command names are defined in one place (rename-safe)
- *  - Return types are statically verified
- *  - The call site reads like a regular async function
+ * Shared types and functions (StepResult, SshArgs, SecureStore, MCP, RAG,
+ * Tailscale, SSH deploy) are imported from @clawno/shared/ipc/types.
+ * Desktop-only types and commands remain in this file.
  */
 
 import { invoke } from "@tauri-apps/api/core";
 
-// ── Shared types ────────────────────────────────────────────────────────────
+export type {
+  ProbeResult, McpScanResult, TailscaleStatus, StepResult, SshArgs,
+} from "@clawno/shared/ipc/types";
 
-export interface StepResult {
-  ok: boolean;
-  detail: string;
-  fixes_applied: string[];
-}
+export {
+  setSecureValue, getSecureValue, deleteSecureValue, listSecureKeys, wipeSecureStore,
+  scanMcpServer, readTextFile, getTailscaleStatus,
+  deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
+  deployRemoteOnboard, deployRemoteStartGateway,
+} from "@clawno/shared/ipc/types";
 
-export interface ProbeResult {
-  online: boolean;
-  latency_ms: number;
-}
+import type { StepResult, ProbeResult } from "@clawno/shared/ipc/types";
+
+// ── Desktop-only types ──────────────────────────────────────────────────────
 
 export interface ServiceInfo {
   name: string;
@@ -50,23 +51,10 @@ export interface PortConnection {
   is_local: boolean;
 }
 
-export interface McpScanResult {
-  risk_level: "safe" | "caution" | "danger";
-  factors: string[];
-  reachable: boolean;
-}
-
 export interface FeishuTestResult {
   ok: boolean;
   msg: string;
   missing_scopes: string[];
-}
-
-export interface TailscaleStatus {
-  installed: boolean;
-  running: boolean;
-  ip: string | null;
-  version: string | null;
 }
 
 export interface LanInfo {
@@ -87,7 +75,7 @@ export const updateOpenclaw             = ()             => invoke<StepResult>("
 export const uninstallLocalInstance     = ()             => invoke<StepResult>("uninstall_local_instance");
 export const listConfiguredProviders    = ()             => invoke<string[]>("list_configured_providers");
 
-// ── Deploy commands ─────────────────────────────────────────────────────────
+// ── Local deploy commands ────────────────────────────────────────────────────
 
 export const deployCheckNode        = ()                         => invoke<StepResult>("deploy_step_check_node");
 export const deployInstallOpenclaw  = ()                         => invoke<StepResult>("deploy_step_install_openclaw");
@@ -95,22 +83,7 @@ export const deployInstallPm2       = ()                         => invoke<StepR
 export const deployOnboard          = ()                         => invoke<StepResult>("deploy_step_onboard");
 export const deployStart            = (port?: number)            => invoke<StepResult>("deploy_step_start", { port });
 
-// ── SSH remote deploy ────────────────────────────────────────────────────────
-
-export interface SshArgs {
-  host: string;
-  port: number;
-  username: string;
-  password?: string;
-  privateKey?: string;
-  gatewayPort: number;
-}
-
-export const deployRemoteConnect           = (args: SshArgs) => invoke<StepResult>("deploy_remote_connect", { args });
-export const deployRemoteCheckNode         = (args: SshArgs) => invoke<StepResult>("deploy_remote_check_node", { args });
-export const deployRemoteInstallOpenclaw   = (args: SshArgs) => invoke<StepResult>("deploy_remote_install_openclaw", { args });
-export const deployRemoteOnboard           = (args: SshArgs) => invoke<StepResult>("deploy_remote_onboard", { args });
-export const deployRemoteStartGateway      = (args: SshArgs) => invoke<StepResult>("deploy_remote_start_gateway", { args });
+// ── Local service management ─────────────────────────────────────────────────
 
 export const getLocalServiceInfo    = ()                         => invoke<ServiceInfo>("get_local_service_info");
 export const startLocalService      = (port?: number)            => invoke<StepResult>("start_local_service", { port });
@@ -119,10 +92,8 @@ export const restartLocalService    = ()                         => invoke<void>
 export const getBrowserUrl          = ()                         => invoke<string>("get_browser_url", {});
 export const openInBrowser          = (url: string)              => invoke<void>("open_in_browser", { url });
 export const probeInstanceHealth    = (port: number)             => invoke<ProbeResult>("probe_instance_health", { port });
-/** Fetch the active model string (e.g. "anthropic/claude-3-5-sonnet") from the running gateway. */
 export const getMainAgentModel      = (port: number)             => invoke<string | null>("get_main_agent_model", { port });
 export const configureApiKey        = (provider: string, apiKey: string) => invoke<StepResult>("configure_api_key", { provider, apiKey });
-/** Run on app startup: auto-fix default model if it has no auth, rebuild fallback chain. */
 export const fixModelConfig         = ()                               => invoke<string>("fix_model_config");
 
 // ── Security commands ───────────────────────────────────────────────────────
@@ -132,41 +103,24 @@ export const getPortConnections     = (port: number)             => invoke<PortC
 export const applyLocalOnlyFirewall = (port: number)             => invoke<string>("apply_local_only_firewall", { port });
 export const removeLocalOnlyFirewall= (port: number)             => invoke<string>("remove_local_only_firewall", { port });
 
-// ── Secure store commands ───────────────────────────────────────────────────
-
-export const setSecureValue         = (key: string, value: string)  => invoke<void>("set_secure_value", { key, value });
-export const getSecureValue         = (key: string)                  => invoke<string | null>("get_secure_value", { key });
-export const deleteSecureValue      = (key: string)                  => invoke<void>("delete_secure_value", { key });
-export const listSecureKeys         = ()                              => invoke<string[]>("list_secure_keys");
-export const wipeSecureStore        = ()                              => invoke<void>("wipe_secure_store");
-
 // ── Connector commands ──────────────────────────────────────────────────────
 
 export const testFeishuConnection   = (appId: string, appSecret: string) => invoke<FeishuTestResult>("test_feishu_connection", { appId, appSecret });
 export const saveFeishuConfig       = (appId: string, appSecret: string)  => invoke<string>("save_feishu_config", { appId, appSecret });
-/** Returns the saved App ID (never the secret), or null if not yet configured. */
 export const getFeishuConfig        = ()                                   => invoke<string | null>("get_feishu_config");
-export const getTailscaleStatus     = ()                                   => invoke<TailscaleStatus>("get_tailscale_status");
 export const getLanInfo             = ()                                   => invoke<LanInfo | null>("get_local_lan_info");
 
 // ── Secure Pairing commands ──────────────────────────────────────────────────
 
 export interface PairQrPayload {
-  /** The full string to embed in the QR code. */
   qr_data: string;
-  /** 6-character human-readable PIN shown on the desktop for confirmation. */
   pin: string;
-  /** Unix timestamp (seconds) — when this token expires. */
   expires_at: number;
 }
 
-/** Generate a pairing QR (uses localhost as host — use generatePairQrWithHost for LAN). */
 export const generatePairQr         = (port: number, serverName: string)              => invoke<PairQrPayload>("generate_pair_qr", { port, serverName });
-/** Generate a pairing QR with an explicit LAN IP. */
 export const generatePairQrWithHost = (host: string, port: number, serverName: string) => invoke<PairQrPayload>("generate_pair_qr_with_host", { host, port, serverName });
-/** Verify a token from the mobile app (marks it consumed on success). */
 export const verifyPairToken        = (token: string)                                  => invoke<void>("verify_pair_token", { token });
-/** Get the 6-char PIN currently displayed on desktop (null if no active token). */
 export const getCurrentPairPin      = ()                                               => invoke<string | null>("get_current_pair_pin");
 
 // ── Telegram Bot commands ────────────────────────────────────────────────────
@@ -199,9 +153,7 @@ export const startDiscordBot       = (port: number)              => invoke<void>
 export const stopDiscordBot        = ()                           => invoke<void>("stop_discord_bot");
 export const getDiscordBotStatus   = ()                           => invoke<boolean>("get_discord_bot_status");
 
-// ── MCP commands ────────────────────────────────────────────────────────────
-
-export const scanMcpServer          = (endpoint: string, transport: string) => invoke<McpScanResult>("scan_mcp_server", { endpoint, transport });
+// ── MCP desktop-only commands ───────────────────────────────────────────────
 
 export interface OpenClawPlugin {
   id: string;
@@ -217,10 +169,6 @@ export interface OpenClawPlugin {
 export const listOpenClawPlugins    = ()                              => invoke<OpenClawPlugin[]>("list_openclaw_plugins");
 export const toggleOpenClawPlugin   = (id: string, enable: boolean)  => invoke<string>("toggle_openclaw_plugin", { id, enable });
 
-// ── RAG commands ────────────────────────────────────────────────────────────
-
-export const readTextFile           = (path: string)             => invoke<string>("read_text_file", { path });
-
 // ── Ollama local model engine ────────────────────────────────────────────────
 
 export interface OllamaStatus {
@@ -231,7 +179,6 @@ export interface OllamaStatus {
 
 export interface OllamaModel {
   name: string;
-  /** File size in bytes */
   size: number;
   modified_at: string;
 }
@@ -239,7 +186,6 @@ export interface OllamaModel {
 export interface OllamaPullProgress {
   model: string;
   status: string;
-  /** 0–100 */
   percent: number;
   done: boolean;
   error: string | null;

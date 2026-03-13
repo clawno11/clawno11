@@ -1,14 +1,15 @@
 /// OpenClaw gateway lifecycle — start, stop, health probe, browser URL.
-
+///
+/// All self-healing actions are captured via the sentinel engine so they
+/// become auditable and can feed the evolution library.
 use std::process::Command;
 use std::time::Duration;
-use serde::Serialize;
 
-use crate::platform::{
-    data_local, first_line, path_join, shell_output, user_home,
-};
+use crate::platform::{first_line, path_join, shell_output, user_home};
 use crate::pm2::{cleanup_pm2_openclaw, pm2_last_log, pm2_start_with_retry, run_pm2};
 use crate::types::StepResult;
+
+use clawno_core::sentinel::{self, capture::capture_context, SentinelEvent};
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -17,11 +18,7 @@ const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 // ── Health probe ─────────────────────────────────────────────────────────────
 
-#[derive(Serialize)]
-pub struct ProbeResult {
-    pub online: bool,
-    pub latency_ms: u64,
-}
+pub use clawno_core::types::ProbeResult;
 
 #[tauri::command]
 pub fn probe_instance_health(port: u16) -> ProbeResult {
@@ -34,7 +31,10 @@ pub fn probe_instance_health(port: u16) -> ProbeResult {
         .and_then(|mut a| a.next())
         .map(|sa| TcpStream::connect_timeout(&sa, Duration::from_secs(3)).is_ok())
         .unwrap_or(false);
-    ProbeResult { online, latency_ms: t0.elapsed().as_millis() as u64 }
+    ProbeResult {
+        online,
+        latency_ms: t0.elapsed().as_millis() as u64,
+    }
 }
 
 // ── Gateway failure diagnosis ─────────────────────────────────────────────────
@@ -65,7 +65,9 @@ fn diagnose_gateway_log(log: &str) -> GatewayFailure {
 fn is_port_listening(port: u16) -> bool {
     use std::net::{TcpStream, ToSocketAddrs};
     let addr_str = format!("127.0.0.1:{}", port);
-    addr_str.to_socket_addrs().ok()
+    addr_str
+        .to_socket_addrs()
+        .ok()
         .and_then(|mut a| a.next())
         .map(|sa| TcpStream::connect_timeout(&sa, Duration::from_millis(300)).is_ok())
         .unwrap_or(false)
@@ -76,10 +78,14 @@ fn kill_port_occupant(port: u16) -> bool {
     {
         let out = shell_output(&format!("netstat -ano | findstr :{port}"));
         for line in out.lines() {
-            if !line.contains("LISTENING") && !line.contains("ESTABLISHED") { continue; }
+            if !line.contains("LISTENING") && !line.contains("ESTABLISHED") {
+                continue;
+            }
             if let Some(pid_str) = line.split_whitespace().last() {
                 if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                    if pid == 0 || pid == 4 { continue; }
+                    if pid == 0 || pid == 4 {
+                        continue;
+                    }
                     shell_output(&format!("taskkill /PID {pid} /F"));
                 }
             }
@@ -93,7 +99,9 @@ fn kill_port_occupant(port: u16) -> bool {
         let out = shell_output(&format!("lsof -ti :{port} 2>/dev/null"));
         for pid_str in out.split_whitespace() {
             if let Ok(pid) = pid_str.trim().parse::<u32>() {
-                if pid > 1 { shell_output(&format!("kill -9 {pid}")); }
+                if pid > 1 {
+                    shell_output(&format!("kill -9 {pid}"));
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(500));
@@ -106,7 +114,9 @@ fn kill_port_occupant(port: u16) -> bool {
 fn wait_for_port(port: u16, secs: u8) -> bool {
     for _ in 0..secs {
         std::thread::sleep(Duration::from_secs(1));
-        if is_port_listening(port) { return true; }
+        if is_port_listening(port) {
+            return true;
+        }
     }
     false
 }
@@ -142,18 +152,25 @@ fn write_cjs_wrapper(mjs: &str, port: u16, fixes: &mut Vec<String>) -> Option<St
     let app_dir = crate::platform::app_data_dir();
     if std::fs::create_dir_all(&app_dir).is_ok() {
         let path = path_join(&app_dir, "gateway-wrapper.cjs");
-        if std::fs::write(&path, &content).is_ok() { return Some(path); }
+        if std::fs::write(&path, &content).is_ok() {
+            return Some(path);
+        }
     }
 
     fixes.push("wrapper-fallback-to-temp".to_string());
     let temp = std::env::var("TEMP")
         .or_else(|_| std::env::var("TMP"))
         .unwrap_or_else(|_| {
-            if cfg!(target_os = "windows") { "C:\\Windows\\Temp".into() }
-            else { "/tmp".into() }
+            if cfg!(target_os = "windows") {
+                "C:\\Windows\\Temp".into()
+            } else {
+                "/tmp".into()
+            }
         });
     let path = path_join(&temp, "clawno-gateway-wrapper.cjs");
-    if std::fs::write(&path, &content).is_ok() { return Some(path); }
+    if std::fs::write(&path, &content).is_ok() {
+        return Some(path);
+    }
     None
 }
 
@@ -171,7 +188,11 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
             let npm_root = shell_output("npm root -g").trim().to_string();
             if !npm_root.is_empty() {
                 let p = path_join(&path_join(&npm_root, "openclaw"), "openclaw.mjs");
-                if std::path::Path::new(&p).exists() { Some(p) } else { None }
+                if std::path::Path::new(&p).exists() {
+                    Some(p)
+                } else {
+                    None
+                }
             } else {
                 None
             }
@@ -187,7 +208,8 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
                     }
                     None => {
                         return StepResult::err_fixed(
-                            "openclaw-mjs-not-found: reinstall openclaw via the deploy steps".to_string(),
+                            "openclaw-mjs-not-found: reinstall openclaw via the deploy steps"
+                                .to_string(),
                             fixes,
                         );
                     }
@@ -198,9 +220,12 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
 
     let wrapper_path = match write_cjs_wrapper(&mjs, port, &mut fixes) {
         Some(p) => p,
-        None => return StepResult::err_fixed(
-            "wrapper-write-failed: disk permission issue".to_string(), fixes,
-        ),
+        None => {
+            return StepResult::err_fixed(
+                "wrapper-write-failed: disk permission issue".to_string(),
+                fixes,
+            )
+        }
     };
 
     if is_port_listening(port) {
@@ -218,28 +243,56 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
     let (pm2_ok, pm2_err) = pm2_start_with_retry(&wrapper_path, &mut fixes);
     if !pm2_ok {
         return StepResult::err_fixed(
-            format!("pm2-start-failed: {}", if pm2_err.is_empty() { "unknown error".to_string() } else { pm2_err }),
+            format!(
+                "pm2-start-failed: {}",
+                if pm2_err.is_empty() {
+                    "unknown error".to_string()
+                } else {
+                    pm2_err
+                }
+            ),
             fixes,
         );
     }
 
     for round in 0u8..3 {
         if wait_for_port(port, 6) {
-            return StepResult::ok_fixed(
-                format!("gateway-ready:{}:{}", port, ui_port), fixes,
-            );
+            sentinel::log_sentinel_event(&SentinelEvent::applied(
+                "gateway",
+                "",
+                "gateway started successfully",
+            ));
+            return StepResult::ok_fixed(format!("gateway-ready:{}:{}", port, ui_port), fixes);
         }
 
         let log = pm2_last_log("openclaw");
+        let ctx = capture_context(&log, "gateway_pm2", None);
+        let sig = ctx.bug_signature.clone();
+
         match diagnose_gateway_log(&log) {
             GatewayFailure::PortInUse => {
+                sentinel::log_sentinel_event(&SentinelEvent::captured(
+                    "gateway",
+                    &sig,
+                    "port in use — killing occupant",
+                ));
                 fixes.push(format!("kill-port-occupant:{}", port));
                 kill_port_occupant(port);
                 std::thread::sleep(Duration::from_millis(500));
                 cleanup_pm2_openclaw(&mut fixes);
                 pm2_start_with_retry(&wrapper_path, &mut fixes);
+                sentinel::log_sentinel_event(&SentinelEvent::applied(
+                    "gateway",
+                    &sig,
+                    "port_kill remedy applied",
+                ));
             }
             GatewayFailure::ConfigCorrupt => {
+                sentinel::log_sentinel_event(&SentinelEvent::captured(
+                    "gateway",
+                    &sig,
+                    "config corruption detected",
+                ));
                 if round == 0 {
                     fixes.push("reset-corrupt-config".to_string());
                     let home_claw = path_join(&user_home(), ".openclaw");
@@ -249,21 +302,42 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
                     shell_output("openclaw onboard --yes");
                     cleanup_pm2_openclaw(&mut fixes);
                     pm2_start_with_retry(&wrapper_path, &mut fixes);
+                    sentinel::log_sentinel_event(&SentinelEvent::applied(
+                        "gateway",
+                        &sig,
+                        "config_patch remedy applied",
+                    ));
                 }
             }
-            GatewayFailure::Timeout => {}
+            GatewayFailure::Timeout => {
+                sentinel::log_sentinel_event(&SentinelEvent::captured(
+                    "gateway",
+                    &sig,
+                    &format!("timeout waiting for port {port} (round {round})"),
+                ));
+            }
             GatewayFailure::UnknownCrash(ref msg) => {
+                sentinel::log_sentinel_event(&SentinelEvent::captured(
+                    "gateway",
+                    &sig,
+                    &format!("unknown crash: {}", first_line(msg)),
+                ));
                 if round >= 1 {
                     return StepResult::err_fixed(
-                        format!("gateway-crash: {}", first_line(msg)), fixes,
+                        format!("gateway-crash: {}", first_line(msg)),
+                        fixes,
                     );
                 }
                 fixes.push("restart-pm2-daemon".to_string());
                 run_pm2(&["kill"]);
-                // Match the 3.5s wait used in pm2_start_with_retry for consistency.
                 std::thread::sleep(Duration::from_millis(3500));
                 cleanup_pm2_openclaw(&mut fixes);
                 pm2_start_with_retry(&wrapper_path, &mut fixes);
+                sentinel::log_sentinel_event(&SentinelEvent::applied(
+                    "gateway",
+                    &sig,
+                    "pm2_restart remedy applied",
+                ));
             }
         }
     }
@@ -274,6 +348,12 @@ pub async fn deploy_step_start(port: Option<u16>) -> StepResult {
     } else {
         format!("gateway-timeout: {}", first_line(&log))
     };
+    let ctx = capture_context(&detail, "gateway_pm2", None);
+    sentinel::log_sentinel_event(&SentinelEvent::captured(
+        "gateway",
+        &ctx.bug_signature,
+        &detail,
+    ));
     StepResult::err_fixed(detail, fixes)
 }
 
@@ -293,7 +373,9 @@ fn openclaw_dashboard_url_from_cli() -> Option<String> {
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("Dashboard URL:") {
             let url = rest.trim().to_string();
-            if !url.is_empty() { return Some(url); }
+            if !url.is_empty() {
+                return Some(url);
+            }
         }
     }
     None
@@ -304,11 +386,15 @@ fn openclaw_dashboard_url_from_cli() -> Option<String> {
 /// ports (18789 ± 10) and return the first UI port that is reachable.
 fn find_listening_ui_port(hint_ui_port: u16) -> Option<u16> {
     // Try the hinted port first
-    if is_port_listening(hint_ui_port) { return Some(hint_ui_port); }
+    if is_port_listening(hint_ui_port) {
+        return Some(hint_ui_port);
+    }
     // Scan gateway ports 18780..18800; UI = gateway + 2
     for gw in 18780u16..=18800 {
         let ui = gw + 2;
-        if ui != hint_ui_port && is_port_listening(ui) { return Some(ui); }
+        if ui != hint_ui_port && is_port_listening(ui) {
+            return Some(ui);
+        }
     }
     None
 }
@@ -340,23 +426,36 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
             let mut c = Command::new("cmd");
             c.args(["/C", &bat_path]);
             c.creation_flags(CREATE_NO_WINDOW);
-            if c.spawn().is_ok() { return Ok(()); }
+            if c.spawn().is_ok() {
+                return Ok(());
+            }
         }
         let r2 = Command::new("powershell")
-            .args(["-NonInteractive", "-WindowStyle", "Hidden",
-                   "-Command", &format!("Start-Process '{}'", url)])
+            .args([
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                &format!("Start-Process '{}'", url),
+            ])
             .spawn();
-        if r2.is_ok() { return Ok(()); }
+        if r2.is_ok() {
+            return Ok(());
+        }
     }
 
     #[cfg(target_os = "macos")]
     {
-        if Command::new("open").arg(&url).spawn().is_ok() { return Ok(()); }
+        if Command::new("open").arg(&url).spawn().is_ok() {
+            return Ok(());
+        }
     }
 
     #[cfg(target_os = "linux")]
     {
-        if Command::new("xdg-open").arg(&url).spawn().is_ok() { return Ok(()); }
+        if Command::new("xdg-open").arg(&url).spawn().is_ok() {
+            return Ok(());
+        }
     }
 
     Err(format!("Failed to open URL: {}", url))
@@ -366,11 +465,8 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
 
 /// Fetch the model string of the "main" agent from a running gateway instance.
 ///
-/// Calls `GET http://127.0.0.1:{port}/agents`, finds the agent with id "main"
-/// (falling back to the first agent), and returns its `model` field.
-///
-/// Returns `None` if the gateway is unreachable or returns no agents.
-/// The model string is typically `"provider/model-name"` (e.g. `"anthropic/claude-3-5-sonnet-20241022"`).
+/// Calls `GET http://127.0.0.1:{port}/agents` and uses the shared
+/// `parse_agents_model` parser to extract the model field.
 #[tauri::command]
 pub async fn get_main_agent_model(port: u16) -> Option<String> {
     let url = format!("http://127.0.0.1:{}/agents", port);
@@ -380,17 +476,7 @@ pub async fn get_main_agent_model(port: u16) -> Option<String> {
         .ok()?;
     let resp = client.get(&url).send().await.ok()?;
     let agents: Vec<serde_json::Value> = resp.json().await.ok()?;
-
-    // Prefer the agent explicitly named "main"; fall back to the first entry.
-    let agent = agents
-        .iter()
-        .find(|a| a.get("id").and_then(|v| v.as_str()) == Some("main"))
-        .or_else(|| agents.first())?;
-
-    agent
-        .get("model")
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string())
+    clawno_core::chat::parse_agents_model(&agents)
 }
 
 // ── Unit tests ───────────────────────────────────────────────────────────────

@@ -1,0 +1,41 @@
+---
+description: 跨平台共享优先原则 — 新增代码前必须判定是否应放入共享层
+alwaysApply: true
+---
+
+# 共享优先原则（Share-First Rule）
+
+新增任何功能时，必须先回答：**这段代码是否两个平台都需要？** 如果是，它必须写在共享层。
+
+## Rust 层判定表
+
+| 条件 | 放入位置 |
+|------|---------|
+| 两端都需要 + 不依赖 `tauri::AppHandle` | `crates/clawno-core/src/` |
+| 两端都需要 + 依赖 tauri | core 提供逻辑函数，各端写薄 `#[tauri::command]` 包装 |
+| 仅一端需要 | `apps/{platform}/src-tauri/src/` |
+
+## TypeScript 层判定表
+
+| 条件 | 放入位置 |
+|------|---------|
+| 两端都需要的类型/invoke 函数 | `packages/shared/src/ipc/types.ts` |
+| 两端都需要的状态逻辑 | `packages/shared/src/stores/` |
+| 两端 UI 相似度 >70% | `packages/shared/src/components/` |
+| 两端都需要的 hook | `packages/shared/src/hooks/` |
+| 仅一端需要 | `apps/{platform}/src/` |
+
+## 翻译判定
+
+| 条件 | 放入位置 |
+|------|---------|
+| 两端均使用且值相同 | `packages/shared/src/locales/` |
+| 仅一端使用或值不同 | `apps/{platform}/src/locales/` |
+
+## 禁止事项
+
+- ❌ 禁止在两端 ipc.ts 中定义相同的 `invoke` 函数
+- ❌ 禁止在两端 types.rs 中定义相同的 struct
+- ❌ 禁止在两端 locales 中放置相同的翻译键
+- ❌ 禁止 `clawno-core` 依赖 `tauri` crate
+- ❌ 禁止 `@clawno/shared` 导入 `apps/` 中的代码

@@ -1,9 +1,8 @@
-/// pm2 process manager — installation, lifecycle, and service queries.
-
-use std::process::Command;
-use crate::platform::{augmented_path, data_local, data_roaming, first_line, path_join};
 use crate::node::npm_install_with_fallback;
+use crate::platform::{augmented_path, data_local, data_roaming, first_line, path_join};
 use crate::types::{ServiceInfo, StepResult};
+/// pm2 process manager — installation, lifecycle, and service queries.
+use std::process::Command;
 use tauri::Emitter;
 
 #[cfg(target_os = "windows")]
@@ -29,7 +28,9 @@ pub fn find_pm2_cmd() -> Option<String> {
             r"C:\Program Files\nodejs\pm2.cmd".to_string(),
         ];
         for p in &candidates {
-            if std::path::Path::new(p).exists() { return Some(p.clone()); }
+            if std::path::Path::new(p).exists() {
+                return Some(p.clone());
+            }
         }
     }
 
@@ -56,21 +57,35 @@ pub fn find_pm2_cmd() -> Option<String> {
                 .flatten()
                 .filter_map(|e| {
                     let s = e.file_name().to_string_lossy().to_string();
-                    if s.starts_with('v') { Some(format!("{nvm_vers}/{s}/bin/pm2")) } else { None }
+                    if s.starts_with('v') {
+                        Some(format!("{nvm_vers}/{s}/bin/pm2"))
+                    } else {
+                        None
+                    }
                 })
                 .collect();
             pm2_bins.sort_by(|a, b| b.cmp(a)); // newest first (v22 before v20)
             candidates.extend(pm2_bins);
         }
         for p in &candidates {
-            if std::path::Path::new(p).exists() { return Some(p.clone()); }
+            if std::path::Path::new(p).exists() {
+                return Some(p.clone());
+            }
         }
     }
 
     // ── Fallback: scan augmented PATH ─────────────────────────────────────
     let path_env = augmented_path();
-    let sep = if cfg!(target_os = "windows") { ";" } else { ":" };
-    let bin = if cfg!(target_os = "windows") { "pm2.cmd" } else { "pm2" };
+    let sep = if cfg!(target_os = "windows") {
+        ";"
+    } else {
+        ":"
+    };
+    let bin = if cfg!(target_os = "windows") {
+        "pm2.cmd"
+    } else {
+        "pm2"
+    };
     for dir in path_env.split(sep) {
         let candidate = path_join(dir, bin);
         if std::path::Path::new(&candidate).exists() {
@@ -85,14 +100,17 @@ pub fn find_pm2_cmd() -> Option<String> {
 /// Run pm2 with properly separated arguments — avoids cmd /C quoting issues.
 pub fn run_pm2(args: &[&str]) -> (bool, String, String) {
     let pm2_path = find_pm2_cmd().unwrap_or_else(|| {
-        if cfg!(target_os = "windows") { "pm2.cmd".to_string() } else { "pm2".to_string() }
+        if cfg!(target_os = "windows") {
+            "pm2.cmd".to_string()
+        } else {
+            "pm2".to_string()
+        }
     });
     let mut cmd = Command::new(&pm2_path);
     cmd.args(args).env("PATH", augmented_path());
     #[cfg(target_os = "windows")]
     cmd.creation_flags(CREATE_NO_WINDOW);
-    match cmd.output()
-    {
+    match cmd.output() {
         Ok(o) => (
             o.status.success(),
             String::from_utf8_lossy(&o.stdout).trim().to_string(),
@@ -129,7 +147,9 @@ pub fn cleanup_pm2_openclaw(fixes: &mut Vec<String>) {
 /// Returns `(success, error_detail)`.
 pub fn pm2_start_with_retry(wrapper_path: &str, fixes: &mut Vec<String>) -> (bool, String) {
     let (ok, stdout, stderr) = run_pm2(&["start", wrapper_path, "--name", "openclaw"]);
-    if ok { return (true, String::new()); }
+    if ok {
+        return (true, String::new());
+    }
 
     let err1 = if !stderr.is_empty() { stderr } else { stdout };
 
@@ -138,9 +158,15 @@ pub fn pm2_start_with_retry(wrapper_path: &str, fixes: &mut Vec<String>) -> (boo
     // 3.5 s gives slow-disk machines enough time for the daemon to fully shut down.
     std::thread::sleep(std::time::Duration::from_millis(3500));
     let (ok2, stdout2, stderr2) = run_pm2(&["start", wrapper_path, "--name", "openclaw"]);
-    if ok2 { return (true, String::new()); }
+    if ok2 {
+        return (true, String::new());
+    }
 
-    let err2 = if !stderr2.is_empty() { stderr2 } else { stdout2 };
+    let err2 = if !stderr2.is_empty() {
+        stderr2
+    } else {
+        stdout2
+    };
     let msg = if !err2.is_empty() { err2 } else { err1 };
     (false, first_line(&msg).to_string())
 }
@@ -149,7 +175,11 @@ fn clean_pm2_version(raw: &str) -> String {
     raw.lines()
         .find(|l| {
             let t = l.trim();
-            !t.is_empty() && t.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+            !t.is_empty()
+                && t.chars()
+                    .next()
+                    .map(|c| c.is_ascii_digit())
+                    .unwrap_or(false)
         })
         .unwrap_or("")
         .trim()
@@ -170,7 +200,9 @@ pub fn stop_openclaw_on_exit() {
 pub async fn deploy_step_install_pm2() -> StepResult {
     let (_, raw, _) = run_pm2(&["--version"]);
     let ver = clean_pm2_version(&raw);
-    if !ver.is_empty() { return StepResult::ok(format!("already-installed:v{}", ver)); }
+    if !ver.is_empty() {
+        return StepResult::ok(format!("already-installed:v{}", ver));
+    }
 
     let (ok, detail, mut fixes) = npm_install_with_fallback("pm2");
     if !ok {
@@ -179,7 +211,8 @@ pub async fn deploy_step_install_pm2() -> StepResult {
             let _ = std::fs::rename(&pm2_home, format!("{pm2_home}.bak"));
             fixes.push("rebuild-pm2-home".to_string());
             let (ok2, detail2, fixes2) = npm_install_with_fallback("pm2");
-            let mut all = fixes; all.extend(fixes2);
+            let mut all = fixes;
+            all.extend(fixes2);
             if ok2 {
                 let (_, raw2, _) = run_pm2(&["--version"]);
                 let ver2 = clean_pm2_version(&raw2);
@@ -197,9 +230,13 @@ pub async fn deploy_step_install_pm2() -> StepResult {
 #[tauri::command]
 pub async fn get_local_service_info() -> ServiceInfo {
     let out = pm2_jlist();
-    let status = if out.contains("\"openclaw\"") && out.contains("\"online\"") { "running" }
-                 else if out.contains("\"openclaw\"") { "stopped" }
-                 else { "unknown" };
+    let status = if out.contains("\"openclaw\"") && out.contains("\"online\"") {
+        "running"
+    } else if out.contains("\"openclaw\"") {
+        "stopped"
+    } else {
+        "unknown"
+    };
     ServiceInfo {
         name: "openclaw".to_string(),
         status: status.to_string(),

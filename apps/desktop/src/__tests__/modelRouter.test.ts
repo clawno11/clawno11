@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { matchRule, type RoutingRule } from "../store/modelRouter";
+import { matchRule, type RoutingRule } from "@clawno/shared/modelRouter";
 
 const makeRule = (overrides: Partial<RoutingRule> = {}): RoutingRule => ({
   id: crypto.randomUUID(),

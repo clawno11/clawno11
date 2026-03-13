@@ -1,0 +1,35 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+echo "🔍 Running pre-commit checks..."
+
+# Run typecheck
+echo "▶ Type checking..."
+pnpm typecheck || {
+  echo "❌ Type check failed"
+  exit 1
+}
+
+# Skip lint for now - packages don't have lint scripts configured
+# echo "▶ Linting..."
+# pnpm lint || {
+#   echo "❌ Lint failed"
+#   exit 1
+# }
+
+# Run Rust format check
+echo "▶ Checking Rust formatting..."
+cargo fmt --all --check || {
+  echo "❌ Rust format check failed"
+  echo "💡 Run 'cargo fmt' to fix formatting issues"
+  exit 1
+}
+
+# Run Rust clippy
+echo "▶ Running Rust clippy..."
+cargo clippy --all-targets --all-features -- -D warnings || {
+  echo "❌ Rust clippy failed"
+  exit 1
+}
+
+echo "✅ All pre-commit checks passed!"

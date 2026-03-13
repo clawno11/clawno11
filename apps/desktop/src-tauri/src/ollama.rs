@@ -11,7 +11,6 @@
 ///
 ///   Model pull progress is streamed line-by-line from POST /api/pull
 ///   and forwarded to the frontend as "ollama-pull-progress" Tauri events.
-
 use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 
@@ -139,9 +138,17 @@ pub async fn ollama_check_status() -> OllamaStatus {
         (false, None)
     };
 
-    let running = if installed { server_is_running().await } else { false };
+    let running = if installed {
+        server_is_running().await
+    } else {
+        false
+    };
 
-    OllamaStatus { installed, running, version }
+    OllamaStatus {
+        installed,
+        running,
+        version,
+    }
 }
 
 /// Silently install the Ollama engine if not already present.
@@ -177,7 +184,8 @@ pub async fn ollama_ensure_installed() -> StepResult {
         // Accept exit codes 0 (success) and 3010 (success, restart required).
         let winget_ok = tokio::process::Command::new("winget")
             .args([
-                "install", "Ollama.Ollama",
+                "install",
+                "Ollama.Ollama",
                 "--silent",
                 "--accept-package-agreements",
                 "--accept-source-agreements",
@@ -209,15 +217,18 @@ pub async fn ollama_ensure_installed() -> StepResult {
 
         let resp = match dl_result {
             Ok(r) if r.status().is_success() => r,
-            Ok(r) => return StepResult::err(format!(
-                "ollama-download-failed:http-{}", r.status().as_u16()
-            )),
+            Ok(r) => {
+                return StepResult::err(format!(
+                    "ollama-download-failed:http-{}",
+                    r.status().as_u16()
+                ))
+            }
             Err(e) => return StepResult::err(format!("ollama-download-failed:{e}")),
         };
 
         let bytes = match resp.bytes().await {
             Ok(b) if !b.is_empty() => b,
-            Ok(_)  => return StepResult::err("ollama-download-failed:empty-response".into()),
+            Ok(_) => return StepResult::err("ollama-download-failed:empty-response".into()),
             Err(e) => return StepResult::err(format!("ollama-download-read-failed:{e}")),
         };
 
@@ -243,7 +254,8 @@ pub async fn ollama_ensure_installed() -> StepResult {
                 StepResult::ok("ollama-installed-direct".to_string())
             }
             Ok(s) => StepResult::err(format!(
-                "ollama-install-failed:installer-exit-{}", s.code().unwrap_or(-1)
+                "ollama-install-failed:installer-exit-{}",
+                s.code().unwrap_or(-1)
             )),
             Err(e) => StepResult::err(format!("ollama-install-failed:{e}")),
         };
@@ -468,7 +480,11 @@ pub fn set_ollama_model(model_name: String) -> StepResult {
         return StepResult::err("model-name-empty".to_string());
     }
     // Sanitise: reject anything that looks like shell injection.
-    if model_name.contains('"') || model_name.contains('\'') || model_name.contains(';') || model_name.contains('&') {
+    if model_name.contains('"')
+        || model_name.contains('\'')
+        || model_name.contains(';')
+        || model_name.contains('&')
+    {
         return StepResult::err("model-name-invalid".to_string());
     }
 
@@ -480,7 +496,10 @@ pub fn set_ollama_model(model_name: String) -> StepResult {
     let (fb_ok, fb_out, fb_err) = shell_result(&fb_cmd);
     if !fb_ok {
         let detail = format!("{}{}", fb_out, fb_err);
-        return StepResult::err(format!("fallback-add-failed:{}", detail.trim().chars().take(120).collect::<String>()));
+        return StepResult::err(format!(
+            "fallback-add-failed:{}",
+            detail.trim().chars().take(120).collect::<String>()
+        ));
     }
 
     StepResult::ok(format!("ollama-model-added-to-fallback:{}", model_name))

@@ -7,7 +7,7 @@ import {
   BarChart3, Database, Puzzle, GitBranch,
   ShieldCheck, ChevronRight,
 } from "lucide-react";
-import { useTokenAnomalyStore } from "../store/tokenAnomalyStore";
+import { useTokenAnomalyStore } from "@clawno/shared/tokenAnomalyStore";
 import { TopBar } from "../components/TopBar";
 
 export function MorePage() {

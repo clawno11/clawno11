@@ -113,7 +113,10 @@ pub async fn fetch_chat_proxy_token(gateway_url: String) -> Result<Option<String
     match client.get(&proxy_url).send().await {
         Ok(r) if r.status().is_success() => {
             let body: serde_json::Value = r.json().await.unwrap_or_default();
-            let token = body.get("ck").and_then(|v| v.as_str()).map(|s| s.to_string());
+            let token = body
+                .get("ck")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
             eprintln!("[fetch_chat_proxy_token] got token: {}", token.is_some());
             Ok(token)
         }

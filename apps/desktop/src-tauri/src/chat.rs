@@ -1,44 +1,78 @@
-/// Chat proxy — relays messages to the OpenClaw gateway and returns the
+/// Chat — relays messages to the OpenClaw gateway and returns the
 /// response via Tauri events so the frontend can render it progressively.
 ///
-/// Strategy (in priority order):
-///   1. HTTP SSE  — POST /v1/chat/completions?stream=true to the gateway.
-///                  Gives real progressive streaming; both Clawno11 and the
-///                  OpenClaw dashboard share the same agent session.
-///   2. CLI fallback — `openclaw agent --agent main --json -m <text>` when
-///                  no gateway URL is reachable (e.g. gateway not yet started).
+/// Strategy:
+///   - Local model (no `/` in name) → Ollama direct on localhost:11434
+///   - Cloud/auto model → WS to OpenClaw gateway with model as agentId
+///     → On quota/network failure → fallback to Ollama (if available)
+///     → On other errors → report directly
+///
+/// Model selection is per-request via the WS `agentId` parameter.
+/// No CLI-based global switching is needed.
+use std::collections::HashMap;
+use std::sync::{Arc, OnceLock};
 
-use futures_util::StreamExt;
+use clawno_core::chat::{
+    build_ollama_body, consume_sse_stream, discover_ollama_model, is_local_model, ollama_chat_url,
+    should_fallback, ChatChunk, ChatDone, FallbackReason,
+};
+use clawno_core::sentinel::{self, capture::capture_context, SentinelEvent};
+use clawno_core::ws_chat::OpenClawWs;
 use tauri::Emitter;
+use tokio::sync::Mutex;
 
-// ── Event payloads ─────────────────────────────────────────────────────────
+// ── WS connection pool ──────────────────────────────────────────────────
 
-/// Payload emitted when a text chunk arrives.
-#[derive(Clone, serde::Serialize)]
-pub struct ChatChunk {
-    pub req_id: String,
-    pub delta: String,
+type WsPool = Mutex<HashMap<String, Arc<OpenClawWs>>>;
+
+static POOL: OnceLock<WsPool> = OnceLock::new();
+
+fn ws_pool() -> &'static WsPool {
+    POOL.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Payload emitted when the turn is complete or has errored.
-#[derive(Clone, serde::Serialize)]
-pub struct ChatDone {
-    pub req_id: String,
-    pub error: Option<String>,
-    /// Actual model string returned by the gateway (e.g. "anthropic/claude-3-5-sonnet-20241022").
-    pub model: Option<String>,
+async fn get_or_create_ws(gateway_url: &str) -> Arc<OpenClawWs> {
+    let mut pool = ws_pool().lock().await;
+    if let Some(ws) = pool.get(gateway_url) {
+        return Arc::clone(ws);
+    }
+    let ws = Arc::new(OpenClawWs::new(gateway_url));
+    pool.insert(gateway_url.to_string(), Arc::clone(&ws));
+    ws
 }
 
-// ── Main command ───────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────
 
-/// Send one user message to the OpenClaw gateway and emit the reply
-/// back to the frontend via Tauri events.
-///
-/// `messages` is the full context array `[{role, content}]`.
-///
-/// Events emitted on `app`:
-/// - `chat-chunk` → `ChatChunk { req_id, delta }`  (zero or more, one per SSE chunk)
-/// - `chat-done`  → `ChatDone  { req_id, error }`  (always emitted last)
+fn done(
+    req_id: &str,
+    error: Option<String>,
+    model: Option<String>,
+    sig: Option<String>,
+) -> ChatDone {
+    ChatDone {
+        req_id: req_id.to_string(),
+        error,
+        model,
+        bug_signature: sig,
+    }
+}
+
+fn fallback_label(reason: FallbackReason) -> &'static str {
+    match reason {
+        FallbackReason::QuotaExhausted => "quota_exhausted",
+        FallbackReason::NetworkDown => "network_down",
+    }
+}
+
+fn fallback_msg_zh(reason: FallbackReason) -> &'static str {
+    match reason {
+        FallbackReason::QuotaExhausted => "云端余额不足，已切换到本地模型",
+        FallbackReason::NetworkDown => "网络不可达，已切换到本地模型",
+    }
+}
+
+// ── Main command ─────────────────────────────────────────────────────────
+
 #[tauri::command]
 pub async fn stream_chat(
     app: tauri::AppHandle,
@@ -46,522 +80,240 @@ pub async fn stream_chat(
     messages: serde_json::Value,
     req_id: String,
     model: Option<String>,
+    #[allow(unused_variables)] auth_token: Option<String>,
+    session_key: Option<String>,
 ) -> Result<(), String> {
-    // Try HTTP SSE first whenever a gateway URL is provided.
-    let use_http = !gateway_url.is_empty()
+    // ── Route: local model → Ollama direct ───────────────────────────────
+    if is_local_model(model.as_deref()) {
+        sentinel::log_sentinel_event(&SentinelEvent::applied(
+            "chat",
+            "",
+            &format!(
+                "local model '{}' → Ollama direct",
+                model.as_deref().unwrap_or("")
+            ),
+        ));
+        return stream_chat_ollama_direct(&app, &messages, &req_id, model).await;
+    }
+
+    // ── Route: cloud/auto → WS to OpenClaw gateway ───────────────────────
+    let has_gateway = !gateway_url.is_empty()
         && (gateway_url.starts_with("http://") || gateway_url.starts_with("https://"));
 
-    if use_http {
-        // Attempt HTTP SSE; fall back to CLI on any transport or routing error
-        // so the user always gets a response.
-        //
-        // Fallback triggers on:
-        //   "http-connect-error:"  — gateway not reachable
-        //   "http-request-error:"  — TCP/TLS failure
-        //   "http-endpoint-404:"   — no chat endpoint at this URL (wrong API version)
-        //   "http-endpoint-405:"   — method not allowed (same root cause)
-        let result = stream_chat_http(app.clone(), &gateway_url, &messages, &req_id, model).await;
-        if let Err(ref e) = result {
-            if e.starts_with("http-connect-error:")
-                || e.starts_with("http-request-error:")
-                || e.starts_with("http-endpoint-404:")
-                || e.starts_with("http-endpoint-405:")
-            {
-                return stream_chat_cli(app, &messages, &req_id).await;
-            }
-        }
-        result
-    } else {
-        stream_chat_cli(app, &messages, &req_id).await
-    }
-}
-
-// ── HTTP SSE path ──────────────────────────────────────────────────────────
-
-/// Call the OpenClaw gateway's chat endpoint with `stream: true` and emit
-/// one `chat-chunk` event per token.
-///
-/// OpenClaw gateway versions differ in their chat API path. We probe the
-/// candidates in order and use the first one that responds with 2xx.
-/// Returns `Err("http-endpoint-404: ...")` when none of the candidates match,
-/// which causes `stream_chat` to fall back to the local CLI.
-async fn stream_chat_http(
-    app: tauri::AppHandle,
-    gateway_url: &str,
-    messages: &serde_json::Value,
-    req_id: &str,
-    model: Option<String>,
-) -> Result<(), String> {
-    let client = reqwest::Client::builder()
-        // Short connect timeout — fail fast if gateway is not reachable.
-        .connect_timeout(std::time::Duration::from_secs(10))
-        // No total request timeout for streaming — the SSE stream can run
-        // indefinitely (model inference on large inputs can take many minutes).
-        .build()
-        .map_err(|e| format!("http-connect-error: {e}"))?;
-
-    let base = gateway_url.trim_end_matches('/');
-
-    // Probe these endpoints in order. The first one to return non-404/405
-    // is used for the actual streaming request.
-    let candidates = [
-        format!("{base}/v1/chat/completions"),  // OpenAI-compatible gateways
-        format!("{base}/chat"),                  // OpenClaw native
-        format!("{base}/api/chat"),              // alternative prefix
-        format!("{base}/agents/main/chat"),      // agent-scoped endpoint
-    ];
-
-    let mut body = serde_json::json!({
-        "messages": messages,
-        "stream": true,
-        "agent": "main",
-    });
-    // Ollama (and other OpenAI-compatible servers) require an explicit "model" field.
-    // When a model override is provided, inject it into the request body.
-    if let Some(m) = model {
-        body["model"] = serde_json::Value::String(m);
-    }
-
-    // Try each candidate. We look for the first that isn't 404/405.
-    let mut last_404_msg = String::new();
-    let mut chosen_endpoint: Option<String> = None;
-    let mut chosen_resp: Option<reqwest::Response> = None;
-
-    for endpoint in &candidates {
-        let resp = match client.post(endpoint).json(&body).send().await {
-            Ok(r) => r,
-            Err(e) => {
-                // Self-healing: connection error → retry once after 1s
-                eprintln!("[self-heal] connection error to {endpoint}: {e} — retrying in 1s");
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                match client.post(endpoint).json(&body).send().await {
-                    Ok(r) => r,
-                    Err(e2) => return Err(format!("http-request-error: {e2}")),
-                }
-            }
-        };
-
-        let status = resp.status().as_u16();
-        if status == 404 || status == 405 {
-            last_404_msg = format!("http-endpoint-404: {endpoint} returned {status}");
-            continue;
-        }
-        chosen_endpoint = Some(endpoint.clone());
-        chosen_resp = Some(resp);
-        break;
-    }
-
-    // If no endpoint accepted the request, propagate as Err so the caller
-    // can fall back to the CLI.
-    let resp = match chosen_resp {
-        Some(r) => r,
-        None => return Err(last_404_msg),
-    };
-
-    let endpoint = chosen_endpoint.unwrap_or_default();
-
-    if !resp.status().is_success() {
-        let status = resp.status().as_u16();
-        let text = resp.text().await.unwrap_or_default();
-
-        // ── Self-healing: model doesn't support tools → bypass gateway, call Ollama directly ──
-        if status == 400 && text.contains("does not support tools") {
-            eprintln!("[self-heal] model doesn't support tools — falling back to direct Ollama");
-            return stream_chat_ollama_direct(&app, messages, req_id).await;
-        }
-
-        // ── Self-healing: 5xx / 429 → retry once after delay ──
-        if (status >= 500 || status == 429) && !endpoint.contains("__retried") {
-            let delay = if status == 429 { 3 } else { 1 };
-            eprintln!("[self-heal] gateway {status} — retrying in {delay}s");
-            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-            let retry_url = format!("{endpoint}__retried");
-            let retry_resp = client.post(&retry_url.replace("__retried", ""))
-                .json(&body)
-                .send()
-                .await;
-            if let Ok(r) = retry_resp {
-                if r.status().is_success() {
-                    return parse_sse_stream(app, r, req_id).await;
-                }
-            }
-        }
-
-        let error_msg = format!("gateway-http-{status} ({endpoint}): {text}");
+    if !has_gateway {
         let _ = app.emit(
             "chat-done",
-            ChatDone { req_id: req_id.to_string(), error: Some(error_msg), model: None },
+            done(
+                &req_id,
+                Some("无网关地址，请先部署或选择实例".into()),
+                None,
+                None,
+            ),
         );
         return Ok(());
     }
 
-    parse_sse_stream(app, resp, req_id).await
-}
+    let ws = get_or_create_ws(&gateway_url).await;
 
-/// Consume an SSE response stream, emitting `chat-chunk` events as tokens arrive
-/// and a final `chat-done` event when the stream completes or errors.
-async fn parse_sse_stream(
-    app: tauri::AppHandle,
-    resp: reqwest::Response,
-    req_id: &str,
-) -> Result<(), String> {
-    let mut byte_stream = resp.bytes_stream();
-    let mut model: Option<String> = None;
-    let mut had_error: Option<String> = None;
-    let mut line_buf = String::new();
+    if let Err(e) = ws.ensure_connected().await {
+        sentinel::log_sentinel_event(&SentinelEvent::captured(
+            "chat_ws",
+            "",
+            &format!("WS connect failed: {e}"),
+        ));
 
-    'outer: while let Some(chunk_result) = byte_stream.next().await {
-        match chunk_result {
-            Err(e) => {
-                had_error = Some(format!("stream-read-error: {e}"));
-                break;
+        if let Some(reason) = should_fallback(&e) {
+            sentinel::log_sentinel_event(&SentinelEvent::applied(
+                "chat_fallback",
+                "",
+                &format!("{} → Ollama", fallback_label(reason)),
+            ));
+            let _ = app.emit(
+                "chat-chunk",
+                ChatChunk {
+                    req_id: req_id.clone(),
+                    delta: format!("⚠️ {}\n\n", fallback_msg_zh(reason)),
+                },
+            );
+            return stream_chat_ollama_direct(&app, &messages, &req_id, None).await;
+        }
+
+        let _ = app.emit(
+            "chat-done",
+            done(&req_id, Some(format!("无法连接网关: {e}")), None, None),
+        );
+        return Ok(());
+    }
+
+    let emitter = app.clone();
+    let rid = req_id.clone();
+    let ws_result = ws
+        .chat_full_streaming(
+            messages.as_array().map(|a| a.as_slice()).unwrap_or(&[]),
+            model.as_deref(),
+            session_key.as_deref(),
+            move |delta| {
+                let _ = emitter.emit(
+                    "chat-chunk",
+                    ChatChunk {
+                        req_id: rid.clone(),
+                        delta: delta.to_string(),
+                    },
+                );
+            },
+        )
+        .await;
+
+    match ws_result {
+        Ok(_resp) => {
+            let _ = app.emit("chat-done", done(&req_id, None, model, None));
+            Ok(())
+        }
+        Err(e) => {
+            sentinel::log_sentinel_event(&SentinelEvent::captured(
+                "chat_ws",
+                "",
+                &format!("WS chat failed: {e}"),
+            ));
+
+            // Drop broken connection from pool so next call reconnects.
+            if e.contains("ws-closed") || e.contains("ws-recv-error") || e.contains("ws-send-error")
+            {
+                let mut pool = ws_pool().lock().await;
+                pool.remove(&gateway_url);
             }
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                for ch in text.chars() {
-                    if ch == '\n' {
-                        let line = line_buf.trim().to_string();
-                        line_buf.clear();
-                        if process_sse_line(&line, &app, req_id, &mut model) {
-                            break 'outer;
-                        }
-                    } else {
-                        line_buf.push(ch);
-                    }
-                }
+
+            if let Some(reason) = should_fallback(&e) {
+                sentinel::log_sentinel_event(&SentinelEvent::applied(
+                    "chat_fallback",
+                    "",
+                    &format!("{} → Ollama", fallback_label(reason)),
+                ));
+                let _ = app.emit(
+                    "chat-chunk",
+                    ChatChunk {
+                        req_id: req_id.clone(),
+                        delta: format!("⚠️ {}\n\n", fallback_msg_zh(reason)),
+                    },
+                );
+                return stream_chat_ollama_direct(&app, &messages, &req_id, None).await;
             }
+
+            let _ = app.emit("chat-done", done(&req_id, Some(e), None, None));
+            Ok(())
         }
     }
-
-    if !line_buf.trim().is_empty() {
-        process_sse_line(line_buf.trim(), &app, req_id, &mut model);
-    }
-
-    let _ = app.emit(
-        "chat-done",
-        ChatDone { req_id: req_id.to_string(), error: had_error, model },
-    );
-    Ok(())
 }
 
-// ── Self-healing: direct Ollama fallback ──────────────────────────────────
+// ── Ollama direct (local fallback) ───────────────────────────────────────
 
-/// Discover the first available Ollama model by querying the local API.
-async fn discover_ollama_model(client: &reqwest::Client) -> Option<String> {
-    let resp = client
-        .get("http://localhost:11434/api/tags")
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let body: serde_json::Value = resp.json().await.ok()?;
-    body["models"]
-        .as_array()?
-        .first()?
-        .get("name")?
-        .as_str()
-        .map(|s| s.to_string())
-}
-
-/// Self-healing fallback: call Ollama directly at `localhost:11434`, bypassing
-/// the OpenClaw gateway so that no `tools` parameter is injected.
-///
-/// Triggered when the gateway returns 400 "does not support tools" — the model
-/// works fine for plain chat, it just can't handle function-calling.
 async fn stream_chat_ollama_direct(
     app: &tauri::AppHandle,
     messages: &serde_json::Value,
     req_id: &str,
+    model_hint: Option<String>,
 ) -> Result<(), String> {
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(5))
         .build()
         .map_err(|e| format!("ollama-direct-error: {e}"))?;
 
-    let model_name = discover_ollama_model(&client)
-        .await
-        .unwrap_or_else(|| "llama3.2".into());
+    let model_name = if let Some(ref hint) = model_hint {
+        hint.clone()
+    } else {
+        discover_ollama_model(&client)
+            .await
+            .unwrap_or_else(|| "llama3.2".into())
+    };
 
-    eprintln!("[self-heal] calling Ollama directly with model={model_name}");
+    sentinel::log_sentinel_event(&SentinelEvent::applied(
+        "chat_ollama",
+        "",
+        &format!("Ollama direct with model={model_name}"),
+    ));
 
-    let body = serde_json::json!({
-        "model": model_name,
-        "messages": messages,
-        "stream": true,
-    });
-
-    let resp = client
-        .post("http://localhost:11434/v1/chat/completions")
-        .json(&body)
-        .send()
-        .await;
+    let body = build_ollama_body(&model_name, messages, true);
+    let resp = client.post(ollama_chat_url()).json(&body).send().await;
 
     match resp {
         Err(e) => {
-            eprintln!("[self-heal] Ollama direct also failed: {e} — falling back to CLI");
-            return stream_chat_cli(app.clone(), messages, req_id).await;
+            let ctx = capture_context(&e.to_string(), "chat_ollama", None);
+            sentinel::log_sentinel_event(&SentinelEvent::captured(
+                "chat_ollama",
+                &ctx.bug_signature,
+                &format!("Ollama connection failed: {e}"),
+            ));
+            let _ = app.emit(
+                "chat-done",
+                done(
+                    req_id,
+                    Some("Ollama 未运行或无法连接，请确认已启动 Ollama".into()),
+                    None,
+                    Some(ctx.bug_signature),
+                ),
+            );
+            Ok(())
         }
         Ok(r) if !r.status().is_success() => {
             let status = r.status().as_u16();
             let text = r.text().await.unwrap_or_default();
-            eprintln!("[self-heal] Ollama direct {status}: {text} — falling back to CLI");
-            return stream_chat_cli(app.clone(), messages, req_id).await;
-        }
-        Ok(r) => {
-            return parse_sse_stream(app.clone(), r, req_id).await;
-        }
-    }
-}
-
-/// Parse a single SSE line and emit a `chat-chunk` event if it carries text.
-/// Returns `true` when `[DONE]` is received and the outer loop should stop.
-fn process_sse_line(
-    line: &str,
-    app: &tauri::AppHandle,
-    req_id: &str,
-    model: &mut Option<String>,
-) -> bool {
-    let Some(data) = line.strip_prefix("data:") else { return false };
-    let data = data.trim();
-
-    if data == "[DONE]" {
-        return true;
-    }
-    if data.is_empty() {
-        return false;
-    }
-
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(data) else {
-        // Non-JSON line (keep-alive ping, comment, etc.) — ignore silently.
-        return false;
-    };
-
-    // Capture model name from the first data chunk that carries it.
-    if model.is_none() {
-        if let Some(m) = json.get("model").and_then(|v| v.as_str()) {
-            let m = m.trim();
-            if !m.is_empty() && m != "main" && m != "default" && m != "unknown" {
-                *model = Some(m.to_string());
-            }
-        }
-    }
-
-    // OpenAI-compatible SSE delta.
-    if let Some(delta) = json
-        .pointer("/choices/0/delta/content")
-        .and_then(|v| v.as_str())
-    {
-        if !delta.is_empty() {
-            let _ = app.emit(
-                "chat-chunk",
-                ChatChunk { req_id: req_id.to_string(), delta: delta.to_string() },
-            );
-        }
-    }
-
-    false
-}
-
-// ── CLI fallback path ──────────────────────────────────────────────────────
-
-/// Run `openclaw agent --agent main --json -m <last_user_msg>` and emit
-/// the response as a single `chat-chunk` + `chat-done` pair.
-///
-/// This path is used when the gateway HTTP endpoint is unreachable (e.g.
-/// gateway not yet started) or when no gateway URL was supplied.
-async fn stream_chat_cli(
-    app: tauri::AppHandle,
-    messages: &serde_json::Value,
-    req_id: &str,
-) -> Result<(), String> {
-    // Extract the last user message from the context array.
-    let user_text = messages
-        .as_array()
-        .and_then(|arr| {
-            arr.iter()
-                .rev()
-                .find(|m| m.get("role").and_then(|r| r.as_str()) == Some("user"))
-        })
-        .and_then(|m| m.get("content"))
-        .and_then(|c| c.as_str())
-        .unwrap_or("")
-        .to_string();
-
-    if user_text.is_empty() {
-        let _ = app.emit(
-            "chat-done",
-            ChatDone { req_id: req_id.to_string(), error: Some("empty message".into()), model: None },
-        );
-        return Ok(());
-    }
-
-    let output = run_openclaw_agent(&user_text).await;
-
-    match output {
-        Err(e) => {
+            let ctx = capture_context(&text, "chat_ollama", None);
+            sentinel::log_sentinel_event(&SentinelEvent::captured(
+                "chat_ollama",
+                &ctx.bug_signature,
+                &format!("Ollama {status}: {text}"),
+            ));
             let _ = app.emit(
                 "chat-done",
-                ChatDone { req_id: req_id.to_string(), error: Some(e), model: None },
+                done(
+                    req_id,
+                    Some(format!(
+                        "Ollama 返回错误 ({status})，请检查模型 {model_name} 是否可用"
+                    )),
+                    None,
+                    Some(ctx.bug_signature),
+                ),
             );
+            Ok(())
         }
-        Ok(raw) => {
-            let model = extract_model_from_reply(&raw);
-            match parse_agent_reply(&raw) {
+        Ok(r) => {
+            let rid = req_id.to_string();
+            let emitter = app.clone();
+            let result = consume_sse_stream(r, 0, |delta| {
+                let _ = emitter.emit(
+                    "chat-chunk",
+                    ChatChunk {
+                        req_id: rid.clone(),
+                        delta: delta.to_string(),
+                    },
+                );
+            })
+            .await;
+
+            match result {
+                Ok(_) => {
+                    let _ = app.emit("chat-done", done(req_id, None, Some(model_name), None));
+                    Ok(())
+                }
                 Err(e) => {
+                    let ctx = capture_context(&e, "chat_ollama", None);
+                    sentinel::log_sentinel_event(&SentinelEvent::captured(
+                        "chat_ollama",
+                        &ctx.bug_signature,
+                        &format!("Ollama stream error: {e}"),
+                    ));
                     let _ = app.emit(
                         "chat-done",
-                        ChatDone { req_id: req_id.to_string(), error: Some(e), model },
+                        done(
+                            req_id,
+                            Some(format!("Ollama 流式响应异常: {e}")),
+                            Some(model_name),
+                            Some(ctx.bug_signature),
+                        ),
                     );
-                }
-                Ok(text) => {
-                    if !text.is_empty() {
-                        let _ = app.emit(
-                            "chat-chunk",
-                            ChatChunk { req_id: req_id.to_string(), delta: text },
-                        );
-                    }
-                    let _ = app.emit(
-                        "chat-done",
-                        ChatDone { req_id: req_id.to_string(), error: None, model },
-                    );
+                    Ok(())
                 }
             }
         }
     }
-
-    Ok(())
-}
-
-// ── CLI helpers ────────────────────────────────────────────────────────────
-
-/// Run `openclaw agent -m <msg> --agent main --json` and return stdout.
-async fn run_openclaw_agent(message: &str) -> Result<String, String> {
-    let augmented = crate::platform::augmented_path();
-
-    // On ALL platforms, prefer explicit v22+ node + openclaw.mjs to avoid:
-    //   - macOS/Linux: shebang version mismatch (shim points to v20)
-    //   - Windows: openclaw.cmd not in PATH after custom-prefix install
-    // Only fall back to bare `openclaw` command if openclaw.mjs is not found.
-    let node_exe = crate::node::find_node_exe();
-    let mjs_path = crate::node::scan_openclaw_mjs();
-
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        if let Some(ref mjs) = mjs_path {
-            let mut c = tokio::process::Command::new(&node_exe);
-            c.args([mjs.as_str(), "agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c.creation_flags(0x08000000);
-            c
-        } else {
-            let mut c = tokio::process::Command::new("cmd");
-            c.args(["/C", "openclaw", "agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c.creation_flags(0x08000000);
-            c
-        }
-    };
-
-    #[cfg(not(target_os = "windows"))]
-    let mut cmd = {
-        if let Some(ref mjs) = mjs_path {
-            let mut c = tokio::process::Command::new(&node_exe);
-            c.args([mjs.as_str(), "agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c
-        } else {
-            let mut c = tokio::process::Command::new("openclaw");
-            c.args(["agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c
-        }
-    };
-
-    let out = cmd
-        .output()
-        .await
-        .map_err(|e| format!("openclaw-spawn-error: {e}"))?;
-
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        // If stdout has JSON, prefer that (agent sometimes exits non-zero but still has output).
-        if stdout.trim_start().starts_with('{') {
-            return Ok(stdout);
-        }
-        return Err(format!("openclaw-exit-error: {stderr}"));
-    }
-
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
-}
-
-/// Extract ALL payload texts from the JSON returned by `openclaw agent --json`.
-///
-/// OpenClaw may return multiple payload blocks (tool calls, multiple turns, etc.).
-/// Joining them all ensures the complete reply is surfaced rather than just the
-/// first block.
-fn parse_agent_reply(raw: &str) -> Result<String, String> {
-    let json: serde_json::Value =
-        serde_json::from_str(raw.trim()).map_err(|e| format!("json-parse-error: {e}"))?;
-
-    // Try multiple JSON shapes — openclaw CLI output format varies by version:
-    //   Newer:  { "payloads": [...], "meta": {...} }        (top-level)
-    //   Older:  { "result": { "payloads": [...] } }         (nested under result)
-    for pointer in &["/payloads", "/result/payloads"] {
-        if let Some(payloads) = json.pointer(pointer).and_then(|v| v.as_array()) {
-            let parts: Vec<&str> = payloads
-                .iter()
-                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                .collect();
-            if !parts.is_empty() {
-                return Ok(parts.join("\n\n"));
-            }
-        }
-    }
-
-    // Fallback: single top-level text field.
-    for pointer in &["/result/text", "/text"] {
-        if let Some(text) = json.pointer(pointer).and_then(|v| v.as_str()) {
-            return Ok(text.to_string());
-        }
-    }
-
-    // Fallback: check for error fields from the CLI.
-    if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
-        return Err(format!("agent-error: {err}"));
-    }
-
-    Err(format!("unexpected-response: {raw}"))
-}
-
-/// Try to extract the actual AI model name from the openclaw CLI JSON response.
-fn extract_model_from_reply(raw: &str) -> Option<String> {
-    let json: serde_json::Value = serde_json::from_str(raw.trim()).ok()?;
-
-    let candidates = [
-        // Newer format: { "meta": { "agentMeta": { "model": "..." } } }
-        "/meta/agentMeta/model",
-        "/meta/model",
-        // Older format: { "result": { ... } }
-        "/result/model",
-        "/result/agent/model",
-        "/result/metadata/model",
-        "/metadata/model",
-        "/model",
-        "/result/provider_model",
-    ];
-
-    for path in &candidates {
-        if let Some(m) = json.pointer(path).and_then(|v| v.as_str()) {
-            let m = m.trim();
-            if !m.is_empty() && m != "main" && m != "default" && m != "unknown" {
-                return Some(m.to_string());
-            }
-        }
-    }
-    None
 }

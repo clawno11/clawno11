@@ -1,0 +1,28 @@
+[package]
+name = "clawno-core"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.77.2"
+
+[features]
+default = []
+desktop = ["ws-chat"]
+mobile = []
+ws-chat = ["dep:tokio-tungstenite", "dep:ed25519-dalek"]
+ssh-exec = ["dep:russh", "dep:russh-keys", "dep:async-trait"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+reqwest = { workspace = true, features = ["stream", "json"] }
+futures-util = { workspace = true }
+tokio = { workspace = true }
+aes-gcm = { version = "0.10", default-features = false, features = ["aes", "alloc"] }
+sha2 = "0.10"
+base64 = "0.22"
+getrandom = "0.2"
+russh = { workspace = true, optional = true }
+russh-keys = { workspace = true, optional = true }
+async-trait = { workspace = true, optional = true }
+tokio-tungstenite = { workspace = true, optional = true }
+ed25519-dalek = { version = "2", features = ["pkcs8", "pem"], optional = true }

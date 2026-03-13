@@ -2,42 +2,48 @@
 /// `/v1/chat/completions` endpoint on a LAN-accessible port.
 ///
 /// The openclaw gateway is WebSocket-only and does not provide a REST chat
-/// API.  Desktop can fall back to the `openclaw agent` CLI, but mobile has
-/// no CLI.  This proxy bridges the gap:
+/// API.  This proxy bridges the gap by connecting to the gateway via WebSocket:
 ///
-///   Mobile ──HTTP POST──▶ chat_proxy ──CLI──▶ openclaw agent ──WS──▶ gateway
+///   Mobile ──HTTP POST──▶ chat_proxy ──WS──▶ openclaw gateway
 ///
-/// The proxy binds on `0.0.0.0` so the Android emulator (via `10.0.2.2`) and
-/// LAN devices can reach it.
+/// Model selection is per-request: the `model` field in the request body is
+/// passed as the WS `agentId` parameter.  No CLI-based model switching needed.
 ///
 /// **Security**: Every request must carry `Authorization: Bearer <token>`.
 /// The token is generated once at startup and communicated to mobile clients
 /// via the QR pairing flow.
+use std::sync::{Arc, OnceLock};
 
 use axum::{
-    Router,
-    routing::{get, post},
     extract::Request,
-    middleware::{self, Next},
-    response::{IntoResponse, Json, Response, Sse, sse::Event},
     http::StatusCode,
+    middleware::{self, Next},
+    response::{sse::Event, IntoResponse, Json, Response, Sse},
+    routing::{get, post},
+    Router,
 };
+use clawno_core::chat::{discover_ollama_model, is_local_model, ollama_chat_url, should_fallback};
+use clawno_core::sentinel::{self, capture::capture_context, SentinelEvent};
+use clawno_core::ws_chat::OpenClawWs;
 use serde::{Deserialize, Serialize};
-use std::{convert::Infallible, sync::OnceLock, time::Duration};
-use futures_util::stream;
+use std::{convert::Infallible, time::Duration};
+use tokio::sync::Mutex;
+use tokio_stream::wrappers::ReceiverStream;
 
 const DEFAULT_PROXY_PORT: u16 = 18800;
 
-/// Bearer token required for all chat requests.  Generated once at startup.
 static PROXY_AUTH_TOKEN: OnceLock<String> = OnceLock::new();
+static GATEWAY_URL: OnceLock<String> = OnceLock::new();
+static WS_CLIENT: OnceLock<Mutex<Option<Arc<OpenClawWs>>>> = OnceLock::new();
 
-/// Retrieve the current proxy auth token (for embedding in QR pairing data).
+fn ws_client_slot() -> &'static Mutex<Option<Arc<OpenClawWs>>> {
+    WS_CLIENT.get_or_init(|| Mutex::new(None))
+}
+
 pub fn get_proxy_auth_token() -> &'static str {
     PROXY_AUTH_TOKEN.get().map(|s| s.as_str()).unwrap_or("")
 }
 
-/// Middleware that rejects requests without a valid Bearer token.
-/// The /health endpoint is exempt so uptime probes still work.
 async fn auth_middleware(req: Request, next: Next) -> Response {
     if req.uri().path() == "/health" {
         return next.run(req).await;
@@ -46,9 +52,13 @@ async fn auth_middleware(req: Request, next: Next) -> Response {
     let expected = match PROXY_AUTH_TOKEN.get() {
         Some(t) => t.as_str(),
         None => {
-            return (StatusCode::SERVICE_UNAVAILABLE, Json(serde_json::json!({
-                "error": { "message": "Proxy not ready — auth token not yet generated", "type": "server_error" }
-            }))).into_response();
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({
+                    "error": { "message": "Proxy not ready", "type": "server_error" }
+                })),
+            )
+                .into_response();
         }
     };
 
@@ -61,9 +71,13 @@ async fn auth_middleware(req: Request, next: Next) -> Response {
         .unwrap_or(false);
 
     if !authorized {
-        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({
-            "error": { "message": "Unauthorized — invalid or missing Bearer token", "type": "auth_error" }
-        }))).into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(serde_json::json!({
+                "error": { "message": "Unauthorized", "type": "auth_error" }
+            })),
+        )
+            .into_response();
     }
 
     next.run(req).await
@@ -76,6 +90,8 @@ struct ChatRequest {
     model: Option<String>,
     #[serde(default)]
     stream: bool,
+    #[serde(default)]
+    session_key: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Clone)]
@@ -129,9 +145,49 @@ async fn health_handler() -> impl IntoResponse {
     Json(serde_json::json!({ "status": "ok", "ck": token }))
 }
 
-async fn chat_handler(
-    Json(req): Json<ChatRequest>,
-) -> Response {
+async fn providers_handler() -> impl IntoResponse {
+    let providers = crate::node::list_configured_providers().await;
+    Json(serde_json::json!({ "providers": providers }))
+}
+
+#[derive(Deserialize)]
+struct ConfigureApiKeyRequest {
+    provider: String,
+    api_key: String,
+}
+
+async fn configure_api_key_handler(Json(req): Json<ConfigureApiKeyRequest>) -> impl IntoResponse {
+    let result = crate::deploy::configure_api_key(req.provider, req.api_key).await;
+    Json(serde_json::json!({ "ok": result.ok, "detail": result.detail }))
+}
+
+// ── Ensure WS connection (with auto-reconnect) ──────────────────────────
+
+async fn get_ws_client() -> Result<Arc<OpenClawWs>, String> {
+    let slot = ws_client_slot();
+    {
+        let guard = slot.lock().await;
+        if let Some(ref ws) = *guard {
+            if ws.is_connected().await {
+                return Ok(Arc::clone(ws));
+            }
+        }
+    }
+
+    let gw_url = GATEWAY_URL
+        .get()
+        .map(|s| s.as_str())
+        .unwrap_or("http://127.0.0.1:18789");
+    let ws = Arc::new(OpenClawWs::new(gw_url));
+    ws.connect().await?;
+    let mut guard = slot.lock().await;
+    *guard = Some(Arc::clone(&ws));
+    Ok(ws)
+}
+
+// ── Chat handler ─────────────────────────────────────────────────────────
+
+async fn chat_handler(Json(req): Json<ChatRequest>) -> Response {
     let user_text = req
         .messages
         .iter()
@@ -141,123 +197,264 @@ async fn chat_handler(
         .unwrap_or_default();
 
     if user_text.is_empty() {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({
-            "error": { "message": "No user message found", "type": "invalid_request_error" }
-        }))).into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({
+                "error": { "message": "No user message found", "type": "invalid_request_error" }
+            })),
+        )
+            .into_response();
     }
 
     let model = req.model.clone().unwrap_or_else(|| "main".to_string());
 
-    let reply = match run_openclaw_agent(&user_text).await {
-        Ok(raw) => {
-            let parsed = parse_agent_reply(&raw);
-            match parsed {
-                Ok(text) => text,
-                Err(e) if e.contains("does not support tools") => {
-                    eprintln!("[chat-proxy][self-heal] tools error — trying Ollama direct");
-                    match call_ollama_direct(&req.messages).await {
-                        Ok(text) => text,
-                        Err(e2) => {
-                            return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                                "error": { "message": format!("self-heal failed: {e2}"), "type": "server_error" }
-                            }))).into_response();
-                        }
-                    }
-                }
-                Err(_) => raw,
-            }
-        }
-        Err(e) if e.contains("does not support tools") => {
-            eprintln!("[chat-proxy][self-heal] CLI tools error — trying Ollama direct");
-            match call_ollama_direct(&req.messages).await {
-                Ok(text) => text,
-                Err(e2) => {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                        "error": { "message": format!("self-heal failed: {e2}"), "type": "server_error" }
-                    }))).into_response();
-                }
-            }
-        }
+    // Local models go straight to Ollama, bypassing the gateway.
+    if is_local_model(Some(&model)) {
+        return match call_ollama_direct(&req.messages, Some(&model)).await {
+            Ok(text) => build_non_streaming_response(&model, text),
+            Err(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": { "message": e, "type": "server_error" }
+                })),
+            )
+                .into_response(),
+        };
+    }
+
+    sentinel::log_sentinel_event(&SentinelEvent::applied(
+        "chat_proxy",
+        "",
+        &format!("WS chat for model={model}"),
+    ));
+
+    let msgs_value: Vec<serde_json::Value> = req
+        .messages
+        .iter()
+        .map(|m| serde_json::json!({"role": m.role, "content": m.content}))
+        .collect();
+
+    // Try WS with model as agentId
+    let ws = match get_ws_client().await {
+        Ok(ws) => ws,
         Err(e) => {
-            // Self-healing: generic CLI failure → try Ollama direct as last resort
-            eprintln!("[chat-proxy][self-heal] CLI failed: {e} — trying Ollama direct");
-            match call_ollama_direct(&req.messages).await {
-                Ok(text) => text,
-                Err(_) => {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
-                        "error": { "message": e, "type": "server_error" }
-                    }))).into_response();
-                }
+            let ctx = capture_context(&e, "chat_proxy", None);
+            sentinel::log_sentinel_event(&SentinelEvent::captured(
+                "chat_proxy",
+                &ctx.bug_signature,
+                &format!("WS connect failed: {e}"),
+            ));
+
+            if let Some(reason) = should_fallback(&e) {
+                sentinel::log_sentinel_event(&SentinelEvent::applied(
+                    "chat_proxy_fallback",
+                    "",
+                    &format!("{:?} → Ollama", reason),
+                ));
+                return match call_ollama_direct(&req.messages, None).await {
+                    Ok(text) => build_non_streaming_response(&model, text),
+                    Err(ollama_err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                        "error": { "message": format!("Gateway and Ollama both failed: {ollama_err}"), "type": "server_error" }
+                    }))).into_response(),
+                };
             }
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({
+                    "error": { "message": e, "type": "server_error" }
+                })),
+            )
+                .into_response();
         }
     };
 
+    if req.stream {
+        return build_streaming_ws_response(ws, model, msgs_value, req.session_key).await;
+    }
+
+    // Non-streaming: lock is already released, ws is an Arc
+    let ws_result = ws
+        .chat_full(&msgs_value, Some(&model), req.session_key.as_deref())
+        .await;
+
+    match ws_result {
+        Ok(resp) => build_non_streaming_response(&model, resp.text),
+        Err(e) => handle_ws_error(&e, &model, &req.messages).await,
+    }
+}
+
+fn build_non_streaming_response(model: &str, reply: String) -> Response {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let id = format!("chatcmpl-proxy-{}", now);
+    let resp = ChatCompletionResponse {
+        id,
+        object: "chat.completion",
+        created: now,
+        model: model.to_string(),
+        choices: vec![Choice {
+            index: 0,
+            message: ChatMessage {
+                role: "assistant".into(),
+                content: reply,
+            },
+            finish_reason: "stop".into(),
+        }],
+    };
+    Json(resp).into_response()
+}
+
+async fn build_streaming_ws_response(
+    ws: Arc<OpenClawWs>,
+    model: String,
+    msgs_value: Vec<serde_json::Value>,
+    session_key: Option<String>,
+) -> Response {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
     let id = format!("chatcmpl-proxy-{}", now);
 
-    if req.stream {
-        let role_chunk = ChatChunkResponse {
-            id: id.clone(),
-            object: "chat.completion.chunk",
-            created: now,
-            model: model.clone(),
-            choices: vec![ChunkChoice {
-                index: 0,
-                delta: Delta { role: Some("assistant".into()), content: None },
-                finish_reason: None,
-            }],
-        };
-        let content_chunk = ChatChunkResponse {
-            id: id.clone(),
-            object: "chat.completion.chunk",
-            created: now,
-            model: model.clone(),
-            choices: vec![ChunkChoice {
-                index: 0,
-                delta: Delta { role: None, content: Some(reply) },
-                finish_reason: None,
-            }],
-        };
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Event, Infallible>>(64);
+
+    let role_chunk = ChatChunkResponse {
+        id: id.clone(),
+        object: "chat.completion.chunk",
+        created: now,
+        model: model.clone(),
+        choices: vec![ChunkChoice {
+            index: 0,
+            delta: Delta {
+                role: Some("assistant".into()),
+                content: None,
+            },
+            finish_reason: None,
+        }],
+    };
+    let _ = tx
+        .send(Ok(
+            Event::default().data(serde_json::to_string(&role_chunk).unwrap_or_default())
+        ))
+        .await;
+
+    let tx_task = tx.clone();
+    let model_task = model.clone();
+    let id_task = id.clone();
+
+    tokio::spawn(async move {
+        let model_cb = model_task.clone();
+        let id_cb = id_task.clone();
+        let tx_cb = tx_task.clone();
+
+        let ws_result = ws
+            .chat_full_streaming(
+                &msgs_value,
+                Some(&model_task),
+                session_key.as_deref(),
+                move |delta| {
+                    let chunk = ChatChunkResponse {
+                        id: id_cb.clone(),
+                        object: "chat.completion.chunk",
+                        created: now,
+                        model: model_cb.clone(),
+                        choices: vec![ChunkChoice {
+                            index: 0,
+                            delta: Delta {
+                                role: None,
+                                content: Some(delta.to_string()),
+                            },
+                            finish_reason: None,
+                        }],
+                    };
+                    let _ = tx_cb
+                        .try_send(Ok(Event::default()
+                            .data(serde_json::to_string(&chunk).unwrap_or_default())));
+                },
+            )
+            .await;
+
+        if let Err(e) = ws_result {
+            sentinel::log_sentinel_event(&SentinelEvent::captured(
+                "chat_proxy",
+                "",
+                &format!("WS streaming failed: {e}"),
+            ));
+            if e.contains("ws-closed") || e.contains("ws-recv-error") || e.contains("ws-send-error")
+            {
+                let mut guard = ws_client_slot().lock().await;
+                *guard = None;
+            }
+        }
+
         let stop_chunk = ChatChunkResponse {
-            id: id.clone(),
+            id: id_task.clone(),
             object: "chat.completion.chunk",
             created: now,
-            model,
+            model: model_task.clone(),
             choices: vec![ChunkChoice {
                 index: 0,
-                delta: Delta { role: None, content: None },
+                delta: Delta {
+                    role: None,
+                    content: None,
+                },
                 finish_reason: Some("stop".into()),
             }],
         };
+        let _ = tx_task
+            .send(Ok(
+                Event::default().data(serde_json::to_string(&stop_chunk).unwrap_or_default())
+            ))
+            .await;
+        let _ = tx_task.send(Ok(Event::default().data("[DONE]"))).await;
+    });
 
-        let events = vec![
-            Ok::<_, Infallible>(Event::default().data(serde_json::to_string(&role_chunk).unwrap_or_default())),
-            Ok(Event::default().data(serde_json::to_string(&content_chunk).unwrap_or_default())),
-            Ok(Event::default().data(serde_json::to_string(&stop_chunk).unwrap_or_default())),
-            Ok(Event::default().data("[DONE]")),
-        ];
+    drop(tx);
 
-        Sse::new(stream::iter(events))
-            .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
-            .into_response()
+    Sse::new(ReceiverStream::new(rx))
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
+        .into_response()
+}
+
+async fn handle_ws_error(e: &str, model: &str, messages: &[ChatMessage]) -> Response {
+    let ctx = capture_context(e, "chat_proxy", None);
+    sentinel::log_sentinel_event(&SentinelEvent::captured(
+        "chat_proxy",
+        &ctx.bug_signature,
+        &format!("WS failed: {e}"),
+    ));
+
+    if e.contains("ws-closed") || e.contains("ws-recv-error") || e.contains("ws-send-error") {
+        let mut guard = ws_client_slot().lock().await;
+        *guard = None;
+    }
+
+    if let Some(reason) = should_fallback(e) {
+        sentinel::log_sentinel_event(&SentinelEvent::applied(
+            "chat_proxy_fallback",
+            "",
+            &format!("{:?} → Ollama", reason),
+        ));
+        match call_ollama_direct(messages, None).await {
+            Ok(text) => build_non_streaming_response(model, text),
+            Err(ollama_err) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({
+                "error": { "message": format!("Gateway and Ollama both failed: {ollama_err}"), "type": "server_error" }
+            }))).into_response(),
+        }
     } else {
-        let resp = ChatCompletionResponse {
-            id,
-            object: "chat.completion",
-            created: now,
-            model,
-            choices: vec![Choice {
-                index: 0,
-                message: ChatMessage { role: "assistant".into(), content: reply },
-                finish_reason: "stop".into(),
-            }],
-        };
-        Json(resp).into_response()
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "error": { "message": e, "type": "server_error" }
+            })),
+        )
+            .into_response()
     }
 }
+
+// ── Startup ──────────────────────────────────────────────────────────────
 
 const PROXY_TOKEN_STORE_KEY: &str = "chat_proxy_auth_token";
 
@@ -266,26 +463,32 @@ fn generate_and_persist_token(app: &tauri::AppHandle) -> String {
     let mut buf = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut buf);
     let token = crate::pairing::b64_encode(&buf);
-    let _ = crate::secure_store::set_secure_value(app.clone(), PROXY_TOKEN_STORE_KEY.into(), token.clone());
-    eprintln!("[chat-proxy] new auth token generated & persisted ({} chars)", token.len());
+    let _ = crate::secure_store::set_secure_value(
+        app.clone(),
+        PROXY_TOKEN_STORE_KEY.into(),
+        token.clone(),
+    );
+    eprintln!(
+        "[chat-proxy] new auth token generated & persisted ({} chars)",
+        token.len()
+    );
     token
 }
 
-/// Start the REST chat proxy in a background Tokio task.
-/// Tries DEFAULT_PROXY_PORT first, then increments until a free port is found.
-/// Returns the port that will be attempted (actual binding is async).
-///
-/// The auth token is persisted in the secure store so mobile clients don't need
-/// to re-pair after every desktop restart.
-pub fn start_proxy(app: &tauri::AppHandle, _gateway_port: u16) -> u16 {
+pub fn start_proxy(app: &tauri::AppHandle, gateway_port: u16) -> u16 {
     let port = DEFAULT_PROXY_PORT;
 
-    // Try to reuse a previously persisted token so mobile stays paired across restarts.
-    let existing = crate::secure_store::get_secure_value(app.clone(), PROXY_TOKEN_STORE_KEY.into()).ok().flatten();
+    let _ = GATEWAY_URL.set(format!("http://127.0.0.1:{gateway_port}"));
 
+    let existing = crate::secure_store::get_secure_value(app.clone(), PROXY_TOKEN_STORE_KEY.into())
+        .ok()
+        .flatten();
     let token = if let Some(ref t) = existing {
         if !t.is_empty() {
-            eprintln!("[chat-proxy] reusing persisted auth token ({} chars)", t.len());
+            eprintln!(
+                "[chat-proxy] reusing persisted auth token ({} chars)",
+                t.len()
+            );
             t.clone()
         } else {
             generate_and_persist_token(app)
@@ -299,6 +502,8 @@ pub fn start_proxy(app: &tauri::AppHandle, _gateway_port: u16) -> u16 {
     tauri::async_runtime::spawn(async move {
         let app = Router::new()
             .route("/health", get(health_handler))
+            .route("/providers", get(providers_handler))
+            .route("/configure-api-key", post(configure_api_key_handler))
             .route("/v1/chat/completions", post(chat_handler))
             .layer(middleware::from_fn(auth_middleware));
 
@@ -328,19 +533,24 @@ pub fn start_proxy(app: &tauri::AppHandle, _gateway_port: u16) -> u16 {
     port
 }
 
-// ── Self-healing: direct Ollama fallback ─────────────────────────────────
+// ── Ollama direct fallback ───────────────────────────────────────────────
 
-async fn call_ollama_direct(messages: &[ChatMessage]) -> Result<String, String> {
+async fn call_ollama_direct(
+    messages: &[ChatMessage],
+    model_hint: Option<&str>,
+) -> Result<String, String> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| format!("ollama-error: {e}"))?;
 
-    let model_name = discover_ollama_model_proxy(&client)
-        .await
-        .unwrap_or_else(|| "llama3.2".into());
-
-    eprintln!("[chat-proxy][self-heal] calling Ollama with model={model_name}");
+    let model_name = if let Some(hint) = model_hint {
+        hint.to_string()
+    } else {
+        discover_ollama_model(&client)
+            .await
+            .unwrap_or_else(|| "llama3.2".into())
+    };
 
     let msgs: Vec<serde_json::Value> = messages
         .iter()
@@ -354,7 +564,7 @@ async fn call_ollama_direct(messages: &[ChatMessage]) -> Result<String, String> 
     });
 
     let resp = client
-        .post("http://localhost:11434/v1/chat/completions")
+        .post(ollama_chat_url())
         .json(&body)
         .send()
         .await
@@ -374,109 +584,4 @@ async fn call_ollama_direct(messages: &[ChatMessage]) -> Result<String, String> 
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
         .ok_or_else(|| "ollama-error: no content in response".to_string())
-}
-
-async fn discover_ollama_model_proxy(client: &reqwest::Client) -> Option<String> {
-    let resp = client
-        .get("http://localhost:11434/api/tags")
-        .send()
-        .await
-        .ok()?;
-    if !resp.status().is_success() {
-        return None;
-    }
-    let body: serde_json::Value = resp.json().await.ok()?;
-    body["models"]
-        .as_array()?
-        .first()?
-        .get("name")?
-        .as_str()
-        .map(|s| s.to_string())
-}
-
-// ── CLI helpers (reused from chat.rs with slight modifications) ──────────
-
-async fn run_openclaw_agent(message: &str) -> Result<String, String> {
-    let augmented = crate::platform::augmented_path();
-    let node_exe = crate::node::find_node_exe();
-    let mjs_path = crate::node::scan_openclaw_mjs();
-
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        #[allow(unused_imports)]
-        use std::os::windows::process::CommandExt;
-        if let Some(ref mjs) = mjs_path {
-            let mut c = tokio::process::Command::new(&node_exe);
-            c.args([mjs.as_str(), "agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c.creation_flags(0x08000000);
-            c
-        } else {
-            let mut c = tokio::process::Command::new("cmd");
-            c.args(["/C", "openclaw", "agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c.creation_flags(0x08000000);
-            c
-        }
-    };
-
-    #[cfg(not(target_os = "windows"))]
-    let mut cmd = {
-        if let Some(ref mjs) = mjs_path {
-            let mut c = tokio::process::Command::new(&node_exe);
-            c.args([mjs.as_str(), "agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c
-        } else {
-            let mut c = tokio::process::Command::new("openclaw");
-            c.args(["agent", "--agent", "main", "--json", "-m", message]);
-            c.env("PATH", &augmented);
-            c
-        }
-    };
-
-    let out = cmd
-        .output()
-        .await
-        .map_err(|e| format!("openclaw-spawn-error: {e}"))?;
-
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr).to_string();
-        let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-        if stdout.trim_start().starts_with('{') {
-            return Ok(stdout);
-        }
-        return Err(format!("openclaw-exit-error: {stderr}"));
-    }
-
-    Ok(String::from_utf8_lossy(&out.stdout).to_string())
-}
-
-fn parse_agent_reply(raw: &str) -> Result<String, String> {
-    let json: serde_json::Value =
-        serde_json::from_str(raw.trim()).map_err(|e| format!("json-parse-error: {e}"))?;
-
-    for pointer in &["/payloads", "/result/payloads"] {
-        if let Some(payloads) = json.pointer(pointer).and_then(|v| v.as_array()) {
-            let parts: Vec<&str> = payloads
-                .iter()
-                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-                .collect();
-            if !parts.is_empty() {
-                return Ok(parts.join("\n\n"));
-            }
-        }
-    }
-
-    for pointer in &["/result/text", "/text"] {
-        if let Some(text) = json.pointer(pointer).and_then(|v| v.as_str()) {
-            return Ok(text.to_string());
-        }
-    }
-
-    if let Some(err) = json.get("error").and_then(|v| v.as_str()) {
-        return Err(format!("agent-error: {err}"));
-    }
-
-    Err(format!("unexpected-response: {raw}"))
 }

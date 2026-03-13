@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { detectPii, redactPii } from "../store/piiFilter";
+import { detectPii, redactPii } from "@clawno/shared/piiFilter";
 
 describe("detectPii", () => {
   it("detects Chinese phone numbers", () => {

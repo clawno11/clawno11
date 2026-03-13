@@ -1,0 +1,47 @@
+---
+description: 新增前端页面/组件时的共享检查流程
+globs: apps/*/src/**/*.tsx
+alwaysApply: false
+---
+
+# 新增页面/组件规则
+
+## 新增页面的标准流程
+
+1. **核心内容组件** → 放 `packages/shared/src/components/` 通过 props 处理平台差异
+2. **页面壳** → 放各端 `apps/{platform}/src/pages/`，只做布局 + 导入共享组件
+3. **新增 store** → 先放 `packages/shared/src/stores/`，各端通过 re-export 使用
+4. **新增 hook** → 判断是否两端都用，是则放 `packages/shared/src/hooks/`
+
+## 页面壳模式示例
+
+```tsx
+// ✅ apps/desktop/src/pages/RagPage.tsx — 薄壳
+import { RagPageContent } from "@clawno/shared/components/rag/RagPageContent";
+
+export default function RagPage() {
+  return (
+    <div className="p-6">
+      <RagPageContent />
+    </div>
+  );
+}
+```
+
+## 共享组件通过 props 处理平台差异
+
+```tsx
+// ✅ 用 props 而非条件编译
+interface Props {
+  compact?: boolean;       // mobile = true
+  showTopBar?: boolean;    // mobile = true
+  onKillSwitch?: () => void; // 平台注入
+}
+```
+
+## 新增后必须更新 package.json exports
+
+在 `packages/shared/package.json` 的 `"exports"` 字段添加新路径：
+```json
+"./components/xxx/XxxContent": "./src/components/xxx/XxxContent.tsx"
+```

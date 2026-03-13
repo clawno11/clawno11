@@ -10,13 +10,15 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   ShieldCheck, RefreshCw, AlertTriangle, AlertCircle,
-  Info, Trash2, ShieldAlert, ShieldOff, Clock,
+  Info, Trash2, ShieldAlert, Clock, Zap,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import {
   getRecentSecurityEvents, clearSecurityEvents, logSecurityEvent,
   type SecurityEvent, type SecurityEventSeverity,
-} from "../store/securityEventStore";
+} from "@clawno/shared/securityEventStore";
+import { useKillSwitch } from "@clawno/shared/hooks/useKillSwitch";
+import { useInstanceStore } from "../store/instances";
 import { TopBar } from "../components/TopBar";
 
 const SEVERITY_STYLE: Record<SecurityEventSeverity, {
@@ -40,6 +42,27 @@ export function SecurityPage() {
   const [events, setEvents]   = useState<SecurityEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [clearing, setClearing] = useState(false);
+  const [killResult, setKillResult] = useState<{ ok: boolean; msg: string } | null>(null);
+  const instances = useInstanceStore((s) => s.instances);
+  const { running: killRunning, trigger: triggerKill } = useKillSwitch({
+    platform: "mobile",
+    instances,
+  });
+
+  const handleKillSwitch = useCallback(async () => {
+    if (!window.confirm(t("manage.killSwitchConfirm"))) return;
+    setKillResult(null);
+    const res = await triggerKill();
+    if (res.detail === "no_remote_instance" || res.detail === "no_credentials") {
+      setKillResult({ ok: false, msg: t("security.killSwitchNoCreds") });
+    } else if (res.ok) {
+      await logSecurityEvent("kill_switch_activated", "Remote service stopped via SSH (Security page)", "danger");
+      setKillResult({ ok: true, msg: t("manage.killSwitchSuccess") });
+    } else {
+      setKillResult({ ok: false, msg: `${t("manage.killSwitchFailed")}: ${res.detail}` });
+    }
+    await load();
+  }, [t, triggerKill]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -99,6 +122,33 @@ export function SecurityPage() {
           </div>
         </div>
 
+        {/* Kill Switch action */}
+        <div className="rounded-2xl border border-red-200 bg-red-50 overflow-hidden">
+          <div className="px-4 py-3 flex items-center gap-3">
+            <Zap size={18} className="text-red-500 flex-shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-semibold text-red-700">{t("manage.killSwitch")}</p>
+              <p className="text-[11px] text-red-600">{t("manage.killSwitchDesc")}</p>
+            </div>
+            <button
+              onClick={handleKillSwitch}
+              disabled={killRunning}
+              className="touch-btn px-3 py-1.5 rounded-xl text-xs font-semibold text-white bg-red-500 disabled:opacity-50"
+            >
+              {killRunning ? t("security.killSwitchRunning") : t("security.killSwitchBtn")}
+            </button>
+          </div>
+          {killResult && (
+            <div className={`px-4 py-2 border-t text-xs ${
+              killResult.ok
+                ? "border-green-200 bg-green-50 text-green-700"
+                : "border-red-200 text-red-600"
+            }`}>
+              {killResult.msg}
+            </div>
+          )}
+        </div>
+
         {/* Mobile notice */}
         <div className="flex items-start gap-3 px-4 py-3 rounded-2xl border border-blue-200 bg-blue-50">
           <Info size={16} className="text-blue-500 flex-shrink-0 mt-0.5" />
@@ -118,7 +168,7 @@ export function SecurityPage() {
               { icon: ShieldCheck, labelKey: "security.featureInjection",  descKey: "security.featureInjectionDesc", status: "active",  color: "#10b981" },
               { icon: ShieldCheck, labelKey: "security.featureRag",        descKey: "security.featureRagDesc",       status: "active",  color: "#10b981" },
               { icon: ShieldAlert, labelKey: "security.featureFirewall",   descKey: "security.featureFirewallDesc",  status: "desktop", color: "#f59e0b" },
-              { icon: ShieldOff,   labelKey: "security.featureKillSwitch", descKey: "security.featureKillSwitchDesc",status: "desktop", color: "#f59e0b" },
+              { icon: Zap,         labelKey: "security.featureKillSwitch", descKey: "security.featureKillSwitchDesc",status: "ssh",     color: "#ef4444" },
             ].map((item, i) => {
               const Icon = item.icon;
               return (
@@ -129,11 +179,13 @@ export function SecurityPage() {
                     <p className="text-[11px] text-[hsl(var(--muted-foreground))]">{t(item.descKey)}</p>
                   </div>
                   <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-                    item.status === "active"
-                      ? "text-green-700 bg-green-50"
-                      : "text-amber-700 bg-amber-50"
+                    item.status === "active"  ? "text-green-700 bg-green-50" :
+                    item.status === "ssh"     ? "text-red-700 bg-red-50"     :
+                                                "text-amber-700 bg-amber-50"
                   }`}>
-                    {item.status === "active" ? t("security.featureStatusActive") : t("security.featureStatusDesktop")}
+                    {item.status === "active"  ? t("security.featureStatusActive") :
+                     item.status === "ssh"     ? t("security.featureStatusSsh")    :
+                                                 t("security.featureStatusDesktop")}
                   </span>
                 </div>
               );

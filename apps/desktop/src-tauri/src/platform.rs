@@ -2,7 +2,6 @@
 ///
 /// All platform-specific constants and helpers live here so that other modules
 /// only import from `crate::platform` and remain platform-agnostic in their logic.
-
 use std::process::Command;
 
 #[cfg(target_os = "windows")]
@@ -26,8 +25,7 @@ pub fn data_roaming() -> String {
         .unwrap_or_else(|_| format!("{}\\AppData\\Roaming", user_home()));
 
     #[cfg(not(target_os = "windows"))]
-    return std::env::var("XDG_CONFIG_HOME")
-        .unwrap_or_else(|_| format!("{}/.config", user_home()));
+    return std::env::var("XDG_CONFIG_HOME").unwrap_or_else(|_| format!("{}/.config", user_home()));
 }
 
 pub fn data_local() -> String {
@@ -61,7 +59,10 @@ pub fn sep() -> &'static str {
 /// Fix PL-2: use std::path::Path so trailing separators on `a` are handled correctly
 /// and double-separator paths (e.g. "C:\\foo\\\\bar") are never produced.
 pub fn path_join(a: &str, b: &str) -> String {
-    std::path::Path::new(a).join(b).to_string_lossy().into_owned()
+    std::path::Path::new(a)
+        .join(b)
+        .to_string_lossy()
+        .into_owned()
 }
 
 // ── PATH augmentation ───────────────────────────────────────────────────────
@@ -69,9 +70,9 @@ pub fn path_join(a: &str, b: &str) -> String {
 /// Build a PATH string that includes all common Node.js install locations.
 /// Prepended so our managed installs take precedence over system installs.
 pub fn augmented_path() -> String {
-    let home    = user_home();
+    let home = user_home();
     let roaming = data_roaming();
-    let local   = data_local();
+    let local = data_local();
 
     #[cfg(target_os = "windows")]
     let extra: Vec<String> = {
@@ -108,11 +109,15 @@ pub fn augmented_path() -> String {
                         let s = e.file_name().to_string_lossy().to_string();
                         if s.starts_with('v') {
                             Some(format!("{fnm_base}\\{s}\\installation"))
-                        } else { None }
+                        } else {
+                            None
+                        }
                     })
                     .collect();
                 fnm_vers.sort(); // ascending: v20 < v22 → last insert at pos 0 wins
-                for dir in fnm_vers { v.insert(0, dir); }
+                for dir in fnm_vers {
+                    v.insert(0, dir);
+                }
             }
         }
         v
@@ -151,7 +156,11 @@ pub fn augmented_path() -> String {
                 .filter_map(|e| {
                     let name = e.file_name();
                     let s = name.to_string_lossy().to_string();
-                    if s.starts_with('v') { Some(s) } else { None }
+                    if s.starts_with('v') {
+                        Some(s)
+                    } else {
+                        None
+                    }
                 })
                 .collect();
             versions.sort(); // ascending: v20 < v22 < v24 → last insert wins at pos 0
@@ -221,7 +230,11 @@ pub fn shell_output_both(cmd: &str) -> String {
         .map(|o| {
             let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
             let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            if out.is_empty() { err } else { out }
+            if out.is_empty() {
+                err
+            } else {
+                out
+            }
         })
         .unwrap_or_default()
 }

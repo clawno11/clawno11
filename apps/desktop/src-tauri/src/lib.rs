@@ -1,22 +1,22 @@
 // Sub-modules — each has a single, focused responsibility.
-pub mod platform;       // cross-platform shell + path helpers
-pub mod types;          // shared serializable types (StepResult, ServiceInfo, …)
-pub mod node;           // Node.js & openclaw CLI management
-pub mod pm2;            // pm2 daemon lifecycle
-pub mod gateway;        // openclaw gateway start / health / URL
-pub mod deploy;         // deployment coordinator + API-key config
-pub mod ssh_deploy;     // SSH remote deployment (step-by-step)
-pub mod secure_store;   // encrypted KV store (API keys, secrets)
-pub mod security;       // port scanning, firewall rules, security report
-pub mod connectors;     // IM connectors (Feishu, Tailscale)
-pub mod bots;           // Telegram + Discord background bots
-pub mod pairing;        // Secure QR-code pairing (OTP + PIN confirmation)
-pub mod mcp;            // MCP server security scanner
-pub mod rag;            // local RAG: text ingestion helper
-pub mod token_log;      // SQLite schema migrations
-pub mod chat;           // streaming chat proxy (SSE → Tauri events)
-pub mod chat_proxy;     // LAN-facing REST proxy for mobile chat
-pub mod ollama;         // local Ollama model engine (install / pull / manage)
+pub mod bots; // Telegram + Discord background bots
+pub mod chat; // streaming chat proxy (SSE → Tauri events)
+pub mod chat_proxy; // LAN-facing REST proxy for mobile chat
+pub mod connectors; // IM connectors (Feishu, Tailscale)
+pub mod deploy; // deployment coordinator + API-key config
+pub mod gateway; // openclaw gateway start / health / URL
+pub mod mcp; // MCP server security scanner
+pub mod node; // Node.js & openclaw CLI management
+pub mod ollama;
+pub mod pairing; // Secure QR-code pairing (OTP + PIN confirmation)
+pub mod platform; // cross-platform shell + path helpers
+pub mod pm2; // pm2 daemon lifecycle
+pub mod rag; // local RAG: text ingestion helper
+pub mod secure_store; // encrypted KV store (API keys, secrets)
+pub mod security; // port scanning, firewall rules, security report
+pub mod ssh_deploy; // SSH remote deployment (step-by-step)
+pub mod token_log; // SQLite schema migrations
+pub mod types; // shared serializable types (StepResult, ServiceInfo, …) // local Ollama model engine (install / pull / manage)
 
 use tauri::Manager;
 
@@ -60,6 +60,7 @@ pub fn run() {
             deploy::deploy_remote,
             deploy::configure_api_key,
             deploy::fix_model_config,
+            deploy::models::restore_default_model,
             // ── SSH remote deploy pipeline ────────────────────────────────────
             ssh_deploy::deploy_remote_connect,
             ssh_deploy::deploy_remote_check_node,
@@ -83,25 +84,27 @@ pub fn run() {
             secure_store::delete_secure_value,
             secure_store::list_secure_keys,
             secure_store::wipe_secure_store,
-            // ── Security ─────────────────────────────────────────────────────
-            security::scan_security_status,
-            security::get_port_connections,
-            security::check_firewall_active,
-            security::apply_local_only_firewall,
-            security::remove_local_only_firewall,
-            security::get_tool_permissions,
-            security::set_exec_mode,
-            security::add_exec_allowlist_entry,
-            security::remove_exec_allowlist_entry,
-            security::kill_switch_offline,
-            security::kill_switch_restore,
-            security::get_allowed_ips,
-            security::add_allowed_ip,
-            security::remove_allowed_ip,
-            security::scan_lan_devices,
-            security::get_local_lan_info,
-            security::get_network_access_mode,
-            security::set_network_access_mode,
+            // ── Security: scanning & tool permissions ───────────────────────
+            security::scan::scan_security_status,
+            security::scan::get_port_connections,
+            security::scan::check_firewall_active,
+            security::scan::get_tool_permissions,
+            security::scan::set_exec_mode,
+            security::scan::add_exec_allowlist_entry,
+            security::scan::remove_exec_allowlist_entry,
+            // ── Security: firewall & kill switch ────────────────────────────
+            security::firewall::apply_local_only_firewall,
+            security::firewall::remove_local_only_firewall,
+            security::firewall::kill_switch_offline,
+            security::firewall::kill_switch_restore,
+            security::firewall::get_network_access_mode,
+            security::firewall::set_network_access_mode,
+            // ── Security: IP allowlist & LAN ────────────────────────────────
+            security::network::get_allowed_ips,
+            security::network::add_allowed_ip,
+            security::network::remove_allowed_ip,
+            security::network::scan_lan_devices,
+            security::network::get_local_lan_info,
             // ── Connectors ───────────────────────────────────────────────────
             connectors::test_feishu_connection,
             connectors::save_feishu_config,
@@ -153,8 +156,20 @@ pub fn run() {
 
             // ── 系统托盘：最小化到托盘，双击恢复，右键退出 ──────────────────
             let tray_menu = tauri::menu::MenuBuilder::new(app)
-                .item(&tauri::menu::MenuItem::with_id(app, "show", "显示 ClawNo.11", true, None::<&str>)?)
-                .item(&tauri::menu::MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?)
+                .item(&tauri::menu::MenuItem::with_id(
+                    app,
+                    "show",
+                    "显示 ClawNo.11",
+                    true,
+                    None::<&str>,
+                )?)
+                .item(&tauri::menu::MenuItem::with_id(
+                    app,
+                    "quit",
+                    "退出",
+                    true,
+                    None::<&str>,
+                )?)
                 .build()?;
 
             let _tray = tauri::tray::TrayIconBuilder::new()

@@ -1,7 +1,7 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { MessageSquare, Server, Network, MoreHorizontal, Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { useTokenAnomalyStore } from "../store/tokenAnomalyStore";
+import { useTokenAnomalyStore } from "@clawno/shared/tokenAnomalyStore";
 
 interface NavItem {
   path: string;

@@ -1,0 +1,31 @@
+---
+description: 翻译文件放置规则 — 防止 locales 重复
+globs: "**/locales/*.json,**/i18n.ts"
+alwaysApply: false
+---
+
+# 翻译文件规则
+
+## 新增翻译键的判定
+
+| 条件 | 放入 |
+|------|------|
+| 两端均使用且值相同 | `packages/shared/src/locales/{lang}.json` |
+| 仅一端使用 | `apps/{platform}/src/locales/{lang}.json` |
+| 两端均使用但值不同 | 各端 locales（平台可覆盖 shared） |
+
+## 检查步骤
+
+1. 在 shared locales 中搜索是否已有相同/相似的 key
+2. 如果是通用 UI 文本（按钮、标签、错误），优先放 shared
+3. 如果是平台特有功能描述，放对应端
+
+## 合并机制
+
+两端通过 `createI18n(platformOverrides)` 自动合并：`{ ...shared, ...platform }`
+平台可以覆盖 shared 的同名 key（但应尽量避免）。
+
+## 禁止
+
+- ❌ 两端 locales 中出现完全相同的 key+value 组合
+- ❌ 新增翻译时只改一端忘记改另一端

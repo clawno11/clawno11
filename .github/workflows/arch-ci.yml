@@ -1,0 +1,246 @@
+name: Architecture CI
+
+on:
+  push:
+    branches: [main, refactor/cargo-workspace]
+  pull_request:
+    branches: [main, refactor/cargo-workspace]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Type safety checks
+  typecheck:
+    name: TypeScript Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Type check all packages
+        run: pnpm typecheck
+
+  # Lint checks (ESLint for TypeScript files)
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Lint with ESLint
+        run: |
+          # Run eslint on packages with TypeScript files
+          cd packages/shared && npx eslint src --ext .ts,.tsx || true
+          cd ../../apps/desktop && npx eslint src --ext .ts,.tsx || true
+          cd ../mobile && npx eslint src --ext .ts,.tsx || true
+
+  # Rust checks
+  rust-check:
+    name: Rust Check & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Rust format check
+        run: cargo fmt --all --check
+
+      - name: Rust clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Rust tests
+        run: cargo test --all-features --workspace
+
+  # Desktop build check (no release)
+  desktop-build-check:
+    name: Desktop Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build desktop app
+        run: pnpm --filter @clawno/desktop build
+        env:
+          TAURI_PRIVATE_KEY: ""
+          TAURI_KEY_PASSWORD: ""
+
+  # Mobile build check
+  mobile-build-check:
+    name: Mobile Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install Rust stable + Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Install Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Check mobile code compiles
+        run: cargo check --manifest-path apps/mobile/src-tauri/Cargo.toml --all-features
+
+      - name: Build openclaw-client
+        run: pnpm --filter @clawno/openclaw-client build
+
+  # Web build check
+  web-build-check:
+    name: Web Build Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build web app
+        run: pnpm --filter @clawno/web build
+
+  # Workspace integrity check
+  workspace-integrity:
+    name: Workspace Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check workspace structure
+        run: |
+          echo "Checking workspace structure..."
+          test -f pnpm-workspace.yaml || exit 1
+          test -f package.json || exit 1
+          test -f turbo.json || exit 1
+          test -d apps/desktop || exit 1
+          test -d apps/mobile || exit 1
+          test -d apps/web || exit 1
+          test -d packages/shared || exit 1
+          echo "✓ Workspace structure is valid"
+
+      - name: Check shared package exports
+        run: |
+          echo "Checking shared package exports..."
+          test -f packages/shared/package.json || exit 1
+          test -f packages/shared/src/index.ts || exit 1
+          echo "✓ Shared package exports are valid"
+
+      - name: Check cargo workspace
+        run: |
+          echo "Checking cargo workspace..."
+          test -f Cargo.toml || exit 1
+          test -d crates || exit 1
+          test -d apps/desktop/src-tauri || exit 1
+          test -d apps/mobile/src-tauri || exit 1
+          echo "✓ Cargo workspace is valid"
+
+  # Architecture documentation check
+  docs-check:
+    name: Documentation Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check architecture docs exist
+        run: |
+          echo "Checking architecture documentation..."
+          test -d docs || echo "⚠ docs/ directory not found"
+          test -f README.md || exit 1
+          echo "✓ Documentation files exist"
+
+      - name: Check for TODO/FIXME in critical paths
+        run: |
+          echo "Checking for unresolved TODOs..."
+          TODO_COUNT=$(find packages/shared/src apps/desktop/src apps/mobile/src -name "*.ts" -o -name "*.tsx" | xargs grep -l "TODO\|FIXME" | wc -l)
+          if [ "$TODO_COUNT" -gt 0 ]; then
+            echo "⚠ Found $TODO_COUNT files with TODO/FIXME in shared code"
+          else
+            echo "✓ No TODO/FIXME in shared code"
+          fi

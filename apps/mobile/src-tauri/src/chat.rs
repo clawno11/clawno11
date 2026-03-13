@@ -1,13 +1,29 @@
-/**
- * Mobile chat streaming via direct HTTP SSE to the openclaw gateway.
- *
- * Unlike desktop (which spawns `openclaw agent --json`), mobile makes
- * a direct HTTP POST to the gateway's /v1/chat/completions endpoint with
- * stream=true, parses SSE chunks, and emits Tauri events to the frontend.
- */
-use futures_util::StreamExt;
+/// Mobile chat streaming via the desktop's chat proxy.
+///
+/// Mobile does not have direct WS access to the OpenClaw gateway.
+/// All requests go through the desktop's LAN-accessible chat proxy
+/// (port 18800-18810), which bridges HTTP → WS.
+///
+/// Model selection is per-request: the `model` field is passed through
+/// to the chat proxy, which forwards it as the WS `agentId` parameter.
+use clawno_core::chat::{consume_sse_stream, ChatChunk, ChatDone};
+use clawno_core::sentinel::{self, SentinelEvent};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter};
+
+fn done(
+    req_id: &str,
+    error: Option<String>,
+    model: Option<String>,
+    sig: Option<String>,
+) -> ChatDone {
+    ChatDone {
+        req_id: req_id.to_string(),
+        error,
+        model,
+        bug_signature: sig,
+    }
+}
 
 #[tauri::command]
 pub async fn stream_chat(
@@ -17,171 +33,140 @@ pub async fn stream_chat(
     req_id: String,
     model: Option<String>,
     auth_token: Option<String>,
+    session_key: Option<String>,
 ) -> Result<(), String> {
-    let url = format!(
-        "{}/v1/chat/completions",
-        gateway_url.trim_end_matches('/')
-    );
-
-    let model_field = model.unwrap_or_else(|| "main".to_string());
-    let body = serde_json::json!({
-        "model": model_field,
-        "messages": messages,
-        "stream": true,
-    });
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| e.to_string())?;
-
-    let mut request = client
-        .post(&url)
-        .header("Content-Type", "application/json")
-        .json(&body);
-
-    if let Some(ref token) = auth_token {
-        if !token.is_empty() {
-            request = request.header("Authorization", format!("Bearer {token}"));
-        }
-    }
-
-    // ── Self-healing: retry on connection error ──
-    let response = match request.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[self-heal] connection failed: {e} — retrying in 1s");
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            let mut retry = client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .json(&body);
-            if let Some(ref token) = auth_token {
-                if !token.is_empty() {
-                    retry = retry.header("Authorization", format!("Bearer {token}"));
-                }
-            }
-            match retry.send().await {
-                Ok(r) => r,
-                Err(e2) => {
-                    let err = format!("连接网关失败: {}", e2);
-                    let _ = app.emit(
-                        "chat-done",
-                        serde_json::json!({"req_id": req_id, "error": err}),
-                    );
-                    return Ok(());
-                }
-            }
-        }
-    };
-
-    if !response.status().is_success() {
-        let status = response.status().as_u16();
-        let err_body = response
-            .text()
-            .await
-            .unwrap_or_default()
-            .chars()
-            .take(300)
-            .collect::<String>();
-
-        // ── Self-healing: 5xx or 429 → retry once ──
-        if status >= 500 || status == 429 {
-            let delay = if status == 429 { 3 } else { 1 };
-            eprintln!("[self-heal] server returned {status} — retrying in {delay}s");
-            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-            let mut retry = client
-                .post(&url)
-                .header("Content-Type", "application/json")
-                .json(&body);
-            if let Some(ref token) = auth_token {
-                if !token.is_empty() {
-                    retry = retry.header("Authorization", format!("Bearer {token}"));
-                }
-            }
-            if let Ok(r) = retry.send().await {
-                if r.status().is_success() {
-                    // Use the retry response for SSE parsing below
-                    return parse_mobile_sse_stream(&app, r, &req_id).await;
-                }
-            }
-        }
-
-        let err = format!("网关返回错误 {}: {}", status, err_body);
-        let _ = app.emit(
-            "chat-done",
-            serde_json::json!({"req_id": req_id, "error": err}),
-        );
-        return Ok(());
-    }
-
-    parse_mobile_sse_stream(&app, response, &req_id).await
+    // Mobile always routes through the desktop's chat proxy.
+    // The gateway_url from the frontend is already the chat proxy URL.
+    stream_via_chat_proxy(
+        &app,
+        &gateway_url,
+        &messages,
+        &req_id,
+        model,
+        auth_token.as_deref(),
+        session_key.as_deref(),
+    )
+    .await
 }
 
-async fn parse_mobile_sse_stream(
+// ── SSE helpers ──────────────────────────────────────────────────────────
+
+async fn emit_sse_stream(
     app: &AppHandle,
     response: reqwest::Response,
     req_id: &str,
 ) -> Result<(), String> {
-    let mut stream = response.bytes_stream();
-    let mut buf = String::new();
+    let rid = req_id.to_string();
+    let emitter = app.clone();
 
-    while let Some(chunk) = stream.next().await {
-        let bytes = match chunk {
-            Ok(b) => b,
-            Err(e) => {
-                let _ = app.emit(
-                    "chat-done",
-                    serde_json::json!({"req_id": req_id, "error": e.to_string()}),
-                );
-                return Ok(());
+    let result = consume_sse_stream(response, 0, |delta| {
+        let _ = emitter.emit(
+            "chat-chunk",
+            ChatChunk {
+                req_id: rid.clone(),
+                delta: delta.to_string(),
+            },
+        );
+    })
+    .await;
+
+    match result {
+        Ok(model) => {
+            let _ = app.emit("chat-done", done(req_id, None, model, None));
+            Ok(())
+        }
+        Err(e) => {
+            let _ = app.emit("chat-done", done(req_id, Some(e), None, None));
+            Ok(())
+        }
+    }
+}
+
+// ── Chat proxy relay ─────────────────────────────────────────────────────
+
+const CHAT_PROXY_PORT_START: u16 = 18800;
+const CHAT_PROXY_PORT_END: u16 = 18810;
+
+fn extract_host(url: &str) -> &str {
+    let without_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    without_scheme.split(':').next().unwrap_or("127.0.0.1")
+}
+
+async fn stream_via_chat_proxy(
+    app: &AppHandle,
+    gateway_url: &str,
+    messages: &[Value],
+    req_id: &str,
+    model: Option<String>,
+    auth_token: Option<&str>,
+    session_key: Option<&str>,
+) -> Result<(), String> {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .connect_timeout(std::time::Duration::from_secs(2))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let model_name = model.unwrap_or_else(|| "main".into());
+    let host = extract_host(gateway_url);
+
+    sentinel::log_sentinel_event(&SentinelEvent::applied(
+        "mobile_chat",
+        "",
+        &format!("chat proxy at {host} for model={model_name}"),
+    ));
+
+    let mut body = serde_json::json!({
+        "model": model_name,
+        "messages": messages,
+        "stream": true,
+    });
+    if let Some(sk) = session_key {
+        body["session_key"] = serde_json::Value::String(sk.to_string());
+    }
+
+    for port in CHAT_PROXY_PORT_START..=CHAT_PROXY_PORT_END {
+        let proxy_url = format!("http://{host}:{port}/v1/chat/completions");
+        let mut req = client
+            .post(&proxy_url)
+            .header("Content-Type", "application/json")
+            .json(&body);
+        if let Some(token) = auth_token {
+            if !token.is_empty() {
+                req = req.header("Authorization", format!("Bearer {token}"));
             }
-        };
+        }
 
-        buf.push_str(&String::from_utf8_lossy(&bytes));
-
-        loop {
-            if let Some(pos) = buf.find('\n') {
-                let line = buf[..pos].trim().to_string();
-                buf.drain(..=pos);
-
-                if line.starts_with("data:") {
-                    let data = line["data:".len()..].trim_start();
-
-                    if data == "[DONE]" {
-                        let _ = app.emit(
-                            "chat-done",
-                            serde_json::json!({"req_id": req_id, "error": null}),
-                        );
-                        return Ok(());
-                    }
-
-                    if let Ok(v) = serde_json::from_str::<Value>(data) {
-                        if let Some(delta) = v
-                            .get("choices")
-                            .and_then(|c| c.get(0))
-                            .and_then(|c| c.get("delta"))
-                            .and_then(|d| d.get("content"))
-                            .and_then(|c| c.as_str())
-                        {
-                            if !delta.is_empty() {
-                                let _ = app.emit(
-                                    "chat-chunk",
-                                    serde_json::json!({"req_id": req_id, "delta": delta}),
-                                );
-                            }
-                        }
-                    }
-                }
-            } else {
+        match req.send().await {
+            Ok(r) if r.status().is_success() => {
+                return emit_sse_stream(app, r, req_id).await;
+            }
+            Ok(r) if r.status().as_u16() == 401 => continue,
+            Ok(r) => {
+                let status = r.status().as_u16();
+                let text = r.text().await.unwrap_or_default();
+                sentinel::log_sentinel_event(&SentinelEvent::captured(
+                    "mobile_chat",
+                    "",
+                    &format!("chat proxy {port} returned {status}: {text}"),
+                ));
                 break;
             }
+            Err(_) => continue,
         }
     }
 
     let _ = app.emit(
         "chat-done",
-        serde_json::json!({"req_id": req_id, "error": null}),
+        done(
+            req_id,
+            Some("桌面端 chat proxy 不可达，请检查桌面端是否正在运行".into()),
+            None,
+            None,
+        ),
     );
     Ok(())
 }

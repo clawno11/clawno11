@@ -25,7 +25,7 @@ We have no servers that receive your data. We have no analytics, no tracking, no
 | AI conversation content | ❌ No | Stored only locally on your device, in SQLite |
 | API Keys / Secrets | ❌ No | Stored only locally in app sandbox (not uploaded) |
 | Device identifiers | ❌ No | Not collected |
-| Camera / Microphone | ❌ No | Not accessed |
+| Camera / Microphone | ⚠️ Optional | Microphone used only on mobile for voice input (if you tap the mic button). Never recorded in background. |
 | Contacts / Calendar | ❌ No | Not accessed |
 
 ### 3. Permissions We Request
@@ -35,6 +35,7 @@ We have no servers that receive your data. We have no analytics, no tracking, no
 | Internet access | Android / iOS / Desktop | Connect to your own AI gateway server |
 | Storage read/write | Android / iOS / Desktop | Import RAG documents, store local SQLite database |
 | Foreground network | Android | Maintain connection to AI gateway |
+| Microphone | Android / iOS (mobile only) | Voice input — only when you tap the mic button |
 
 We request **only the minimum permissions** necessary. No permission is used for advertising or analytics.
 
@@ -113,7 +114,7 @@ ClawNo.11 **不收集任何个人数据**。所有数据仅存储在您的本地
 | AI 对话内容 | ❌ 否 | 仅本地存储于您的设备（SQLite） |
 | API 密钥/Secret | ❌ 否 | 仅本地存储于应用沙箱（不上传） |
 | 设备标识符 | ❌ 否 | 不收集 |
-| 摄像头/麦克风 | ❌ 否 | 不访问 |
+| 摄像头/麦克风 | ⚠️ 可选 | 麦克风仅在移动端用于语音输入（点击麦克风按钮时）。不会后台录音。 |
 | 通讯录/日历 | ❌ 否 | 不访问 |
 
 ### 3. 我们申请的权限
@@ -123,6 +124,7 @@ ClawNo.11 **不收集任何个人数据**。所有数据仅存储在您的本地
 | 网络访问 | Android / iOS / 桌面端 | 连接您自己的 AI 网关服务器 |
 | 存储读写 | Android / iOS / 桌面端 | 导入 RAG 文档，存储本地 SQLite 数据库 |
 | 前台网络保持 | Android | 维持与 AI 网关的连接 |
+| 麦克风 | Android / iOS（仅移动端） | 语音输入 — 仅在您点击麦克风按钮时使用 |
 
 我们仅申请**最小必要权限**，所有权限均不用于广告或用户分析。
 

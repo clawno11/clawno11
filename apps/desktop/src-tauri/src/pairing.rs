@@ -1,3 +1,5 @@
+use serde::Serialize;
+use std::sync::{Arc, Mutex};
 /// Secure QR-code pairing between the desktop gateway and the mobile app.
 ///
 /// ## Design (modelled on Bluetooth Numeric Comparison pairing)
@@ -35,10 +37,7 @@
 /// - IP is Base64-encoded in the QR → not immediately legible from a photo.
 /// - PIN confirmation → phishing with a modified QR fails (PIN would differ).
 /// - Crypto-random token → not guessable.
-
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::sync::{Arc, Mutex};
-use serde::Serialize;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -116,13 +115,31 @@ pub fn b64_encode(data: &[u8]) -> String {
     let mut i = 0;
     while i < data.len() {
         let b0 = data[i] as u32;
-        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
-        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
-        let _ = write!(out, "{}{}{}{}",
+        let b1 = if i + 1 < data.len() {
+            data[i + 1] as u32
+        } else {
+            0
+        };
+        let b2 = if i + 2 < data.len() {
+            data[i + 2] as u32
+        } else {
+            0
+        };
+        let _ = write!(
+            out,
+            "{}{}{}{}",
             CHARS[((b0 >> 2) & 0x3F) as usize] as char,
             CHARS[(((b0 & 0x03) << 4) | (b1 >> 4)) as usize] as char,
-            if i + 1 < data.len() { CHARS[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char } else { '=' },
-            if i + 2 < data.len() { CHARS[(b2 & 0x3F) as usize] as char } else { '=' },
+            if i + 1 < data.len() {
+                CHARS[(((b1 & 0x0F) << 2) | (b2 >> 6)) as usize] as char
+            } else {
+                '='
+            },
+            if i + 2 < data.len() {
+                CHARS[(b2 & 0x3F) as usize] as char
+            } else {
+                '='
+            },
         );
         i += 3;
     }
@@ -146,8 +163,8 @@ pub fn b64_encode(data: &[u8]) -> String {
 /// Returns the bound port, or 0 on failure (in which case the QR payload will
 /// omit the `vp` field and single-use enforcement falls back to the TTL window).
 fn start_verify_server(state: Arc<Mutex<Option<ActiveToken>>>, ttl_secs: u64) -> u16 {
-    use tokio::net::TcpListener;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
     // Bind synchronously so we can return the port before spawning.
     let listener = match std::net::TcpListener::bind("0.0.0.0:0") {
@@ -165,8 +182,7 @@ fn start_verify_server(state: Arc<Mutex<Option<ActiveToken>>>, ttl_secs: u64) ->
             Ok(l) => l,
             Err(_) => return,
         };
-        let deadline = tokio::time::Instant::now()
-            + tokio::time::Duration::from_secs(ttl_secs + 5);
+        let deadline = tokio::time::Instant::now() + tokio::time::Duration::from_secs(ttl_secs + 5);
 
         loop {
             let accept = tokio::time::timeout_at(deadline, listener.accept()).await;
@@ -227,7 +243,7 @@ fn start_verify_server(state: Arc<Mutex<Option<ActiveToken>>>, ttl_secs: u64) ->
             // Verify and conditionally consume the token.
             let ok = {
                 let mut guard = match state.lock() {
-                    Ok(g)  => g,
+                    Ok(g) => g,
                     Err(_) => break, // Poisoned mutex — shut down.
                 };
                 match guard.as_mut() {
@@ -297,10 +313,10 @@ fn generate_pair_qr_inner(
     {
         let mut guard = state.0.lock().map_err(|_| "内部锁错误".to_string())?;
         *guard = Some(ActiveToken {
-            token:       token.clone(),
-            pin:         pin.clone(),
+            token: token.clone(),
+            pin: pin.clone(),
             expires_at,
-            used:        false,
+            used: false,
             verify_port: 0, // placeholder — updated after server binds
         });
     }
@@ -327,7 +343,8 @@ fn generate_pair_qr_inner(
     let host_b64 = b64_encode(host_and_port.as_bytes());
     let name_b64 = b64_encode(server_name.as_bytes());
     let chat_key = crate::chat_proxy::get_proxy_auth_token();
-    let mut qr_data = format!("clawno11://pair?h={host_b64}&n={name_b64}&t={token}&exp={expires_at}");
+    let mut qr_data =
+        format!("clawno11://pair?h={host_b64}&n={name_b64}&t={token}&exp={expires_at}");
     if verify_port > 0 {
         qr_data.push_str(&format!("&vp={verify_port}"));
     }
@@ -335,7 +352,11 @@ fn generate_pair_qr_inner(
         qr_data.push_str(&format!("&ck={chat_key}"));
     }
 
-    Ok(PairQrPayload { qr_data, pin, expires_at })
+    Ok(PairQrPayload {
+        qr_data,
+        pin,
+        expires_at,
+    })
 }
 
 /// Generate a new time-limited pairing QR payload using the loopback address.

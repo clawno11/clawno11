@@ -12,32 +12,23 @@ name = "app"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2", features = [] }
+tauri-build = { workspace = true }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-tauri-plugin-fs = "2"
-tauri-plugin-dialog = "2"
-tauri-plugin-store = "2"
-tauri-plugin-sql = { version = "2", features = ["sqlite"] }
-tauri-plugin-http = "2"
+clawno-core = { path = "../../../crates/clawno-core", features = ["mobile", "ssh-exec"] }
+tauri = { workspace = true }
+tauri-plugin-fs = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+tauri-plugin-store = { workspace = true }
+tauri-plugin-sql = { workspace = true }
+tauri-plugin-http = { workspace = true }
 tauri-plugin-barcode-scanner = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["full"] }
-dirs-next = "2"
-reqwest = { version = "0.12", features = ["json", "stream", "rustls-tls"], default-features = false }
-futures-util = "0.3"
-russh = "0.44"
-russh-keys = "0.44"
-async-trait = "0.1"
-
-[profile.release]
-panic = "abort"
-codegen-units = 1
-lto = true
-opt-level = "s"
-strip = true
-
-[profile.dev]
-incremental = true
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+dirs-next = { workspace = true }
+reqwest = { workspace = true, features = ["json", "stream", "rustls-tls"], default-features = false }
+futures-util = { workspace = true }
+russh = { workspace = true }
+russh-keys = { workspace = true }
+async-trait = { workspace = true }
