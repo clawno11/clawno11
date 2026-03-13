@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -41,6 +42,12 @@
   "plugins": {
     "shell": {
       "open": true
+    },
+    "updater": {
+      "endpoints": [
+        "https://github.com/clawno11/clawno11/releases/latest/download/latest.json"
+      ],
+      "pubkey": "RWSH6VkdQJO9dWWx2aE9IGPlgY7VIX69sRihFaO59lSmCuzv9XGue12H"
     }
   }
 }

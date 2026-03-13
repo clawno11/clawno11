@@ -36,6 +36,9 @@
       ]
     },
     "http:allow-fetch-send",
-    "http:allow-fetch-cancel"
+    "http:allow-fetch-cancel",
+    "updater:default",
+    "process:allow-restart",
+    "process:allow-exit"
   ]
 }

@@ -63,6 +63,7 @@ jobs:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
           releaseName: "ClawNo.11 ${{ github.ref_name }}"
-          releaseDraft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' || true }}
+          releaseDraft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
           prerelease: false
+          includeUpdaterJson: true
           args: --target ${{ matrix.target }}

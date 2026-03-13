@@ -593,7 +593,7 @@
         },
         {
           "label": "Website",
-          "url": "https://clawno11.com"
+          "url": "https://clawno11.ai"
         },
         {
           "label": "Privacy Policy",
@@ -609,6 +609,21 @@
         }
       ]
     }
+  },
+  "update": {
+    "available": "New version v{{version}} available",
+    "downloading": "Downloading update…",
+    "readyToRestart": "Update ready — restart to apply",
+    "restart": "Restart Now",
+    "later": "Later",
+    "installAndRestart": "Download & Restart",
+    "upToDate": "You're up to date",
+    "checkFailed": "Update check failed",
+    "mode": "Update Mode",
+    "auto": "Auto Update",
+    "autoDesc": "Download silently in the background; installs on next restart",
+    "prompt": "Manual Confirm",
+    "promptDesc": "Show a dialog when a new version is found; you decide when to update"
   },
   "voice": {
     "message": "Voice message"

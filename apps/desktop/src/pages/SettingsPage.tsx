@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Settings, Info, Shield, Database, ExternalLink, Trash2, Check, ArrowRight, Wallet, ChevronDown, ChevronUp, Plus, X } from "lucide-react";
+import { Settings, Info, Shield, Database, ExternalLink, Trash2, Check, ArrowRight, Wallet, ChevronDown, ChevronUp, Plus, X, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { ToggleRow } from "@clawno/shared/components/common/ToggleRow";
 import { LangSelector } from "@clawno/shared/components/common/LangSelector";
 import { useNavigate } from "react-router-dom";
+import { getUpdateMode, setUpdateMode, useUpdaterStore, type UpdateMode } from "../store/updater";
 import { getVersion } from "@tauri-apps/api/app";
 import {
   purgeOldRecords,
@@ -41,6 +42,59 @@ function TabBtn({ label, icon: Icon, active, onClick }: {
 
 // ── General Tab ────────────────────────────────────────────────────────────
 
+function UpdateModeSection() {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<UpdateMode>(getUpdateMode);
+  const checkForUpdate = useUpdaterStore((s) => s.checkForUpdate);
+  const updaterStatus = useUpdaterStore((s) => s.status);
+
+  const handleChange = (m: UpdateMode) => {
+    setMode(m);
+    setUpdateMode(m);
+  };
+
+  const options: { value: UpdateMode; labelKey: string; descKey: string }[] = [
+    { value: "auto",   labelKey: "update.auto",   descKey: "update.autoDesc"   },
+    { value: "prompt", labelKey: "update.prompt",  descKey: "update.promptDesc" },
+  ];
+
+  return (
+    <Section title={t("update.mode")} desc="">
+      <div className="space-y-2">
+        {options.map((opt) => (
+          <button
+            key={opt.value}
+            onClick={() => handleChange(opt.value)}
+            className={`w-full text-left p-3 rounded-lg border transition-colors ${
+              mode === opt.value
+                ? "border-primary bg-primary/5"
+                : "border-border hover:bg-muted/40"
+            }`}
+          >
+            <div className="flex items-center justify-between mb-0.5">
+              <span className="text-sm font-medium">{t(opt.labelKey)}</span>
+              {mode === opt.value && <Check size={14} className="text-primary" />}
+            </div>
+            <p className="text-xs text-muted-foreground">{t(opt.descKey)}</p>
+          </button>
+        ))}
+      </div>
+      <button
+        onClick={() => checkForUpdate()}
+        disabled={updaterStatus === "checking"}
+        className="mt-2 flex items-center gap-1.5 text-xs text-primary hover:underline disabled:opacity-50"
+      >
+        <RefreshCw size={12} className={updaterStatus === "checking" ? "animate-spin" : ""} />
+        {updaterStatus === "checking"
+          ? t("update.downloading")
+          : updaterStatus === "idle" || updaterStatus === "error"
+            ? t("update.upToDate")
+            : t("update.available", { version: useUpdaterStore.getState().newVersion })}
+      </button>
+    </Section>
+  );
+}
+
 function GeneralTab() {
   const { t } = useTranslation();
 
@@ -70,6 +124,8 @@ function GeneralTab() {
           defaultOn={true}
         />
       </Section>
+
+      <UpdateModeSection />
     </div>
   );
 }

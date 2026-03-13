@@ -15,8 +15,10 @@ import { LocalModelPage } from "./pages/LocalModelPage.tsx";
 import { RemoteSessionsPage } from "./pages/RemoteSessionsPage.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { initRemoteSessionListeners } from "./store/remoteSessions.ts";
+import { initAutoUpdater } from "./store/updater.ts";
 
 initRemoteSessionListeners();
+initAutoUpdater().catch((e) => console.warn("[updater] init failed:", e));
 
 // ── Error boundary — prevents one page crash from taking down the whole app ──
 

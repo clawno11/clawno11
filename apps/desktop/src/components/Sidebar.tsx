@@ -2,8 +2,9 @@ import { useState, useEffect } from "react";
 import { NavLink } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { getVersion } from "@tauri-apps/api/app";
-import { LayoutDashboard, Rocket, MessageSquare, ShieldCheck, Activity, Plug, BookOpen, Puzzle, GitBranch, Cpu, Radio, Settings } from "lucide-react";
+import { LayoutDashboard, Rocket, MessageSquare, ShieldCheck, Activity, Plug, BookOpen, Puzzle, GitBranch, Cpu, Radio, Settings, Download, RotateCcw } from "lucide-react";
 import { useTokenAnomalyStore } from "@clawno/shared/tokenAnomalyStore";
+import { useUpdaterStore, getUpdateMode } from "../store/updater";
 
 function NavItem({
   to,
@@ -48,6 +49,91 @@ function NavItem({
         </>
       )}
     </NavLink>
+  );
+}
+
+function UpdateIndicator() {
+  const { t } = useTranslation();
+  const status = useUpdaterStore((s) => s.status);
+  const newVersion = useUpdaterStore((s) => s.newVersion);
+  const downloadAndInstall = useUpdaterStore((s) => s.downloadAndInstall);
+  const restart = useUpdaterStore((s) => s.restart);
+  const [showDialog, setShowDialog] = useState(false);
+
+  // In "prompt" mode, show dialog when update is available
+  useEffect(() => {
+    if (status === "available" && getUpdateMode() === "prompt") {
+      setShowDialog(true);
+    }
+  }, [status]);
+
+  if (status === "idle" || status === "checking" || status === "error") return null;
+
+  return (
+    <>
+      {status === "available" && (
+        <button
+          onClick={() => {
+            if (getUpdateMode() === "auto") {
+              downloadAndInstall();
+            } else {
+              setShowDialog(true);
+            }
+          }}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium transition-colors"
+          style={{ background: "hsl(var(--sidebar-active-bg))", color: "white", fontSize: 9 }}
+          title={t("update.available", { version: newVersion })}
+        >
+          <Download size={10} />
+          v{newVersion}
+        </button>
+      )}
+      {status === "downloading" && (
+        <span className="flex items-center gap-1 text-xs animate-pulse" style={{ color: "hsl(var(--sidebar-text))", fontSize: 9 }}>
+          <Download size={10} />
+          {t("update.downloading")}
+        </span>
+      )}
+      {status === "ready" && (
+        <button
+          onClick={restart}
+          className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium animate-pulse"
+          style={{ background: "#22c55e", color: "white", fontSize: 9 }}
+          title={t("update.readyToRestart")}
+        >
+          <RotateCcw size={10} />
+          {t("update.restart")}
+        </button>
+      )}
+
+      {/* ── Update dialog (prompt mode) ── */}
+      {showDialog && status === "available" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowDialog(false)}>
+          <div
+            className="bg-card border rounded-2xl shadow-2xl p-6 max-w-sm w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="text-lg font-semibold mb-2">{t("update.available", { version: newVersion })}</h3>
+            <p className="text-sm text-muted-foreground mb-6">{t("update.promptDesc")}</p>
+            <div className="flex gap-3 justify-end">
+              <button
+                className="px-4 py-2 rounded-lg text-sm border hover:bg-muted transition-colors"
+                onClick={() => setShowDialog(false)}
+              >
+                {t("update.later")}
+              </button>
+              <button
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white transition-colors"
+                style={{ background: "hsl(var(--sidebar-active-bg))" }}
+                onClick={() => { setShowDialog(false); downloadAndInstall(); }}
+              >
+                {t("update.installAndRestart")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -123,9 +209,10 @@ export function Sidebar() {
         ))}
       </nav>
 
-      {/* ── 底部装饰 ── */}
+      {/* ── 底部：版本 + 更新状态 ── */}
       <div className="mt-auto flex flex-col items-center gap-1.5">
         <div className="w-8 border-t" style={{ borderColor: "hsl(var(--sidebar-border))" }} />
+        <UpdateIndicator />
         <span
           className="font-mono text-center leading-tight"
           style={{ fontSize: 9, color: "hsl(var(--sidebar-text))", opacity: 0.5, letterSpacing: "0.1em" }}

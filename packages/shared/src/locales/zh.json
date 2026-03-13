@@ -593,7 +593,7 @@
         },
         {
           "label": "官网",
-          "url": "https://clawno11.com"
+          "url": "https://clawno11.ai"
         },
         {
           "label": "隐私政策",
@@ -609,6 +609,21 @@
         }
       ]
     }
+  },
+  "update": {
+    "available": "发现新版本 v{{version}}",
+    "downloading": "正在下载更新…",
+    "readyToRestart": "更新已就绪，重启生效",
+    "restart": "立即重启",
+    "later": "稍后",
+    "installAndRestart": "下载并重启",
+    "upToDate": "已是最新版本",
+    "checkFailed": "检查更新失败",
+    "mode": "更新模式",
+    "auto": "自动更新",
+    "autoDesc": "后台静默下载，重启时自动安装",
+    "prompt": "手动确认",
+    "promptDesc": "发现新版本时弹窗提示，由您决定是否更新"
   },
   "voice": {
     "message": "语音消息"

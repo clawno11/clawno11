@@ -94,3 +94,6 @@ apps/mobile/vite.config.js
 
 # TOFU SSH known hosts (user data, not project config)
 .clawno11/
+
+# Tauri updater signing keys (NEVER commit)
+.tauri/
