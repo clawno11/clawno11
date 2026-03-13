@@ -127,10 +127,14 @@ export function Sidebar() {
       <div className="mt-auto flex flex-col items-center gap-1.5">
         <div className="w-8 border-t" style={{ borderColor: "hsl(var(--sidebar-border))" }} />
         <span
-          className="font-mono"
+          className="font-mono text-center leading-tight"
           style={{ fontSize: 9, color: "hsl(var(--sidebar-text))", opacity: 0.5, letterSpacing: "0.1em" }}
         >
           {version}
+          <br />
+          <span style={{ fontSize: 7.5, letterSpacing: "0.02em" }}>
+            {__BUILD_DATE__}
+          </span>
         </span>
       </div>
     </aside>
