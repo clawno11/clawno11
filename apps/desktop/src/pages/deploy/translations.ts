@@ -78,6 +78,8 @@ export function translateDetail(raw: string): string {
     ["gateway-start-failed", (v) => `Gateway 启动失败：${v}`],
     ["openclaw-not-found-after-install", () => "OpenClaw 安装后未找到命令，请检查 PATH 配置"],
     ["install-openclaw-failed:", (v) => `OpenClaw 安装失败：${v}`],
+    ["npm-not-available:", () => "npm 不可用，无法安装依赖。请重装 Node.js（https://nodejs.org）"],
+    ["node-installed-but-npm-missing:", () => "Node.js 已安装但 npm 缺失，自动修复失败。请重装 Node.js"],
   ];
 
   for (const [prefix, fn] of prefixMap) {
@@ -106,6 +108,16 @@ export function translateFix(fix: string): string {
     "onboard-skipped-non-fatal": "跳过初始化（使用默认配置）",
     "reset-corrupt-config": "重置损坏的配置文件",
     "winget-install-node-lts": "通过 winget 安装 Node.js LTS",
+    "npm-missing-attempting-repair": "npm 缺失，正在尝试自动修复",
+    "corepack-enable-ok": "通过 corepack 启用 npm",
+    "npm-found-after-path-refresh": "刷新 PATH 后找到 npm",
+    "winget-reinstall-node": "通过 winget 重装 Node.js（含 npm）",
+    "choco-reinstall-node": "通过 choco 重装 Node.js（含 npm）",
+    "brew-reinstall-node": "通过 brew 重装 Node.js（含 npm）",
+    "apt-install-npm": "通过 apt 安装 npm",
+    "dnf-install-npm": "通过 dnf 安装 npm",
+    "pacman-install-npm": "通过 pacman 安装 npm",
+    "npm-repair-exhausted": "npm 自动修复方案已用尽",
   };
   if (exactMap[fix]) return exactMap[fix];
 

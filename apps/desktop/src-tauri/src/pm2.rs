@@ -204,6 +204,17 @@ pub async fn deploy_step_install_pm2() -> StepResult {
         return StepResult::ok(format!("already-installed:v{}", ver));
     }
 
+    // Guard: npm must be available to install pm2
+    {
+        let mut npm_fixes: Vec<String> = Vec::new();
+        if !crate::node::is_npm_available() && !crate::node::ensure_npm(&mut npm_fixes) {
+            return StepResult::err_fixed(
+                "npm-not-available: cannot install pm2 without npm".into(),
+                npm_fixes,
+            );
+        }
+    }
+
     let (ok, _detail, mut fixes) = npm_install_with_fallback("pm2");
     if !ok {
         // Self-healing: rebuild .pm2 home and retry

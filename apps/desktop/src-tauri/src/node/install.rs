@@ -24,6 +24,134 @@ fn verify_node() -> Option<String> {
     None
 }
 
+/// Verify both node >= 22 AND npm are available.
+/// Returns `Some("vXX.Y.Z (npm vA.B.C)")` when both work, `None` otherwise.
+fn verify_node_and_npm() -> Option<String> {
+    let node_ver = verify_node()?;
+    if is_npm_available() {
+        let npm_ver = shell_output("npm --version").trim().to_string();
+        Some(format!("{} (npm v{})", node_ver.trim(), npm_ver))
+    } else {
+        None
+    }
+}
+
+pub fn is_npm_available() -> bool {
+    let out = shell_output("npm --version");
+    let trimmed = out.trim();
+    !trimmed.is_empty()
+        && trimmed
+            .chars()
+            .next()
+            .map(|c| c.is_ascii_digit())
+            .unwrap_or(false)
+}
+
+/// If node is present but npm is missing, attempt to bootstrap npm.
+/// Returns a list of fixes applied, and whether npm is now available.
+pub fn ensure_npm(fixes: &mut Vec<String>) -> bool {
+    if is_npm_available() {
+        return true;
+    }
+    fixes.push("npm-missing-attempting-repair".to_string());
+
+    // Strategy A: corepack (bundled with Node 16.9+)
+    let (ok_cp, _, _) = shell_result("corepack enable");
+    if ok_cp {
+        fixes.push("corepack-enable-ok".to_string());
+        if is_npm_available() {
+            return true;
+        }
+    }
+
+    // Strategy B (Windows): reinstall Node via winget to get full package
+    #[cfg(target_os = "windows")]
+    {
+        let profile = detect_platform();
+        // Try refreshing PATH first — npm might exist but not in PATH
+        refresh_windows_path(fixes);
+        if is_npm_available() {
+            fixes.push("npm-found-after-path-refresh".to_string());
+            return true;
+        }
+        // Try winget repair
+        if profile.has_winget {
+            fixes.push("winget-reinstall-node".to_string());
+            let (ok, _, _) = shell_result(
+                "winget install OpenJS.NodeJS.LTS -e --silent \
+                 --accept-package-agreements --accept-source-agreements",
+            );
+            if ok {
+                refresh_windows_path(fixes);
+                if is_npm_available() {
+                    return true;
+                }
+            }
+        }
+        // Try choco
+        if profile.has_choco {
+            fixes.push("choco-reinstall-node".to_string());
+            let (ok, _, _) = shell_result("choco install nodejs-lts -y --force");
+            if ok {
+                refresh_windows_path(fixes);
+                if is_npm_available() {
+                    return true;
+                }
+            }
+        }
+    }
+
+    // Strategy B (macOS): brew reinstall
+    #[cfg(target_os = "macos")]
+    {
+        fixes.push("brew-reinstall-node".to_string());
+        let (ok, _, _) = shell_result("brew reinstall node@22");
+        if ok && is_npm_available() {
+            return true;
+        }
+        let (ok2, _, _) = shell_result("brew link --overwrite node@22");
+        if ok2 && is_npm_available() {
+            return true;
+        }
+    }
+
+    // Strategy B (Linux): install npm package separately
+    #[cfg(target_os = "linux")]
+    {
+        let profile = detect_platform();
+        if profile.has_apt {
+            fixes.push("apt-install-npm".to_string());
+            let (ok, _, _) =
+                shell_result("apt-get install -y npm 2>/dev/null || sudo apt-get install -y npm");
+            if ok && is_npm_available() {
+                return true;
+            }
+        }
+        if profile.has_dnf {
+            fixes.push("dnf-install-npm".to_string());
+            let (ok, _, _) =
+                shell_result("dnf install -y npm 2>/dev/null || sudo dnf install -y npm");
+            if ok && is_npm_available() {
+                return true;
+            }
+        }
+        if profile.has_pacman {
+            fixes.push("pacman-install-npm".to_string());
+            let (ok, _, _) = shell_result(
+                "pacman -Sy --noconfirm npm 2>/dev/null || sudo pacman -Sy --noconfirm npm",
+            );
+            if ok && is_npm_available() {
+                return true;
+            }
+        }
+    }
+
+    // Strategy C: download Node.js full package as last resort
+    // (the DirectDownloadNodeStrategy already installs full node+npm)
+    fixes.push("npm-repair-exhausted".to_string());
+    false
+}
+
 fn refresh_windows_path(#[allow(unused_variables)] fixes: &mut Vec<String>) {
     #[cfg(target_os = "windows")]
     {
@@ -772,9 +900,16 @@ pub async fn deploy_step_check_node(app: tauri::AppHandle) -> StepResult {
         );
     }
 
-    // Quick check: is Node >= 22 already available?
-    if let Some(ver) = verify_node() {
-        return StepResult::ok(ver);
+    // Quick check: is Node >= 22 AND npm already available?
+    if let Some(full) = verify_node_and_npm() {
+        return StepResult::ok(full);
+    }
+
+    // Node exists but npm is missing — try to repair npm first
+    if verify_node().is_some() && !is_npm_available() && ensure_npm(&mut fixes) {
+        if let Some(full) = verify_node_and_npm() {
+            return StepResult::ok_fixed(full, fixes);
+        }
     }
 
     // Check via nvm-which on Unix
@@ -783,23 +918,48 @@ pub async fn deploy_step_check_node(app: tauri::AppHandle) -> StepResult {
         let node_path = super::scan::nvm_which_node();
         if !node_path.is_empty() {
             inject_bin_dir(&node_path);
-            if let Some(ver) = verify_node() {
+            if let Some(full) = verify_node_and_npm() {
                 fixes.push("found-via-nvm-which".into());
-                return StepResult::ok_fixed(ver, fixes);
+                return StepResult::ok_fixed(full, fixes);
+            }
+            // nvm node found but npm missing
+            if verify_node().is_some() && !is_npm_available() && ensure_npm(&mut fixes) {
+                if let Some(full) = verify_node_and_npm() {
+                    return StepResult::ok_fixed(full, fixes);
+                }
             }
         }
     }
 
-    // Node not found or too old — run the strategy chain
+    // Node not found or too old — run the strategy chain.
+    // Verifier requires BOTH node and npm to consider installation successful.
     let strategies = build_node_strategies(&profile);
     let chain = StrategyChain {
         step_id: "install-node".into(),
         strategies,
         stall_timeout: Duration::from_secs(30),
-        verifier: Box::new(verify_node),
+        verifier: Box::new(verify_node_and_npm),
     };
 
-    chain.execute(&app, &profile).await
+    let result = chain.execute(&app, &profile).await;
+
+    // Post-chain: if node was installed but npm is still missing, attempt repair
+    if result.ok && !is_npm_available() {
+        let mut post_fixes: Vec<String> = result.fixes_applied.clone();
+        if ensure_npm(&mut post_fixes) {
+            let npm_ver = shell_output("npm --version").trim().to_string();
+            return StepResult::ok_fixed(
+                format!("{} (npm v{})", result.detail, npm_ver),
+                post_fixes,
+            );
+        }
+        return StepResult::err_fixed(
+            "node-installed-but-npm-missing: npm could not be repaired automatically".into(),
+            post_fixes,
+        );
+    }
+
+    result
 }
 
 // ── Tauri command: install/update openclaw ────────────────────────────────────
@@ -821,8 +981,18 @@ pub async fn deploy_step_install_openclaw(app: tauri::AppHandle) -> StepResult {
         }
     }
 
-    let (dl_ok, _dl_detail, mut fixes) =
+    // Guard: npm must be available before attempting install
+    let mut fixes: Vec<String> = Vec::new();
+    if !is_npm_available() && !ensure_npm(&mut fixes) {
+        return StepResult::err_fixed(
+            "npm-not-available: cannot install openclaw without npm".into(),
+            fixes,
+        );
+    }
+
+    let (dl_ok, _dl_detail, dl_fixes) =
         download_and_install_npm_package(&app, "openclaw", "openclaw").await;
+    fixes.extend(dl_fixes);
 
     let verify = || -> Option<String> {
         let v = shell_output("openclaw --version");
@@ -878,6 +1048,14 @@ pub async fn deploy_step_install_openclaw(app: tauri::AppHandle) -> StepResult {
 #[tauri::command]
 pub async fn update_openclaw(app: tauri::AppHandle) -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
+
+    // Guard: npm must be available for fallback install paths
+    if !is_npm_available() && !ensure_npm(&mut fixes) {
+        return StepResult::err_fixed(
+            "npm-not-available: cannot update openclaw without npm".into(),
+            fixes,
+        );
+    }
 
     let existing_ver = {
         let v = shell_output("openclaw --version");
