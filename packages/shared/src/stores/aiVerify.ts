@@ -4,10 +4,10 @@
  * to confirm the key is actually valid before showing "已配置".
  */
 
-export type VerifyStatus = "idle" | "verifying" | "ok" | "relay" | "failed";
+export type VerifyStatus = "idle" | "verifying" | "ok" | "relay" | "failed" | "unreachable";
 
 export interface VerifyResult {
-  status: "ok" | "relay" | "failed";
+  status: "ok" | "relay" | "failed" | "unreachable";
   message?: string;
 }
 
@@ -74,12 +74,16 @@ export async function verifyProviderKey(
     if (resp.status === 401 || resp.status === 403)
       return { status: "failed", message: "Key 无效或已过期，请重新获取" };
     if (resp.status === 429)
-      return { status: "failed", message: "请求过于频繁，请稍后重试" };
+      return { status: "unreachable", message: "请求过于频繁，请稍后重试" };
+    if (resp.status >= 500)
+      return { status: "unreachable", message: `服务商暂时不可用 (HTTP ${resp.status})` };
     return { status: "failed", message: `验证返回 HTTP ${resp.status}` };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (msg.toLowerCase().includes("abort") || msg.toLowerCase().includes("timeout"))
-      return { status: "failed", message: "验证超时，请检查网络连接" };
-    return { status: "failed", message: msg };
+      return { status: "unreachable", message: "验证超时，请检查网络连接" };
+    if (msg.toLowerCase().includes("failed to fetch") || msg.toLowerCase().includes("networkerror"))
+      return { status: "unreachable", message: "无法连接到服务商，Key 已写入，不影响使用" };
+    return { status: "unreachable", message: `网络异常: ${msg}` };
   }
 }

@@ -24,6 +24,13 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .on_window_event(|window, event| {
             // 点 × 时隐藏到系统托盘而不是退出，让应用保持后台运行
             if window.label() == "main" {
@@ -49,6 +56,9 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
+            // ── Deploy environment scan ────────────────────────────────────
+            deploy::environment::scan_environment,
+            deploy::environment::install_single_dep,
             // ── Deploy pre-check & update ────────────────────────────────────
             node::check_deploy_status,
             node::update_openclaw,
@@ -62,6 +72,7 @@ pub fn run() {
             gateway::deploy_step_start,
             deploy::deploy_remote,
             deploy::configure_api_key,
+            deploy::diagnose_auth,
             deploy::fix_model_config,
             deploy::models::restore_default_model,
             deploy::models::repair_model_config,

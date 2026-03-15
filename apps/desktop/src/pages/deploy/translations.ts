@@ -67,6 +67,8 @@ export function translateDetail(raw: string): string {
     ["installed-but-not-found:", () => "已安装但未找到命令，请重启应用后重试"],
     ["alt-config-dir:", (v) => `使用备用配置目录：${v}`],
     ["api-key-configured", () => "AI 模型 API Key 已配置"],
+    ["api-key-configured-and-verified", () => "AI 模型 API Key 已配置并验证通过"],
+    ["key-written-but-not-recognized:", (v) => `Key 已写入但 OpenClaw 未识别：${v}`],
     ["provider-or-key-empty", () => "提供商或 API Key 不能为空"],
     ["paste-token-failed:", (v) => `API Key 写入失败：${v}`],
     ["configured-provider:", (v) => `已配置 ${v}`],
@@ -80,6 +82,8 @@ export function translateDetail(raw: string): string {
     ["install-openclaw-failed:", (v) => `OpenClaw 安装失败：${v}`],
     ["npm-not-available:", () => "npm 不可用，无法安装依赖。请重装 Node.js（https://nodejs.org）"],
     ["node-installed-but-npm-missing:", () => "Node.js 已安装但 npm 缺失，自动修复失败。请重装 Node.js"],
+    ["git-not-installed:", () => "未安装 Git，OpenClaw 依赖 Git。请从 https://git-scm.com 安装"],
+    ["git-install-failed:", (v) => v ? `Git 安装失败：${v}。请手动安装：https://git-scm.com/download/win` : "Git 自动安装失败，请手动安装 Git"],
   ];
 
   for (const [prefix, fn] of prefixMap) {
@@ -118,6 +122,9 @@ export function translateFix(fix: string): string {
     "dnf-install-npm": "通过 dnf 安装 npm",
     "pacman-install-npm": "通过 pacman 安装 npm",
     "npm-repair-exhausted": "npm 自动修复方案已用尽",
+    "winget-install-git": "通过 winget 安装 Git",
+    "attempted-winget-git": "尝试通过 winget 安装 Git",
+    "git-missing-preflight": "缺少 Git，请先安装",
   };
   if (exactMap[fix]) return exactMap[fix];
 

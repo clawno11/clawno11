@@ -27,6 +27,7 @@ tauri-plugin-sql = { workspace = true }
 tauri-plugin-http = { workspace = true }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+tauri-plugin-single-instance = "2"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }
@@ -38,5 +39,7 @@ rand = "0.8"
 russh = { workspace = true }
 russh-keys = { workspace = true }
 async-trait = { workspace = true }
+sha2 = { workspace = true }
+sysinfo = "0.33"
 axum = { version = "0.8.4", features = ["json"] }
 tokio-stream = "0.1"

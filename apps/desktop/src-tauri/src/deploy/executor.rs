@@ -51,6 +51,8 @@ pub struct StepContext {
     pub fixes: Vec<String>,
     pub emitter: ProgressEmitter,
     pub stall_timeout: Duration,
+    pub strategy_idx: u8,
+    pub strategy_total: u8,
 }
 
 impl StepContext {
@@ -115,6 +117,8 @@ impl StrategyChain {
                 fixes: Vec::new(),
                 emitter: emitter.clone(),
                 stall_timeout: self.stall_timeout,
+                strategy_idx: idx as u8,
+                strategy_total: total,
             };
 
             let mut progress = StepProgress::new(&self.step_id, strategy.name(), idx as u8, total);
@@ -245,6 +249,8 @@ impl StrategyChain {
                                 fixes: Vec::new(),
                                 emitter: emitter.clone(),
                                 stall_timeout: self.stall_timeout,
+                                strategy_idx: idx as u8,
+                                strategy_total: total,
                             };
                             let outcome2 = strategy.execute(&mut ctx2).await;
                             all_fixes.append(&mut ctx2.fixes);
@@ -313,6 +319,8 @@ impl StrategyChain {
                     fixes: Vec::new(),
                     emitter: emitter.clone(),
                     stall_timeout: self.stall_timeout,
+                    strategy_idx: idx as u8,
+                    strategy_total: total,
                 };
 
                 let outcome = strategy.execute(&mut ctx).await;
@@ -406,7 +414,9 @@ impl StrategyChain {
                 | Remedy::ResetConfig
                 | Remedy::RestartDaemon
                 | Remedy::TryNextStrategy
-                | Remedy::DirectDownload => {
+                | Remedy::DirectDownload
+                | Remedy::RescanNodeVersion
+                | Remedy::InstallGit => {
                     fixes.push(format!("remedy:deferred:{:?}", remedy));
                     applied_any = true;
                 }
@@ -446,7 +456,9 @@ impl DiagnosisCategoryLabel for Diagnosis {
             ErrorCategory::PortInUse => "port-in-use",
             ErrorCategory::ConfigCorrupt => "config-corrupt",
             ErrorCategory::BinaryNotFound => "binary-not-found",
+            ErrorCategory::GitNotInstalled => "git-not-installed",
             ErrorCategory::VersionTooOld => "version-too-old",
+            ErrorCategory::NodeVersionMismatch => "node-version-mismatch",
             ErrorCategory::ProcessStalled => "process-stalled",
             ErrorCategory::ProcessCrash => "process-crash",
             ErrorCategory::Unknown => "unknown",

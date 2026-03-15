@@ -4,15 +4,7 @@ use crate::platform::shell_output;
 /// install locations (nvm, fnm, volta, mise, asdf, Homebrew, winget, etc.).
 use crate::platform::{data_local, path_join};
 
-/// Parse the major version number from a `v24.0.0` style string.
-pub fn node_major(ver: &str) -> u32 {
-    ver.trim_start_matches('v')
-        .split('.')
-        .next()
-        .unwrap_or("0")
-        .parse()
-        .unwrap_or(0)
-}
+pub use clawno_core::version_parse::node_major;
 
 /// Extract a major version number from a binary path like `.../v22.1.0/bin/node`.
 /// Used as fallback when the binary cannot be executed (quarantine, Rosetta, etc.).
@@ -43,7 +35,10 @@ pub fn find_node_exe() -> String {
     #[cfg(not(target_os = "windows"))]
     let exe_name = "node";
 
-    let path_env = std::env::var("PATH").unwrap_or_default();
+    // Use augmented_path() instead of raw process PATH so that nvm/brew/fnm
+    // managed directories are always searched — critical on macOS where GUI
+    // apps receive a minimal PATH from launchd.
+    let path_env = crate::platform::augmented_path();
     let sep = if cfg!(target_os = "windows") {
         ";"
     } else {
@@ -63,14 +58,7 @@ pub fn find_node_exe() -> String {
         match std::process::Command::new(&s).arg("--version").output() {
             Ok(o) => {
                 let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                let major = ver
-                    .trim_start_matches('v')
-                    .split('.')
-                    .next()
-                    .unwrap_or("0")
-                    .parse::<u32>()
-                    .unwrap_or(0);
-                if major >= 22 {
+                if node_major(&ver) >= 22 {
                     return s;
                 }
                 if first_executable.is_empty() {
@@ -89,9 +77,10 @@ pub fn find_node_exe() -> String {
     if !path_hint_v22.is_empty() {
         return path_hint_v22;
     }
-    // No v22+ found via PATH — try filesystem scan of known install locations.
-    // This covers GUI apps where PATH is stripped by macOS/Windows.
-    if let Some(dir) = scan_node_paths() {
+    // No v22+ found via augmented PATH — try filesystem scan of known install
+    // locations.  Iterate ALL candidates (not just the first match) so that a
+    // v20 in /opt/homebrew/bin doesn't shadow a v22 in ~/.nvm/.
+    for dir in scan_all_node_dirs() {
         #[cfg(target_os = "windows")]
         let bin = format!("{}\\node.exe", dir);
         #[cfg(not(target_os = "windows"))]
@@ -106,8 +95,6 @@ pub fn find_node_exe() -> String {
         }
     }
     // Fallback: return whatever we found (may be < v22), or bare name.
-    // The caller (CJS wrapper) will see the version mismatch error from openclaw
-    // and the user gets a clear "Node v22+ required" message.
     if !first_executable.is_empty() {
         return first_executable;
     }
@@ -118,7 +105,7 @@ pub fn find_node_exe() -> String {
 }
 
 /// Inject a directory into the current process PATH if not already present.
-pub(super) fn inject_dir(dir: &str) {
+pub(crate) fn inject_dir(dir: &str) {
     if dir.is_empty() {
         return;
     }
@@ -368,8 +355,9 @@ pub fn scan_openclaw_mjs() -> Option<String> {
         .find(|p| std::path::Path::new(p).exists())
 }
 
-/// Search well-known directories for an existing `node.exe` / `node` binary.
-pub fn scan_node_paths() -> Option<String> {
+/// Build the list of well-known directories that may contain a `node` binary.
+/// Sorted with newest version-manager versions first.
+fn node_candidate_dirs() -> Vec<String> {
     let home = crate::platform::user_home();
     let local = data_local();
 
@@ -388,7 +376,27 @@ pub fn scan_node_paths() -> Option<String> {
             r"C:\ProgramData\chocolatey\bin".to_string(),
             format!("{home}\\scoop\\apps\\nodejs\\current"),
             format!("{home}\\scoop\\shims"),
+            format!("{local}\\clawno\\node"),
         ];
+        // clawno direct-download dirs (node-vXX.YY.Z-win-x64)
+        let clawno_node = format!("{local}\\clawno\\node");
+        if let Ok(entries) = std::fs::read_dir(&clawno_node) {
+            let mut dl_dirs: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.starts_with("node-v") {
+                        Some(format!("{clawno_node}\\{s}"))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            dl_dirs.sort();
+            for dir in dl_dirs {
+                v.insert(0, dir);
+            }
+        }
         for fnm_base in &[
             format!("{local}\\fnm\\node-versions"),
             format!("{home}\\.fnm\\node-versions"),
@@ -423,7 +431,40 @@ pub fn scan_node_paths() -> Option<String> {
             "/usr/bin".to_string(),
             format!("{home}/.npm-global/bin"),
             format!("{home}/.local/bin"),
+            format!("{local}/clawno-npm-global/bin"),
         ];
+
+        // Homebrew keg-only node@22 (not symlinked into /opt/homebrew/bin)
+        for keg in &[
+            "/opt/homebrew/opt/node@22/bin",
+            "/opt/homebrew/opt/node/bin",
+            "/usr/local/opt/node@22/bin",
+            "/usr/local/opt/node/bin",
+        ] {
+            if !v.contains(&keg.to_string()) {
+                v.push(keg.to_string());
+            }
+        }
+
+        // clawno direct-download dirs (node-vXX.YY.Z-darwin-arm64/bin)
+        let clawno_node = format!("{home}/.clawno/node");
+        if let Ok(entries) = std::fs::read_dir(&clawno_node) {
+            let mut dl_dirs: Vec<String> = entries
+                .flatten()
+                .filter_map(|e| {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.starts_with("node-v") {
+                        Some(format!("{clawno_node}/{s}/bin"))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            dl_dirs.sort();
+            for dir in dl_dirs {
+                v.insert(0, dir);
+            }
+        }
 
         let nvm_base = nvm_dir();
         let nvm_vers = format!("{nvm_base}/versions/node");
@@ -517,77 +558,28 @@ pub fn scan_node_paths() -> Option<String> {
         v
     };
 
+    candidates
+}
+
+/// Return ALL directories from the well-known list that contain a `node` binary.
+/// Used by `find_node_exe()` to iterate every candidate until a v22+ is found.
+fn scan_all_node_dirs() -> Vec<String> {
     #[cfg(target_os = "windows")]
     let exe = "node.exe";
     #[cfg(not(target_os = "windows"))]
     let exe = "node";
 
-    for dir in &candidates {
-        if std::path::Path::new(&path_join(dir, exe)).exists() {
-            return Some(dir.clone());
-        }
-    }
-    None
+    node_candidate_dirs()
+        .into_iter()
+        .filter(|dir| std::path::Path::new(&path_join(dir, exe)).exists())
+        .collect()
 }
 
-/// Parse the openclaw semver from CLI output like `openclaw/1.2.3 linux-x64 node-v22.0.0\n1.2.3`.
-pub(super) fn openclaw_semver(raw: &str) -> String {
-    for line in raw.lines() {
-        let t = line.trim();
-        // "1.2.3" or "2026.3.12" — line starts with a digit
-        if t.contains('.')
-            && t.chars()
-                .next()
-                .map(|c| c.is_ascii_digit())
-                .unwrap_or(false)
-        {
-            return t.to_string();
-        }
-        // "OpenClaw 2026.3.12 (hash)" — extract version after "OpenClaw "
-        if let Some(rest) = t
-            .strip_prefix("OpenClaw ")
-            .or_else(|| t.strip_prefix("openclaw/"))
-        {
-            let ver = rest.split_whitespace().next().unwrap_or("");
-            if ver.contains('.') {
-                return ver.to_string();
-            }
-        }
-    }
-    String::new()
+/// Search well-known directories for an existing `node.exe` / `node` binary.
+/// Returns the first directory found (for back-compat with callers that need
+/// any node, regardless of version).
+pub fn scan_node_paths() -> Option<String> {
+    scan_all_node_dirs().into_iter().next()
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn node_major_parses_standard_version() {
-        assert_eq!(node_major("v22.0.0"), 22);
-        assert_eq!(node_major("v20.11.1"), 20);
-        assert_eq!(node_major("v18.0.0"), 18);
-    }
-
-    #[test]
-    fn node_major_without_v_prefix() {
-        assert_eq!(node_major("24.0.0"), 24);
-    }
-
-    #[test]
-    fn node_major_invalid_returns_zero() {
-        assert_eq!(node_major(""), 0);
-        assert_eq!(node_major("not-a-version"), 0);
-    }
-
-    #[test]
-    fn openclaw_semver_parses() {
-        let raw = "openclaw/1.2.3 linux-x64 node-v22.0.0\n1.2.3";
-        assert_eq!(openclaw_semver(raw), "1.2.3");
-    }
-
-    #[test]
-    fn openclaw_semver_parses_new_format() {
-        assert_eq!(openclaw_semver("OpenClaw 2026.3.12 (6472949)"), "2026.3.12");
-        assert_eq!(openclaw_semver("OpenClaw 2026.3.12"), "2026.3.12");
-    }
-}
+pub(crate) use clawno_core::version_parse::openclaw_semver;

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import {
   ExternalLink, RefreshCw, Loader, AlertCircle, CheckCircle,
-  KeyRound, ChevronDown, Sparkles, CircleAlert,
+  KeyRound, ChevronDown, Sparkles, CircleAlert, AlertTriangle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { maskApiKey } from "../../utils";
@@ -41,14 +41,22 @@ export function ProviderRow({ p, isConfigured: configured, onConfigure, onMarkCo
     try {
       const res = await onConfigure(p.id, key);
       if (res.ok) {
-        await onMarkConfigured(p.id);
-        setResult({ ok: true, msg: t("instances.ai.configuredMsg", { key: maskApiKey(key) }) });
-        setApiKey("");
-        setUpdateMode(false);
+        // 先设为验证中并请求探测
         setVerifyStatus("verifying");
         const v = await verifyProviderKey(p.id, key, p.direct);
         setVerifyStatus(v.status);
         setVerifyMsg(v.message);
+        
+        if (v.status === "ok" || v.status === "relay") {
+          // 验证通过才标记为已配置
+          await onMarkConfigured(p.id);
+          setResult({ ok: true, msg: t("instances.ai.configuredMsg", { key: maskApiKey(key) }) });
+          setApiKey("");
+          setUpdateMode(false);
+        } else {
+          // 验证不通过时，不标记为已配置，并提示错误
+          setResult({ ok: false, msg: v.message ?? "Key 写入成功但验证未通过" });
+        }
       } else {
         setResult({ ok: false, msg: res.detail });
       }
@@ -92,9 +100,14 @@ export function ProviderRow({ p, isConfigured: configured, onConfigure, onMarkCo
         <CheckCircle size={9} /> 已写入
       </span>
     );
+    if (verifyStatus === "unreachable") return (
+      <span className="flex-shrink-0 flex items-center gap-1 text-[10px] font-medium text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5">
+        <AlertTriangle size={9} /> 已写入（待验证）
+      </span>
+    );
     if (verifyStatus === "failed") return (
       <span className="flex-shrink-0 flex items-center gap-1 text-[10px] font-medium text-red-600 bg-red-50 border border-red-200 rounded-full px-1.5 py-0.5">
-        <AlertCircle size={9} /> 配置失败
+        <AlertCircle size={9} /> Key 无效
       </span>
     );
     if (configured) return (
@@ -109,18 +122,37 @@ export function ProviderRow({ p, isConfigured: configured, onConfigure, onMarkCo
 
   const expandBorder = verifyStatus === "failed"
     ? "border-red-300 bg-red-50/30"
-    : verifyStatus === "ok" || (configured && !updateMode && verifyStatus === "idle")
-      ? "border-green-300 bg-green-50/50"
-      : "border-primary/40 bg-primary/5";
+    : verifyStatus === "unreachable"
+      ? "border-amber-300 bg-amber-50/30"
+      : verifyStatus === "ok" || (configured && !updateMode && verifyStatus === "idle")
+        ? "border-green-300 bg-green-50/50"
+        : "border-primary/40 bg-primary/5";
 
   const LockedPanel = () => {
+    if (verifyStatus === "unreachable") return (
+      <div className="flex items-center justify-between gap-2 px-2.5 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
+        <div className="flex items-center gap-2">
+          <AlertTriangle size={14} className="text-amber-500 flex-shrink-0" />
+          <div>
+            <p className="text-[11px] font-semibold text-amber-700">Key 已写入，暂时无法在线验证</p>
+            <p className="text-[10px] text-amber-600/80 mt-0.5">{verifyMsg ?? "无法连接到服务商"} · 不影响正常使用</p>
+          </div>
+        </div>
+        <button
+          onClick={() => { setUpdateMode(true); setVerifyStatus("idle"); setVerifyMsg(undefined); }}
+          className="flex-shrink-0 flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-lg border border-amber-300 text-amber-700 hover:bg-amber-100 transition-colors"
+        >
+          <KeyRound size={11} /> 更换
+        </button>
+      </div>
+    );
     if (verifyStatus === "failed") return (
       <div className="flex items-center justify-between gap-2 px-2.5 py-2.5 rounded-lg bg-red-50 border border-red-200">
         <div className="flex items-center gap-2">
           <AlertCircle size={14} className="text-red-500 flex-shrink-0" />
           <div>
-            <p className="text-[11px] font-semibold text-red-700">Key 验证失败</p>
-            <p className="text-[10px] text-red-600/80 mt-0.5">{verifyMsg ?? "Key 无效或无法连接服务商，请重新配置"}</p>
+            <p className="text-[11px] font-semibold text-red-700">Key 无效或已过期</p>
+            <p className="text-[10px] text-red-600/80 mt-0.5">{verifyMsg ?? "Key 无效，请重新获取"}</p>
           </div>
         </div>
         <button
@@ -288,9 +320,14 @@ export function ProviderRow({ p, isConfigured: configured, onConfigure, onMarkCo
           {result?.ok && verifyStatus === "relay" && (
             <p className="text-[11px] text-amber-600">✓ Key 已写入（中转模式，需配合 OpenRouter 使用）</p>
           )}
+          {result?.ok && verifyStatus === "unreachable" && (
+            <p className="text-[11px] text-amber-600">
+              ⚠ Key 已成功写入 · {verifyMsg ?? "暂时无法连接到服务商验证"} · 不影响正常使用
+            </p>
+          )}
           {result?.ok && verifyStatus === "failed" && (
             <p className="text-[11px] text-red-500">
-              ✗ Key 已写入但验证失败：{verifyMsg ?? "无法连接服务商"} · 请检查 Key 是否正确
+              ✗ Key 已写入但验证失败 · {verifyMsg ?? "Key 无效或已过期"} · 请检查 Key 是否正确
             </p>
           )}
         </div>

@@ -6,9 +6,9 @@ use std::process::Command;
 use tauri::Emitter;
 
 #[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+use crate::platform::CREATE_NO_WINDOW;
 #[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+use std::os::windows::process::CommandExt;
 
 // ── pm2 binary location ──────────────────────────────────────────────────────
 
@@ -145,8 +145,22 @@ pub fn cleanup_pm2_openclaw(fixes: &mut Vec<String>) {
 }
 
 /// Returns `(success, error_detail)`.
-pub fn pm2_start_with_retry(wrapper_path: &str, fixes: &mut Vec<String>) -> (bool, String) {
-    let (ok, stdout, stderr) = run_pm2(&["start", wrapper_path, "--name", "openclaw"]);
+///
+/// When `interpreter` is `Some(path)`, pm2 is told to use that binary to run the
+/// script (via `--interpreter`).  This ensures pm2's auto-restart mechanism uses
+/// the same Node binary, even if the pm2 daemon was originally spawned with a
+/// different version.
+pub fn pm2_start_with_retry(
+    wrapper_path: &str,
+    interpreter: Option<&str>,
+    fixes: &mut Vec<String>,
+) -> (bool, String) {
+    let mut args: Vec<&str> = vec!["start", wrapper_path, "--name", "openclaw"];
+    if let Some(interp) = interpreter {
+        args.push("--interpreter");
+        args.push(interp);
+    }
+    let (ok, stdout, stderr) = run_pm2(&args);
     if ok {
         return (true, String::new());
     }
@@ -157,7 +171,7 @@ pub fn pm2_start_with_retry(wrapper_path: &str, fixes: &mut Vec<String>) -> (boo
     run_pm2(&["kill"]);
     // 3.5 s gives slow-disk machines enough time for the daemon to fully shut down.
     std::thread::sleep(std::time::Duration::from_millis(3500));
-    let (ok2, stdout2, stderr2) = run_pm2(&["start", wrapper_path, "--name", "openclaw"]);
+    let (ok2, stdout2, stderr2) = run_pm2(&args);
     if ok2 {
         return (true, String::new());
     }
@@ -171,20 +185,7 @@ pub fn pm2_start_with_retry(wrapper_path: &str, fixes: &mut Vec<String>) -> (boo
     (false, first_line(&msg).to_string())
 }
 
-fn clean_pm2_version(raw: &str) -> String {
-    raw.lines()
-        .find(|l| {
-            let t = l.trim();
-            !t.is_empty()
-                && t.chars()
-                    .next()
-                    .map(|c| c.is_ascii_digit())
-                    .unwrap_or(false)
-        })
-        .unwrap_or("")
-        .trim()
-        .to_string()
-}
+use clawno_core::version_parse::clean_pm2_version;
 
 // ── Synchronous exit hook ────────────────────────────────────────────────────
 
@@ -197,10 +198,24 @@ pub fn stop_openclaw_on_exit() {
 // ── Tauri commands ───────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn deploy_step_install_pm2() -> StepResult {
+pub async fn deploy_step_install_pm2(app: tauri::AppHandle) -> StepResult {
+    use clawno_core::types::{StepPhase, StepProgress, TrustLevel};
+
+    let emit_progress = |phase: StepPhase, msg: &str| {
+        let mut p = StepProgress::new("install-pm2", "npm", 0, 1);
+        p.phase = phase;
+        p.message = msg.to_string();
+        p.source_url = Some("https://www.npmjs.com/package/pm2".into());
+        p.source_trust = Some(TrustLevel::Official);
+        let _ = app.emit("deploy-step-progress", &p);
+    };
+
+    emit_progress(StepPhase::Probing, "checking pm2...");
+
     let (_, raw, _) = run_pm2(&["--version"]);
     let ver = clean_pm2_version(&raw);
     if !ver.is_empty() {
+        emit_progress(StepPhase::Done, &format!("pm2 v{} already installed", ver));
         return StepResult::ok(format!("already-installed:v{}", ver));
     }
 
@@ -214,6 +229,8 @@ pub async fn deploy_step_install_pm2() -> StepResult {
             );
         }
     }
+
+    emit_progress(StepPhase::Installing, "installing pm2 via npm...");
 
     let (ok, _detail, mut fixes) = npm_install_with_fallback("pm2");
     if !ok {
@@ -317,13 +334,7 @@ pub async fn stop_local_service() {
 
 #[tauri::command]
 pub async fn restart_local_service(app: tauri::AppHandle) {
-    // Reset active model to default priority BEFORE restarting so the gateway
-    // picks up the correct config on startup. Any session-level model override
-    // the user set in chat is intentionally cleared here.
-    let mut fixes = Vec::new();
-    crate::deploy::auto_select_active_model(&mut fixes);
     run_pm2(&["restart", "openclaw"]);
-    // Notify the frontend so any manual model override in the chat UI is cleared.
     let _ = app.emit("gateway-restarted", ());
 }
 
@@ -334,19 +345,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn clean_pm2_version_extracts_semver() {
-        let raw = "\n[PM2] Spawning PM2 daemon...\n5.3.1\n";
-        assert_eq!(clean_pm2_version(raw), "5.3.1");
-    }
-
-    #[test]
-    fn clean_pm2_version_empty_on_no_match() {
-        assert_eq!(clean_pm2_version("[PM2] error"), "");
-    }
-
-    #[test]
     fn find_pm2_cmd_returns_string_or_none() {
-        // Just verify it doesn't panic; actual result depends on the environment.
         let _result = find_pm2_cmd();
     }
 }

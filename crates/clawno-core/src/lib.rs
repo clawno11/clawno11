@@ -6,6 +6,7 @@ pub mod sentinel;
 pub mod ssh;
 pub mod token_log;
 pub mod types;
+pub mod version_parse;
 #[cfg(feature = "ws-chat")]
 pub mod ws_chat;
 

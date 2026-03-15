@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { StepProgress, StepState, DownloadProgress } from "./types";
+import { phaseAwarePct } from "./types";
 
 /**
  * Listens to both the legacy `deploy-download-progress` and new
@@ -78,6 +79,8 @@ export function useStepProgress(
       is_retrying: boolean;
       error_sig?: string;
       remedy?: string;
+      source_url?: string;
+      source_trust?: string;
     }>("deploy-step-progress", (evt) => {
       const p = evt.payload;
       const sp: StepProgress = {
@@ -95,6 +98,8 @@ export function useStepProgress(
         isRetrying: p.is_retrying,
         ...(p.error_sig != null ? { errorSig: p.error_sig } : {}),
         ...(p.remedy != null ? { remedy: p.remedy } : {}),
+        ...(p.source_url != null ? { sourceUrl: p.source_url } : {}),
+        ...(p.source_trust != null ? { sourceTrust: p.source_trust as import("./types").TrustLevel } : {}),
       };
       setSteps((prev) =>
         prev.map((s, i) =>
@@ -103,6 +108,7 @@ export function useStepProgress(
             : s,
         ),
       );
+
     });
     return () => {
       unlisten.then((fn) => fn());
@@ -110,31 +116,27 @@ export function useStepProgress(
   }, [activeIdx, setSteps]);
 }
 
-/** Compute overall progress percentage from steps array. */
+/** Compute overall progress percentage from steps array (phase-aware). */
 export function computeOverallPct(
   steps: StepState[],
   activeIdx: number,
 ): number {
   if (steps.length === 0) return 0;
-  const totalEst = steps.reduce((s, d) => s + d.estimatedSec, 0);
-  if (totalEst === 0) return 0;
+  const n = steps.length;
+  if (n === 0) return 0;
 
-  const doneSec = steps
-    .filter((s) => s.status === "done" || s.status === "error")
-    .reduce((s, d) => s + d.elapsedSec, 0);
+  let completedWeight = 0;
+  let activeWeight = 0;
 
-  const activeStep = steps[activeIdx];
-  let activeContrib = activeStep?.elapsedSec ?? 0;
-
-  // Use real progress if available
-  if (activeStep?.progress && activeStep.progress.pct > 0) {
-    activeContrib = (activeStep.progress.pct / 100) * activeStep.estimatedSec;
-  } else if (activeStep?.downloadProgress?.bytesTotal) {
-    activeContrib =
-      (activeStep.downloadProgress.bytesDownloaded /
-        activeStep.downloadProgress.bytesTotal) *
-      activeStep.estimatedSec;
+  for (let i = 0; i < n; i++) {
+    const s = steps[i]!;
+    if (s.status === "done" || s.status === "error") {
+      completedWeight += 1;
+    } else if (i === activeIdx && s.status === "running") {
+      const stepPct = phaseAwarePct(s.progress, s.elapsedSec, s.estimatedSec);
+      activeWeight = stepPct / 100;
+    }
   }
 
-  return Math.min(99, ((doneSec + activeContrib) / totalEst) * 100);
+  return Math.min(99, ((completedWeight + activeWeight) / n) * 100);
 }

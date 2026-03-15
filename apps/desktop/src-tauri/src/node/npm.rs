@@ -19,10 +19,6 @@ pub struct DeployDownloadProgress {
     pub speed_bps: f64,
 }
 
-fn likely_chinese_locale() -> bool {
-    crate::platform::detect_chinese_locale()
-}
-
 /// Build an `npm install -g` command with timeout flags and optional registry override.
 fn npm_install_cmd(pkg: &str, registry: Option<&str>) -> String {
     match registry {
@@ -77,7 +73,7 @@ pub fn classify_npm_error(stderr: &str, stdout: &str) -> NpmError {
 
 pub fn npm_install_with_fallback(pkg: &str) -> (bool, String, Vec<String>) {
     let mut fixes: Vec<String> = Vec::new();
-    let cn = likely_chinese_locale();
+    let cn = crate::platform::detect_chinese_locale();
 
     // Determine attempt order: Chinese locale → npmmirror first, then official.
     // Other locales → official first, then npmmirror as fallback.
@@ -200,7 +196,7 @@ fn npm_install_user_prefix(pkg: &str, mut fixes: Vec<String>) -> (bool, String, 
     };
     fixes.push(format!("user-prefix-install:{}", prefix_bin));
     let _ = std::fs::create_dir_all(&prefix_bin);
-    let registry_flag = if likely_chinese_locale() {
+    let registry_flag = if crate::platform::detect_chinese_locale() {
         format!(" --registry {NPMMIRROR}")
     } else {
         String::new()
@@ -291,8 +287,8 @@ pub async fn download_and_install_npm_package(
     use tauri::Emitter;
 
     let mut fixes: Vec<String> = Vec::new();
-    let cn = likely_chinese_locale();
-    let stall_timeout = std::time::Duration::from_secs(30);
+    let cn = crate::platform::detect_chinese_locale();
+    let stall_timeout = std::time::Duration::from_secs(600);
 
     let emit_both =
         |app: &tauri::AppHandle, phase: &str, downloaded: u64, total: u64, speed: f64| {

@@ -62,6 +62,40 @@ export interface LanInfo {
   subnet: string;
 }
 
+// ── Deploy environment scan ──────────────────────────────────────────────────
+
+export interface EnvironmentReport {
+  os: string;
+  os_version: string;
+  arch: string;
+  total_memory_mb: number;
+  free_disk_mb: number;
+  is_admin: boolean;
+  is_chinese_locale: boolean;
+  http_proxy: string | null;
+  package_managers: Array<{ name: string; available: boolean; version: string | null }>;
+  dependencies: Array<{
+    id: string;
+    display_name: string;
+    required_version: string;
+    current_version: string | null;
+    status: "satisfied" | "needs-upgrade" | "not-installed";
+    sources: Array<{
+      url: string;
+      label: string;
+      trust_level: "official" | "official-mirror" | "community";
+      expected_sha256: string | null;
+      is_primary: boolean;
+    }>;
+    strategies: string[];
+    size_estimate_mb: number;
+    is_optional: boolean;
+  }>;
+}
+
+export const scanEnvironment           = ()                   => invoke<EnvironmentReport>("scan_environment");
+export const installSingleDep          = (depId: string)      => invoke<StepResult>("install_single_dep", { depId });
+
 // ── Deploy status & update ───────────────────────────────────────────────────
 
 export interface DeployStatus {
@@ -98,6 +132,7 @@ export const resizeChatWebview      = (x: number, y: number, width: number, heig
 export const probeInstanceHealth    = (port: number)             => invoke<ProbeResult>("probe_instance_health", { port });
 export const getMainAgentModel      = (port: number)             => invoke<string | null>("get_main_agent_model", { port });
 export const configureApiKey        = (provider: string, apiKey: string) => invoke<StepResult>("configure_api_key", { provider, apiKey });
+export const diagnoseAuth           = ()                               => invoke<Record<string, unknown>>("diagnose_auth");
 export const fixModelConfig         = ()                               => invoke<string>("fix_model_config");
 export const repairModelConfig      = (port: number)                    => invoke<StepResult>("repair_model_config", { port });
 

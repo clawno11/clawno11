@@ -80,10 +80,24 @@ pub async fn list_configured_providers() -> Vec<String> {
                 if let Some(profiles) = doc.get("profiles").and_then(|p| p.as_object()) {
                     for (_key, val) in profiles {
                         if let Some(p) = val.get("provider").and_then(|v| v.as_str()) {
-                            if let Some(tok) = val.get("token").and_then(|v| v.as_str()) {
-                                if !tok.is_empty() {
-                                    providers.insert(p.to_string());
-                                }
+                            let has_auth = !val
+                                .get("key")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("")
+                                .is_empty()
+                                || !val
+                                    .get("apiKey")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .is_empty()
+                                || !val
+                                    .get("token")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("")
+                                    .is_empty();
+
+                            if has_auth {
+                                providers.insert(p.to_string());
                             }
                         }
                     }

@@ -117,7 +117,9 @@
       "running": "Running",
       "ok": "Done",
       "failed": "Failed"
-    }
+    },
+    "advancedMode": "Advanced",
+    "simpleMode": "Simple"
   },
   "chat": {
     "title": "AI Chat",

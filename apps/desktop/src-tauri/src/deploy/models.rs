@@ -1,20 +1,12 @@
 /// Model routing and auto-selection for OpenClaw deployment.
 ///
-/// All model selection is **dynamic** — we query OpenClaw's own configuration
-/// via `openclaw models status --json` to discover available models and
-/// providers.  No hardcoded model-name mappings are maintained here because:
-///
-///   1. OpenClaw manages its own model registry (names change across versions)
-///   2. Hardcoded tables go stale and cause "Unknown model" errors
-///   3. OpenClaw's agent can switch models via natural language instructions
-///
-/// ClawNo.11's role is limited to:
-///   - Initial setup: pick a non-Ollama model from the configured list
-///   - Repair: detect broken models and switch to a working alternative
+/// Model names come from OpenClaw's own catalog (`openclaw models list --all`),
+/// never from hardcoded tables.  ClawNo.11's role is limited to:
+///   - Initial setup: pick a working model after first deployment
+///   - Repair: detect broken/unknown models and switch to a valid alternative
 use crate::types::StepResult;
 
 /// Query OpenClaw for the current model configuration.
-///
 /// Returns (allowed_models, configured_providers, current_default).
 fn query_openclaw_models() -> (Vec<String>, Vec<String>, String) {
     let out = crate::platform::shell_output("openclaw models status --json");
@@ -53,7 +45,33 @@ fn query_openclaw_models() -> (Vec<String>, Vec<String>, String) {
     (allowed, providers, default_model)
 }
 
-/// Reject model names that contain shell metacharacters.
+/// Query the real model catalog for a specific provider.
+/// Runs `openclaw models list --all --provider {provider} --plain`
+/// and returns the list of valid model keys (e.g. ["zai/glm-4.7", "zai/glm-4.5"]).
+fn query_catalog_models(provider: &str) -> Vec<String> {
+    if !is_safe_model_name(provider) {
+        return vec![];
+    }
+    let out = crate::platform::shell_output(&format!(
+        "openclaw models list --all --provider {} --plain",
+        provider
+    ));
+    out.lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty() && is_safe_model_name(l))
+        .collect()
+}
+
+/// Check if a model key actually exists in the catalog.
+fn model_exists_in_catalog(model: &str) -> bool {
+    let provider = model_provider(model);
+    if provider.is_empty() {
+        return false;
+    }
+    let catalog = query_catalog_models(provider);
+    catalog.iter().any(|m| m == model)
+}
+
 fn is_safe_model_name(name: &str) -> bool {
     !name.is_empty()
         && !name.contains(|c: char| {
@@ -68,80 +86,75 @@ fn is_safe_model_name(name: &str) -> bool {
         })
 }
 
-/// Pick the first non-Ollama cloud model from the allowed list.
-fn first_cloud_model(allowed: &[String]) -> Option<&str> {
-    allowed
-        .iter()
-        .map(|s| s.as_str())
-        .find(|m| !m.starts_with("ollama/") && is_safe_model_name(m))
+fn model_provider(model: &str) -> &str {
+    model.split('/').next().unwrap_or("")
+}
+
+fn current_model_is_valid(current: &str, providers: &[String]) -> bool {
+    if current.is_empty() {
+        return false;
+    }
+    if current.starts_with("ollama/") {
+        return true;
+    }
+    let prov = model_provider(current);
+    providers.iter().any(|p| p.as_str() == prov)
+}
+
+/// Pick the first valid catalog model from providers that have auth configured.
+/// This queries the REAL catalog, not the `allowed` list (which may contain bad names).
+fn pick_model_from_catalog(providers: &[String]) -> Option<String> {
+    for provider in providers {
+        if provider == "ollama" {
+            continue;
+        }
+        let catalog = query_catalog_models(provider);
+        if let Some(model) = catalog.first() {
+            return Some(model.clone());
+        }
+    }
+    None
 }
 
 /// Automatically select the best active model based on what OpenClaw
 /// actually has configured.
 ///
-/// Strategy: query `openclaw models status --json` for the allowed model
-/// list, then pick the first non-Ollama cloud model.  If no cloud models
-/// exist, fall back to the first available Ollama model.
-///
-/// Call this:
-///   - After first deployment (`deploy_step_onboard`)
-///   - After every gateway restart (`restart_local_service`)
+/// Called after first deployment (`deploy_step_onboard`) and on startup
+/// (`fix_model_config`).
 pub fn auto_select_active_model(fixes: &mut Vec<String>) {
-    let (allowed, _providers, _current) = query_openclaw_models();
+    let (_allowed, providers, current) = query_openclaw_models();
 
-    if allowed.is_empty() {
-        fixes.push("no-models-configured".to_string());
+    // If current model is valid AND exists in catalog, keep it
+    if current_model_is_valid(&current, &providers) && model_exists_in_catalog(&current) {
+        fixes.push("current-model-valid-keeping".to_string());
         return;
     }
 
-    // Prefer any cloud model over local Ollama
-    if let Some(cloud) = first_cloud_model(&allowed) {
-        let (ok, _) = super::run_silent(&format!("openclaw models set {}", cloud));
-        if ok {
-            fixes.push(format!("cloud-model-active:{}", cloud));
-            let _ = super::run_silent(&format!("openclaw models fallbacks add {}", cloud));
-            return;
-        }
-        fixes.push(format!("cloud-model-set-failed:{}", cloud));
-    }
-
-    // No cloud models or cloud set failed — try the first available model
-    if let Some(fallback) = allowed.iter().find(|m| is_safe_model_name(m)) {
-        let (ok, _) = super::run_silent(&format!("openclaw models set {}", fallback));
-        if ok {
-            fixes.push(format!("fallback-model-active:{}", fallback));
-        }
-    }
-}
-
-/// After a new API key is configured, pick a model for that provider
-/// from OpenClaw's actual allowed list (not from a hardcoded table).
-pub fn select_model_for_provider(provider: &str, fixes: &mut Vec<String>) {
-    let (allowed, _providers, _current) = query_openclaw_models();
-
-    // Find a model whose prefix matches the provider name
-    let candidate = allowed
-        .iter()
-        .find(|m| m.starts_with(&format!("{}/", provider)));
-
-    if let Some(model) = candidate {
+    // Current model is invalid/unknown — pick from real catalog
+    if let Some(model) = pick_model_from_catalog(&providers) {
         let (ok, _) = super::run_silent(&format!("openclaw models set {}", model));
         if ok {
-            fixes.push(format!("model-set:{}", model));
+            fixes.push(format!("cloud-model-active:{}", model));
+            let _ = super::run_silent(&format!("openclaw models fallbacks add {}", model));
+            return;
         }
-        let (fb_ok, _) = super::run_silent(&format!("openclaw models fallbacks add {}", model));
-        if fb_ok {
-            fixes.push(format!("fallback-added:{}", model));
+        fixes.push(format!("cloud-model-set-failed:{}", model));
+    }
+
+    // No cloud models — try Ollama
+    let ollama_catalog = query_catalog_models("ollama");
+    if let Some(ollama) = ollama_catalog.first() {
+        let (ok, _) = super::run_silent(&format!("openclaw models set {}", ollama));
+        if ok {
+            fixes.push(format!("fallback-ollama-active:{}", ollama));
+            return;
         }
+    }
+
+    if providers.is_empty() {
+        fixes.push("no-configured-providers".to_string());
     } else {
-        // Provider might use a different prefix in the model name.
-        // Fall back to picking any cloud model.
-        if let Some(cloud) = first_cloud_model(&allowed) {
-            let (ok, _) = super::run_silent(&format!("openclaw models set {}", cloud));
-            if ok {
-                fixes.push(format!("model-set-fallback:{}", cloud));
-            }
-        }
+        fixes.push("no-catalog-models-found".to_string());
     }
 }
 
@@ -159,27 +172,21 @@ pub fn restore_default_model() -> StepResult {
 
 /// Diagnose and repair a broken model configuration.
 ///
-/// Typical scenario: user tried a local Ollama model that doesn't support
-/// tool calling, or switched to a model name OpenClaw doesn't recognize.
-///
 /// Strategy:
-///   1. Query OpenClaw for the current model and the full allowed list
-///   2. If the current model is Ollama, check tool-calling support
-///   3. If broken, pick an alternative from the allowed list (cloud first)
+///   1. Get current active model from the running agent
+///   2. Validate it exists in the real catalog
+///   3. If broken, pick a valid alternative from the catalog
 ///   4. Remove broken Ollama models from the fallback chain
 #[tauri::command]
 pub async fn repair_model_config(port: u16) -> StepResult {
     let mut fixes: Vec<String> = Vec::new();
 
-    // ── 1. Get current active model from the running agent ──
     let current = crate::gateway::get_main_agent_model(port)
         .await
         .unwrap_or_default();
 
-    // ── 2. Get the full allowed model list from OpenClaw ──
-    let (allowed, _providers, _cfg_default) = query_openclaw_models();
+    let (allowed, providers, _cfg_default) = query_openclaw_models();
 
-    // ── 3. Diagnose the current model ──
     let mut need_switch = false;
 
     if current.is_empty() {
@@ -198,12 +205,18 @@ pub async fn repair_model_config(port: u16) -> StepResult {
             }
             Ok(true) => {}
         }
-    } else if !allowed.contains(&current) && !allowed.is_empty() {
-        fixes.push(format!("detected:model-not-in-allowed-list:{}", current));
+    } else if !model_exists_in_catalog(&current) {
+        fixes.push(format!("detected:unknown-model:{}", current));
+        need_switch = true;
+    } else if !current_model_is_valid(&current, &providers) {
+        fixes.push(format!(
+            "detected:no-auth-for-provider:{}",
+            model_provider(&current)
+        ));
         need_switch = true;
     }
 
-    // ── 4. Scan fallback chain for broken Ollama models ──
+    // Scan fallback chain for broken Ollama models
     for model in &allowed {
         if !model.starts_with("ollama/") {
             continue;
@@ -215,23 +228,26 @@ pub async fn repair_model_config(port: u16) -> StepResult {
         }
     }
 
-    // ── 5. Switch to a working model and restart the gateway ──
     if need_switch {
-        let switched = if let Some(cloud) = first_cloud_model(&allowed) {
-            let (ok, _) = super::run_silent(&format!("openclaw models set {}", cloud));
+        // Pick from real catalog, only providers with auth
+        let switched = if let Some(model) = pick_model_from_catalog(&providers) {
+            let (ok, _) = super::run_silent(&format!("openclaw models set {}", model));
             if ok {
-                fixes.push(format!("switched-to:{}", cloud));
-            }
-            ok
-        } else if let Some(fallback) = allowed.iter().find(|m| is_safe_model_name(m)) {
-            let (ok, _) = super::run_silent(&format!("openclaw models set {}", fallback));
-            if ok {
-                fixes.push(format!("switched-to-only-available:{}", fallback));
+                fixes.push(format!("switched-to:{}", model));
             }
             ok
         } else {
-            fixes.push("no-models-available-to-switch".to_string());
-            false
+            let ollama_catalog = query_catalog_models("ollama");
+            if let Some(ollama) = ollama_catalog.first() {
+                let (ok, _) = super::run_silent(&format!("openclaw models set {}", ollama));
+                if ok {
+                    fixes.push(format!("switched-to-ollama:{}", ollama));
+                }
+                ok
+            } else {
+                fixes.push("no-models-available-to-switch".to_string());
+                false
+            }
         };
 
         if switched {
@@ -252,24 +268,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn first_cloud_model_skips_ollama() {
-        let models = vec![
-            "ollama/gemma3:4b".to_string(),
-            "zhipu/glm-4-flash".to_string(),
-            "openai/gpt-4o".to_string(),
-        ];
-        assert_eq!(first_cloud_model(&models), Some("zhipu/glm-4-flash"));
+    fn model_provider_extracts_prefix() {
+        assert_eq!(model_provider("zai/glm-4.7"), "zai");
+        assert_eq!(model_provider("ollama/gemma3:4b"), "ollama");
+        assert_eq!(model_provider(""), "");
     }
 
     #[test]
-    fn first_cloud_model_returns_none_when_only_ollama() {
-        let models = vec!["ollama/gemma3:4b".to_string()];
-        assert_eq!(first_cloud_model(&models), None);
-    }
-
-    #[test]
-    fn first_cloud_model_empty() {
-        let models: Vec<String> = vec![];
-        assert_eq!(first_cloud_model(&models), None);
+    fn safe_model_name_rejects_shell_chars() {
+        assert!(is_safe_model_name("zai/glm-4.7"));
+        assert!(!is_safe_model_name("foo;bar"));
+        assert!(!is_safe_model_name(""));
     }
 }

@@ -15,9 +15,9 @@ use clawno_core::sentinel::{self, capture::capture_context, SentinelEvent};
 use clawno_core::types::{StepPhase, StepProgress, STEP_PROGRESS_EVENT};
 
 #[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
+use crate::platform::CREATE_NO_WINDOW;
 #[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+use std::os::windows::process::CommandExt;
 
 // ── Health probe ─────────────────────────────────────────────────────────────
 
@@ -114,14 +114,140 @@ fn kill_port_occupant(port: u16) -> bool {
     }
 }
 
-// ── Node.js executable finder ─────────────────────────────────────────────────
-// Delegated to crate::node::find_node_exe() which is shared with chat.rs.
+// ── Node.js executable: pre-flight verification + cache ──────────────────────
+
+/// Persistent cache file for the last-verified Node v22+ binary path.
+fn node_cache_path() -> String {
+    path_join(&crate::platform::app_data_dir(), "node-v22-path.txt")
+}
+
+/// Layer 3 — Try the cached path first; only valid if the binary still exists
+/// and actually reports v22+.
+fn load_cached_node() -> Option<String> {
+    let cache = node_cache_path();
+    let path = std::fs::read_to_string(&cache).ok()?;
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return None;
+    }
+    if !std::path::Path::new(&path).exists() {
+        return None;
+    }
+    if let Ok(o) = std::process::Command::new(&path).arg("--version").output() {
+        let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+        if crate::node::node_major(&ver) >= 22 {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn save_cached_node(path: &str) {
+    let cache = node_cache_path();
+    let _ = std::fs::create_dir_all(
+        std::path::Path::new(&cache)
+            .parent()
+            .unwrap_or(std::path::Path::new(".")),
+    );
+    let _ = std::fs::write(&cache, path);
+}
+
+/// Layer 1 — Pre-flight verification.  Returns an absolute path to a node v22+
+/// binary, trying (in order):
+/// 1. Cached path from a previous successful launch
+/// 2. `find_node_exe()` with version validation
+/// 3. Emergency nvm-which on Unix
+/// 4. Bare fallback `"node"` (last resort — self-healing will catch the crash)
+fn verify_or_recover_node(fixes: &mut Vec<String>) -> String {
+    // Fast path: cached binary from last successful launch
+    if let Some(cached) = load_cached_node() {
+        return cached;
+    }
+
+    // Normal path: scan via find_node_exe()
+    let candidate = crate::node::find_node_exe();
+
+    // Validate that the candidate actually runs and reports v22+
+    if candidate != "node" && candidate != "node.exe" {
+        if let Ok(o) = std::process::Command::new(&candidate)
+            .arg("--version")
+            .output()
+        {
+            let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            if crate::node::node_major(&ver) >= 22 {
+                save_cached_node(&candidate);
+                return candidate;
+            }
+            fixes.push(format!("node-version-mismatch:found={}", ver));
+        } else {
+            fixes.push("node-exe-not-executable".to_string());
+        }
+    }
+
+    // Emergency recovery: ask nvm/shell for the correct binary
+    #[cfg(not(target_os = "windows"))]
+    {
+        let nvm_node = shell_output(
+            &format!(
+                "export NVM_DIR=\"{}\" && . \"{}/nvm.sh\" 2>/dev/null && nvm use 22 >/dev/null 2>&1 && which node 2>/dev/null",
+                crate::node::nvm_dir_path(),
+                crate::node::nvm_dir_path(),
+            )
+        );
+        if !nvm_node.is_empty() && std::path::Path::new(nvm_node.trim()).exists() {
+            let bin = nvm_node.trim().to_string();
+            if let Ok(o) = std::process::Command::new(&bin).arg("--version").output() {
+                let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if crate::node::node_major(&ver) >= 22 {
+                    fixes.push("recovered-via-nvm-which".to_string());
+                    save_cached_node(&bin);
+                    return bin;
+                }
+            }
+        }
+    }
+
+    // On Windows: try refreshing PATH from registry then re-scan
+    #[cfg(target_os = "windows")]
+    {
+        let new_path = shell_output(
+            "powershell -NoProfile -Command \"\
+             $m=[System.Environment]::GetEnvironmentVariable('PATH','Machine'); \
+             $u=[System.Environment]::GetEnvironmentVariable('PATH','User'); \
+             \"$m;$u\"\"",
+        );
+        if !new_path.is_empty() {
+            let current = std::env::var("PATH").unwrap_or_default();
+            std::env::set_var("PATH", format!("{};{}", new_path, current));
+            fixes.push("refreshed-registry-path".to_string());
+            let retry = crate::node::find_node_exe();
+            if retry != "node" && retry != "node.exe" {
+                if let Ok(o) = std::process::Command::new(&retry).arg("--version").output() {
+                    let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    if crate::node::node_major(&ver) >= 22 {
+                        save_cached_node(&retry);
+                        return retry;
+                    }
+                }
+            }
+        }
+    }
+
+    // Fallback: return whatever we have; self-healing Layer 2 will catch the
+    // version mismatch crash and apply the NodeVersionMismatch remedy.
+    fixes.push("node-v22-not-verified-using-fallback".to_string());
+    candidate
+}
 
 // ── CJS wrapper writer ────────────────────────────────────────────────────────
 
-fn write_cjs_wrapper(mjs: &str, port: u16, fixes: &mut Vec<String>) -> Option<String> {
+fn write_cjs_wrapper(
+    mjs: &str,
+    port: u16,
+    node_exe: &str,
+    fixes: &mut Vec<String>,
+) -> Option<String> {
     let mjs_js = mjs.replace('\\', "\\\\").replace('"', "\\\"");
-    let node_exe = crate::node::find_node_exe();
     let node_exe_js = node_exe.replace('\\', "\\\\").replace('"', "\\\"");
     let content = format!(
         concat!(
@@ -214,9 +340,16 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
         }
     };
 
+    emit_progress(StepPhase::Installing, "verifying node v22+", 8.0);
+
+    // Layer 1 — Pre-flight: verify that find_node_exe() returns a genuine v22+
+    // binary BEFORE writing the wrapper.  If it doesn't, attempt emergency
+    // recovery before giving up.
+    let mut node_exe = verify_or_recover_node(&mut fixes);
+
     emit_progress(StepPhase::Installing, "writing gateway wrapper", 10.0);
 
-    let wrapper_path = match write_cjs_wrapper(&mjs, port, &mut fixes) {
+    let mut wrapper_path = match write_cjs_wrapper(&mjs, port, &node_exe, &mut fixes) {
         Some(p) => p,
         None => {
             return StepResult::err_fixed(
@@ -239,10 +372,23 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
 
     emit_progress(StepPhase::Installing, "cleaning up old processes", 20.0);
     cleanup_pm2_openclaw(&mut fixes);
-    run_pm2(&["flush", "openclaw"]);
+
+    // Kill stale pm2 daemon that may be pinned to an old Node version,
+    // then flush logs so old error entries don't confuse diagnosis.
+    run_pm2(&["kill"]);
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    run_pm2(&["flush"]);
 
     emit_progress(StepPhase::Installing, "starting gateway via pm2", 25.0);
-    let (pm2_ok, pm2_err) = pm2_start_with_retry(&wrapper_path, &mut fixes);
+    let interp_for = |exe: &str| -> Option<String> {
+        if exe != "node" && exe != "node.exe" {
+            Some(exe.to_string())
+        } else {
+            None
+        }
+    };
+    let interp = interp_for(&node_exe);
+    let (pm2_ok, pm2_err) = pm2_start_with_retry(&wrapper_path, interp.as_deref(), &mut fixes);
     if !pm2_ok {
         return StepResult::err_fixed(
             format!(
@@ -293,6 +439,44 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
         let diag = crate::deploy::diagnosis::diagnose(&log, "", None);
 
         match diag.category {
+            // Layer 2 — Self-healing: node version mismatch detected in pm2 logs.
+            // Re-scan for a v22+ binary, rewrite the wrapper, kill the stale
+            // daemon, and restart with the correct --interpreter.
+            clawno_core::types::ErrorCategory::NodeVersionMismatch => {
+                sentinel::log_sentinel_event(&SentinelEvent::captured(
+                    "gateway",
+                    &sig,
+                    "node version mismatch — rescanning for v22+",
+                ));
+                emit_progress(
+                    StepPhase::Retrying,
+                    "node version mismatch — rescanning",
+                    30.0,
+                );
+                fixes.push("self-heal-node-version-mismatch".to_string());
+
+                // Invalidate the cached path (it pointed to a wrong version)
+                let _ = std::fs::remove_file(node_cache_path());
+
+                // Re-scan for a v22+ binary and update outer state so
+                // subsequent rounds use the corrected paths.
+                node_exe = verify_or_recover_node(&mut fixes);
+                let new_interp = interp_for(&node_exe);
+
+                if let Some(new_wrapper) = write_cjs_wrapper(&mjs, port, &node_exe, &mut fixes) {
+                    wrapper_path = new_wrapper;
+                    cleanup_pm2_openclaw(&mut fixes);
+                    run_pm2(&["kill"]);
+                    tokio::time::sleep(Duration::from_millis(2000)).await;
+                    run_pm2(&["flush"]);
+                    pm2_start_with_retry(&wrapper_path, new_interp.as_deref(), &mut fixes);
+                    sentinel::log_sentinel_event(&SentinelEvent::applied(
+                        "gateway",
+                        &sig,
+                        "node_version_rescan remedy applied",
+                    ));
+                }
+            }
             clawno_core::types::ErrorCategory::PortInUse => {
                 sentinel::log_sentinel_event(&SentinelEvent::captured(
                     "gateway",
@@ -304,7 +488,8 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
                 kill_port_occupant(port);
                 tokio::time::sleep(Duration::from_millis(500)).await;
                 cleanup_pm2_openclaw(&mut fixes);
-                pm2_start_with_retry(&wrapper_path, &mut fixes);
+                let cur_interp = interp_for(&node_exe);
+                pm2_start_with_retry(&wrapper_path, cur_interp.as_deref(), &mut fixes);
                 sentinel::log_sentinel_event(&SentinelEvent::applied(
                     "gateway",
                     &sig,
@@ -326,7 +511,8 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
                     }
                     shell_output("openclaw onboard --yes");
                     cleanup_pm2_openclaw(&mut fixes);
-                    pm2_start_with_retry(&wrapper_path, &mut fixes);
+                    let cur_interp = interp_for(&node_exe);
+                    pm2_start_with_retry(&wrapper_path, cur_interp.as_deref(), &mut fixes);
                     sentinel::log_sentinel_event(&SentinelEvent::applied(
                         "gateway",
                         &sig,
@@ -334,8 +520,7 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
                     ));
                 }
             }
-            clawno_core::types::ErrorCategory::ProcessCrash
-            | clawno_core::types::ErrorCategory::Unknown => {
+            _ => {
                 sentinel::log_sentinel_event(&SentinelEvent::captured(
                     "gateway",
                     &sig,
@@ -353,20 +538,14 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
                     run_pm2(&["kill"]);
                     tokio::time::sleep(Duration::from_millis(3500)).await;
                     cleanup_pm2_openclaw(&mut fixes);
-                    pm2_start_with_retry(&wrapper_path, &mut fixes);
+                    let cur_interp = interp_for(&node_exe);
+                    pm2_start_with_retry(&wrapper_path, cur_interp.as_deref(), &mut fixes);
                     sentinel::log_sentinel_event(&SentinelEvent::applied(
                         "gateway",
                         &sig,
                         "pm2_restart remedy applied",
                     ));
                 }
-            }
-            _ => {
-                sentinel::log_sentinel_event(&SentinelEvent::captured(
-                    "gateway",
-                    &sig,
-                    &format!("timeout waiting for port {port} (round {round})"),
-                ));
             }
         }
     }
@@ -400,7 +579,7 @@ pub async fn start_local_service(port: Option<u16>, app: tauri::AppHandle) -> St
 /// This works when openclaw is in PATH (Windows, Linux) but often fails on macOS
 /// due to GUI app PATH isolation.  It is used as an OPTIONAL enhancement only.
 fn openclaw_dashboard_url_from_cli() -> Option<String> {
-    let out = crate::platform::shell_cmd("openclaw dashboard --no-open").ok()?;
+    let out = crate::platform::shell_cmd("openclaw dashboard --no-open", false).ok()?;
     let text = String::from_utf8_lossy(&out.stdout);
     for line in text.lines() {
         if let Some(rest) = line.strip_prefix("Dashboard URL:") {

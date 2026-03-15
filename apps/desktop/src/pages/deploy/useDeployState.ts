@@ -7,6 +7,7 @@ import {
   deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
   deployRemoteOnboard, deployRemoteStartGateway,
   ollamaEnsureInstalled,
+  scanEnvironment, installSingleDep,
   type StepResult,
 } from "../../ipc";
 import { useInstanceStore, type ClawInstance } from "../../store/instances";
@@ -16,20 +17,42 @@ import { translateDetail } from "./translations";
 import type {
   DeployMode, DeployAction, StepDef, StepState,
   VerifyStatus, DeployStatus, FinalResult,
+  TrustLevel, DependencyInfo,
 } from "./types";
-import { STEP_DEFS_BY_ACTION, REMOTE_STEP_DEFS } from "./types";
+import {
+  STEP_DEFS_BY_ACTION, REMOTE_STEP_DEFS,
+  DEP_INSTALL_ORDER, DEP_LABELS, DEP_ESTIMATED_SEC, DEP_HINTS,
+} from "./types";
 import { useStepProgress, computeOverallPct } from "./useStepProgress";
 import { useSshForm } from "./useSshForm";
 import { useAiSetup } from "./useAiSetup";
+import i18n from "../../i18n";
 
-const STEP_FNS_BY_ACTION: Record<DeployAction, Array<(port?: number) => Promise<StepResult>>> = {
-  full: [
-    () => deployCheckNode(),
-    () => updateOpenclaw(),
-    () => deployInstallPm2(),
-    () => deployOnboard(),
-    (port) => deployStart(port),
-  ],
+const L = (zh: string, en: string) => (i18n.language === "en" ? en : zh);
+
+// ── Persistent step result cache ──────────────────────────────────────────────
+
+const STEP_CACHE_KEY = "deploy-step-results";
+
+interface CachedStepResult {
+  ok: boolean;
+  detail: string;
+  completedAt: number;
+}
+
+function loadStepCache(): Record<string, CachedStepResult> {
+  try {
+    return JSON.parse(localStorage.getItem(STEP_CACHE_KEY) || "{}");
+  } catch { return {}; }
+}
+
+function saveStepToCache(depId: string, result: StepResult) {
+  const cache = loadStepCache();
+  cache[depId] = { ok: result.ok, detail: result.detail, completedAt: Date.now() };
+  localStorage.setItem(STEP_CACHE_KEY, JSON.stringify(cache));
+}
+
+const STEP_FNS_BY_ACTION: Record<Exclude<DeployAction, "full">, Array<(port?: number) => Promise<StepResult>>> = {
   update: [
     () => updateOpenclaw(),
     () => deployOnboard(),
@@ -113,17 +136,10 @@ export function useDeployState() {
     setFailedStepIdx(-1);
     if (startFrom === 0) autoRetryCountRef.current = {};
 
-    if (startFrom === 0) {
-      setSteps(stepDefs.map((d) => ({
-        ...d, status: "pending" as const, elapsedSec: 0, fixes_applied: [],
-      })));
-    } else {
-      setSteps((prev) => prev.map((s, i) => {
-        if (i < startFrom) return s;
-        const { detail: _, ...rest } = s;
-        return { ...rest, status: "pending" as const, elapsedSec: 0, fixes_applied: [] };
-      }));
-    }
+    setSteps(stepDefs.map((d, i) => {
+      if (i < startFrom && (d as StepState).status === "done") return d as StepState;
+      return { ...d, status: "pending" as const, elapsedSec: 0, fixes_applied: [] };
+    }));
     setFinalResult(null);
     setIsDeploying(true);
 
@@ -142,6 +158,8 @@ export function useDeployState() {
 
         if (res.ok) {
           updateStep(i, { status: "done", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
+          const depId = stepsRef.current[i]?.depId;
+          if (depId) saveStepToCache(depId, res);
           onStepSuccess(i, res);
         } else {
           // Backend now handles retries via strategy chain — only retry once
@@ -156,6 +174,8 @@ export function useDeployState() {
             const res2 = await stepFns[i]!();
             if (res2.ok) {
               updateStep(i, { status: "done", detail: res2.detail, fixes_applied: [...(res.fixes_applied ?? []), "auto-retry-success", ...(res2.fixes_applied ?? [])] });
+              const depId = stepsRef.current[i]?.depId;
+              if (depId) saveStepToCache(depId, res2);
               onStepSuccess(i, res2);
               continue;
             }
@@ -186,18 +206,194 @@ export function useDeployState() {
     setIsDeploying(false);
   };
 
-  // Local deploy
+  // Build dynamic steps from environment scan
+  const buildDynamicSteps = (depMap: Map<string, DependencyInfo>): StepState[] => {
+    const depSteps: StepState[] = DEP_INSTALL_ORDER.map((depId) => {
+      const info = depMap.get(depId);
+      const labels = DEP_LABELS[depId] ?? { zh: depId, en: depId };
+      const label = i18n.language === "en" ? labels.en : labels.zh;
+      const primary = info?.sources.find((s) => s.isPrimary) ?? info?.sources[0];
+      const installed = info?.status === "satisfied";
+      const hintEntry = DEP_HINTS[depId];
+      const hint = hintEntry && !installed ? (i18n.language === "en" ? hintEntry.en : hintEntry.zh) : undefined;
+      return {
+        label,
+        estimatedSec: installed ? 0 : (DEP_ESTIMATED_SEC[depId] ?? 30),
+        status: "pending" as const,
+        elapsedSec: 0,
+        fixes_applied: [],
+        depId,
+        ...(hint != null ? { hint } : {}),
+        ...(primary?.label != null ? { sourceLabel: primary.label } : {}),
+        ...(primary?.url != null ? { sourceUrl: primary.url } : {}),
+        ...(primary?.trustLevel != null ? { trustLevel: primary.trustLevel } : {}),
+        ...(info?.currentVersion != null ? { currentVersion: info.currentVersion } : {}),
+        preInstalled: installed,
+      };
+    });
+
+    const fixedSteps: StepState[] = [
+      {
+        label: t("deploy.steps.onboard"),
+        estimatedSec: 5,
+        status: "pending" as const,
+        elapsedSec: 0,
+        fixes_applied: [],
+        depId: "__onboard",
+      },
+      {
+        label: t("deploy.steps.start"),
+        estimatedSec: 5,
+        status: "pending" as const,
+        elapsedSec: 0,
+        fixes_applied: [],
+        depId: "__start",
+      },
+    ];
+
+    return [...depSteps, ...fixedSteps];
+  };
+
+  // Scanning state exposed to DeployPage
+  const [isScanning, setIsScanning] = useState(false);
+
+  // Local deploy — full: scan-driven dynamic pipeline
   const handleLocalDeploy = async (action: DeployAction = "full") => {
     const port = 18789;
-    const stepDefs: StepDef[] = STEP_DEFS_BY_ACTION[action].map((k) => ({
-      label: t(k.labelKey), estimatedSec: k.estimatedSec,
-    }));
-    const boundStepFns = STEP_FNS_BY_ACTION[action].map((fn) => () => fn(port));
-    const LAST = boundStepFns.length - 1;
+
+    if (action !== "full") {
+      const stepDefs: StepDef[] = STEP_DEFS_BY_ACTION[action].map((k) => ({
+        label: t(k.labelKey), estimatedSec: k.estimatedSec,
+      }));
+      const boundStepFns = STEP_FNS_BY_ACTION[action].map((fn) => () => fn(port));
+      const LAST = boundStepFns.length - 1;
+
+      await runDeployPipeline(
+        stepDefs,
+        boundStepFns,
+        (i) => {
+          if (i === LAST) {
+            const inst: ClawInstance = {
+              id: "local-default", name: "本机 OpenClaw", kind: "local",
+              gatewayUrl: `ws://localhost:${port}`, uiUrl: `http://localhost:${port + 2}`,
+              httpUrl: `http://localhost:${port}`, port, deployedAt: Date.now(), health: "online",
+            };
+            addOrUpdate(inst);
+            setFinalResult({ success: true, serviceStarted: true, message: t("deploy.success"), inst });
+          }
+        },
+        (_, result) => {
+          const detail = typeof result === "string" ? result : result.detail;
+          setFinalResult({ success: false, serviceStarted: false, message: detail });
+        },
+      );
+      return;
+    }
+
+    // ── Full deploy: environment scan → dynamic pipeline ──
+    setIsScanning(true);
+    setIsDeploying(true);
+    setFinalResult(null);
+
+    let depMap: Map<string, DependencyInfo>;
+    try {
+      const raw = await scanEnvironment();
+      const deps = raw.dependencies.map((d): DependencyInfo => ({
+        id: d.id,
+        displayName: d.display_name,
+        requiredVersion: d.required_version,
+        ...(d.current_version != null ? { currentVersion: d.current_version } : {}),
+        status: d.status,
+        sources: d.sources.map((s) => ({
+          url: s.url,
+          label: s.label,
+          trustLevel: s.trust_level as TrustLevel,
+          ...(s.expected_sha256 != null ? { expectedSha256: s.expected_sha256 } : {}),
+          isPrimary: s.is_primary,
+        })),
+        strategies: d.strategies,
+        sizeEstimateMb: d.size_estimate_mb,
+        isOptional: d.is_optional,
+      }));
+      depMap = new Map(deps.map((d) => [d.id, d]));
+    } catch (e) {
+      setIsScanning(false);
+      setIsDeploying(false);
+      setFinalResult({
+        success: false, serviceStarted: false,
+        message: L("环境扫描失败: ", "Environment scan failed: ") + String(e),
+      });
+      return;
+    }
+    setIsScanning(false);
+
+    const dynamicSteps = buildDynamicSteps(depMap);
+    const cache = loadStepCache();
+
+    // Mark steps that are already satisfied (from scan) as immediately done
+    // and find the first step that needs work
+    let startFrom = 0;
+    for (let i = 0; i < dynamicSteps.length; i++) {
+      const step = dynamicSteps[i]!;
+      const depId = step.depId;
+      if (!depId) continue;
+
+      if (step.preInstalled) {
+        // Environment scan confirmed: already installed
+        dynamicSteps[i] = {
+          ...step,
+          status: "done" as const,
+          detail: step.currentVersion
+            ? `v${step.currentVersion} ${L("已安装", "installed")}`
+            : L("已安装", "installed"),
+        };
+        startFrom = i + 1;
+      } else if (cache[depId]?.ok) {
+        // Previous deploy cached a successful result, and scan now says satisfied
+        const info = depMap.get(depId);
+        if (info?.status === "satisfied") {
+          dynamicSteps[i] = {
+            ...step,
+            status: "done" as const,
+            preInstalled: true,
+            detail: info.currentVersion
+              ? `v${info.currentVersion} ${L("已安装", "installed")}`
+              : cache[depId].detail,
+            ...(info.currentVersion != null ? { currentVersion: info.currentVersion } : {}),
+          };
+          startFrom = i + 1;
+        }
+      }
+    }
+
+    const stepFns: Array<() => Promise<StepResult>> = dynamicSteps.map((step) => {
+      if (step.status === "done") {
+        return async () => ({
+          ok: true,
+          detail: step.detail ?? L("已安装", "installed"),
+          fixes_applied: [],
+        });
+      }
+      switch (step.depId) {
+        case "nodejs": return () => deployCheckNode();
+        case "npm":    return async () => ({ ok: true, detail: L("npm 随 Node.js 安装", "npm bundled with Node.js"), fixes_applied: [] as string[] });
+        case "git":    return async () => {
+          await new Promise((r) => setTimeout(r, 1500));
+          return installSingleDep("git");
+        };
+        case "openclaw": return () => updateOpenclaw();
+        case "pm2":    return () => deployInstallPm2();
+        case "__onboard": return () => deployOnboard();
+        case "__start": return () => deployStart(port);
+        default: return async () => ({ ok: true, detail: "", fixes_applied: [] as string[] });
+      }
+    });
+
+    const LAST = stepFns.length - 1;
 
     await runDeployPipeline(
-      stepDefs,
-      boundStepFns,
+      dynamicSteps,
+      stepFns,
       (i) => {
         if (i === LAST - 1) {
           addOrUpdate({
@@ -222,18 +418,15 @@ export function useDeployState() {
       },
       (i, result) => {
         const detail = typeof result === "string" ? result : result.detail;
-        if (i === LAST) {
-          const inst: ClawInstance = {
-            id: "local-default", name: "本机 OpenClaw", kind: "local",
-            gatewayUrl: `ws://localhost:${port}`, uiUrl: `http://localhost:${port + 2}`,
-            httpUrl: `http://localhost:${port}`, port, deployedAt: Date.now(), health: "offline",
-          };
-          addOrUpdate(inst);
-          setFinalResult({ success: true, serviceStarted: false, message: detail, inst });
-        } else {
-          setFinalResult({ success: false, serviceStarted: false, message: detail });
-        }
+        const inst: ClawInstance = {
+          id: "local-default", name: "本机 OpenClaw", kind: "local",
+          gatewayUrl: `ws://localhost:${port}`, uiUrl: `http://localhost:${port + 2}`,
+          httpUrl: `http://localhost:${port}`, port, deployedAt: Date.now(), health: "offline",
+        };
+        addOrUpdate(inst);
+        setFinalResult({ success: false, serviceStarted: false, message: detail, inst });
       },
+      startFrom,
     );
   };
 
@@ -286,6 +479,158 @@ export function useDeployState() {
     else handleRemoteDeploy();
   };
 
+  // Ref to store step functions for manual execution
+  const manualStepFnsRef = useRef<Array<() => Promise<StepResult>>>([]);
+
+  // Prepare steps for advanced mode — scan environment, build step list, don't auto-execute
+  const prepareSteps = async () => {
+    const port = 18789;
+    setIsScanning(true);
+    setFinalResult(null);
+
+    let depMap: Map<string, DependencyInfo>;
+    try {
+      const raw = await scanEnvironment();
+      const deps = raw.dependencies.map((d): DependencyInfo => ({
+        id: d.id,
+        displayName: d.display_name,
+        requiredVersion: d.required_version,
+        ...(d.current_version != null ? { currentVersion: d.current_version } : {}),
+        status: d.status,
+        sources: d.sources.map((s) => ({
+          url: s.url,
+          label: s.label,
+          trustLevel: s.trust_level as TrustLevel,
+          ...(s.expected_sha256 != null ? { expectedSha256: s.expected_sha256 } : {}),
+          isPrimary: s.is_primary,
+        })),
+        strategies: d.strategies,
+        sizeEstimateMb: d.size_estimate_mb,
+        isOptional: d.is_optional,
+      }));
+      depMap = new Map(deps.map((d) => [d.id, d]));
+    } catch (e) {
+      setIsScanning(false);
+      setFinalResult({
+        success: false, serviceStarted: false,
+        message: L("环境扫描失败: ", "Environment scan failed: ") + String(e),
+      });
+      return;
+    }
+    setIsScanning(false);
+
+    const dynamicSteps = buildDynamicSteps(depMap);
+    const cache = loadStepCache();
+
+    for (let i = 0; i < dynamicSteps.length; i++) {
+      const step = dynamicSteps[i]!;
+      const depId = step.depId;
+      if (!depId) continue;
+
+      if (step.preInstalled) {
+        dynamicSteps[i] = {
+          ...step,
+          status: "done" as const,
+          detail: step.currentVersion
+            ? `v${step.currentVersion} ${L("已安装", "installed")}`
+            : L("已安装", "installed"),
+        };
+      } else if (cache[depId]?.ok) {
+        const info = depMap.get(depId);
+        if (info?.status === "satisfied") {
+          dynamicSteps[i] = {
+            ...step,
+            status: "done" as const,
+            preInstalled: true,
+            detail: info.currentVersion
+              ? `v${info.currentVersion} ${L("已安装", "installed")}`
+              : cache[depId].detail,
+            ...(info.currentVersion != null ? { currentVersion: info.currentVersion } : {}),
+          };
+        }
+      }
+    }
+
+    const fns: Array<() => Promise<StepResult>> = dynamicSteps.map((step) => {
+      if (step.status === "done") {
+        return async () => ({
+          ok: true,
+          detail: step.detail ?? L("已安装", "installed"),
+          fixes_applied: [],
+        });
+      }
+      switch (step.depId) {
+        case "nodejs": return () => deployCheckNode();
+        case "npm":    return async () => ({ ok: true, detail: L("npm 随 Node.js 安装", "npm bundled with Node.js"), fixes_applied: [] as string[] });
+        case "git":    return async () => {
+          await new Promise((r) => setTimeout(r, 1500));
+          return installSingleDep("git");
+        };
+        case "openclaw": return () => updateOpenclaw();
+        case "pm2":    return () => deployInstallPm2();
+        case "__onboard": return () => deployOnboard();
+        case "__start": return () => deployStart(port);
+        default: return async () => ({ ok: true, detail: "", fixes_applied: [] as string[] });
+      }
+    });
+
+    manualStepFnsRef.current = fns;
+    setSteps(dynamicSteps);
+  };
+
+  // Execute a single step in advanced mode
+  const executeStep = async (index: number) => {
+    const fn = manualStepFnsRef.current[index];
+    if (!fn) return;
+    const step = stepsRef.current[index];
+    if (!step || step.status === "done") return;
+
+    const port = 18789;
+    const totalSteps = manualStepFnsRef.current.length;
+
+    setActiveIdx(index);
+    setIsDeploying(true);
+    updateStep(index, { status: "running", elapsedSec: 0, fixes_applied: [] });
+
+    try {
+      const res = await fn();
+      if (res.ok) {
+        updateStep(index, { status: "done", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
+        const depId = step.depId;
+        if (depId) saveStepToCache(depId, res);
+
+        if (index === totalSteps - 2) {
+          addOrUpdate({
+            id: "local-default", name: "本机 OpenClaw", kind: "local",
+            gatewayUrl: `ws://127.0.0.1:${port}`, uiUrl: `http://127.0.0.1:${port}`,
+            httpUrl: `http://127.0.0.1:${port}`, port, deployedAt: Date.now(), health: "offline",
+          });
+        }
+        if (index === totalSteps - 1) {
+          const inst: ClawInstance = {
+            id: "local-default", name: "本机 OpenClaw", kind: "local",
+            gatewayUrl: `ws://localhost:${port}`, uiUrl: `http://localhost:${port + 2}`,
+            httpUrl: `http://localhost:${port}`, port, deployedAt: Date.now(), health: "online",
+          };
+          addOrUpdate(inst);
+          setFinalResult({ success: true, serviceStarted: true, message: t("deploy.success"), inst });
+          setOllamaPhase("installing");
+          ollamaEnsureInstalled()
+            .then((r) => setOllamaPhase(r.ok ? "ok" : "fail"))
+            .catch(() => setOllamaPhase("fail"));
+        }
+      } else {
+        updateStep(index, { status: "error", detail: res.detail, fixes_applied: res.fixes_applied ?? [] });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      updateStep(index, { status: "error", detail: msg, fixes_applied: [] });
+    } finally {
+      setActiveIdx(-1);
+      setIsDeploying(false);
+    }
+  };
+
   const reset = () => {
     setSteps([]);
     setFinalResult(null);
@@ -301,9 +646,12 @@ export function useDeployState() {
   };
 
   const retryFromFailed = () => {
-    const ctx = lastPipelineRef.current;
-    if (!ctx || ctx.failedIdx < 0) return;
-    runDeployPipeline(ctx.stepDefs, ctx.stepFns, ctx.onStepSuccess, ctx.onAbort, ctx.failedIdx);
+    // 重新扫描环境后再部署，避免依赖已安装但上次误报失败时仍重复安装
+    if (mode === "local") {
+      handleLocalDeploy("full");
+    } else {
+      handleRemoteDeploy();
+    }
   };
 
   const { markConfigured: markAiConfigured } = useAiConfigStore();
@@ -318,8 +666,10 @@ export function useDeployState() {
       const res = await configureApiKey(ai.selectedProvider, key);
       setAiConfigResult({ ok: res.ok, msg: translateDetail(res.detail) });
       if (res.ok) {
+        // Rust 侧已验证 OpenClaw 识别了该 Key，可以标记为已配置
         ai.setApiKey("");
         await markAiConfigured(ai.selectedProvider);
+        // 进一步前端侧探测 Key 是否直连可用
         setAiVerifyStatus("verifying");
         const v = await verifyProviderKey(ai.selectedProvider, key, DIRECT_PROVIDER_IDS.has(ai.selectedProvider));
         setAiVerifyStatus(v.status);
@@ -354,6 +704,7 @@ export function useDeployState() {
   return {
     mode, setMode,
     steps, isDeploying, finalResult, activeIdx,
+    isScanning,
     ollamaPhase,
     // SSH form — spread for backward compat
     sshHost: ssh.sshHost, setSshHost: ssh.setSshHost,
@@ -373,7 +724,8 @@ export function useDeployState() {
     aiApiKey: ai.apiKey, setAiApiKey: ai.setApiKey,
     isConfiguringAI, aiConfigResult, aiVerifyStatus, setAiVerifyStatus, aiVerifyMsg,
     // Actions
-    handleDeploy, handleTestConnection: ssh.handleTestConnection,
+    handleDeploy, prepareSteps, executeStep,
+    handleTestConnection: ssh.handleTestConnection,
     handleRemoteDeploy, handleConfigureAI, handleOpenDashboard,
     reset, resetAndRecheck, retryFromFailed, failedStepIdx,
     // Progress metrics

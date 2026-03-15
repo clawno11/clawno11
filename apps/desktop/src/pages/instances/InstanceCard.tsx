@@ -153,6 +153,7 @@ export function InstanceCard({
         </div>
       )}
 
+
       {/* Configure AI panel */}
       {showConfigAI && (
         <ConfigureAIPanel
@@ -212,6 +213,7 @@ export function InstanceCard({
         >
           <RefreshCw size={13} />
         </button>
+
 
         {inst.kind === "local" && (
           <>

@@ -17,6 +17,13 @@ pub use npm::{npm_install_with_fallback, DeployDownloadProgress};
 pub use scan::{
     find_node_exe, node_major, scan_node_paths, scan_openclaw_bin_dir, scan_openclaw_mjs,
 };
+pub(crate) use scan::{inject_dir, openclaw_semver};
+
+/// Expose nvm directory path for gateway pre-flight recovery.
+#[cfg(not(target_os = "windows"))]
+pub fn nvm_dir_path() -> String {
+    scan::nvm_dir()
+}
 
 pub use check::*;
 pub use install::*;

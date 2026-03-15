@@ -63,10 +63,14 @@ impl WatchdogResult {
 ///
 /// `on_output` is called for each line of combined output, enabling
 /// real-time progress parsing.
+///
+/// When `allow_window` is true on Windows, the subprocess is NOT created with
+/// CREATE_NO_WINDOW, so UAC and installer GUIs can appear.
 pub async fn run_with_watchdog<F>(
     cmd: &str,
     stall_timeout: Duration,
     on_output: F,
+    allow_window: bool,
 ) -> WatchdogResult
 where
     F: Fn(&str) + Send + Sync + 'static,
@@ -78,7 +82,9 @@ where
     let mut child = {
         let mut c = TokioCommand::new("cmd");
         c.args(["/C", cmd]);
-        c.creation_flags(CREATE_NO_WINDOW);
+        if !allow_window {
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
         c.env("PATH", augmented_path());
         c.stdout(std::process::Stdio::piped());
         c.stderr(std::process::Stdio::piped());
@@ -148,7 +154,14 @@ where
             let last = la_wd.load(Ordering::Relaxed);
             let now = epoch_secs();
             if now.saturating_sub(last) >= wd_stall.as_secs() {
+                // Before declaring "stalled", check if the process has active
+                // child processes (e.g. msiexec.exe during silent install).
+                // Active children = still working, just no stdout output.
                 if let Some(pid) = child_id {
+                    if has_active_children(pid) {
+                        la_wd.store(epoch_secs(), Ordering::Relaxed);
+                        continue;
+                    }
                     killed_wd.store(true, Ordering::Relaxed);
                     kill_process(pid);
                 }
@@ -298,4 +311,43 @@ fn kill_process(pid: u32) {
     let _ = std::process::Command::new("kill")
         .args(["-9", &pid.to_string()])
         .output();
+}
+
+/// Check if a process has active child processes.
+/// Used to distinguish "stalled" from "working silently" (e.g. msiexec.exe).
+#[cfg(target_os = "windows")]
+fn has_active_children(pid: u32) -> bool {
+    let out = std::process::Command::new("wmic")
+        .args([
+            "process",
+            "where",
+            &format!("ParentProcessId={}", pid),
+            "get",
+            "ProcessId",
+        ])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+    match out {
+        Ok(o) => {
+            let text = String::from_utf8_lossy(&o.stdout);
+            // WMIC outputs a header line "ProcessId" then one line per child.
+            // More than 1 non-empty line = has children.
+            text.lines()
+                .filter(|l| l.trim().chars().all(|c| c.is_ascii_digit()) && !l.trim().is_empty())
+                .count()
+                > 0
+        }
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn has_active_children(pid: u32) -> bool {
+    let out = std::process::Command::new("pgrep")
+        .args(["-P", &pid.to_string()])
+        .output();
+    match out {
+        Ok(o) => o.status.success() && !o.stdout.is_empty(),
+        Err(_) => false,
+    }
 }

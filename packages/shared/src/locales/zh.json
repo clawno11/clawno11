@@ -117,7 +117,9 @@
       "running": "运行中",
       "ok": "完成",
       "failed": "失败"
-    }
+    },
+    "advancedMode": "高级模式",
+    "simpleMode": "简单模式"
   },
   "prompts": {
     "toggle": "快捷指令",

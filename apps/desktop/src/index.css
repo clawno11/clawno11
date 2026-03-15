@@ -148,3 +148,9 @@ button:active:not(:disabled) {
   border-radius: 2px 0 0 2px;
   background: hsl(var(--sidebar-active-bg));
 }
+
+/* ── 进度条条纹动画 (安装阶段) ── */
+@keyframes progress-stripes {
+  from { background-position: 1rem 0; }
+  to   { background-position: 0 0; }
+}

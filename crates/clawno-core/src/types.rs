@@ -67,6 +67,10 @@ pub struct StepProgress {
     pub error_sig: Option<String>,
     /// Description of the remedy being applied.
     pub remedy: Option<String>,
+    /// Active download source URL (shown to user during download phase).
+    pub source_url: Option<String>,
+    /// Trust level of the active source.
+    pub source_trust: Option<TrustLevel>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -74,6 +78,7 @@ pub struct StepProgress {
 pub enum StepPhase {
     Probing,
     Downloading,
+    Downloaded,
     Installing,
     Verifying,
     Retrying,
@@ -99,6 +104,8 @@ impl StepProgress {
             is_retrying: false,
             error_sig: None,
             remedy: None,
+            source_url: None,
+            source_trust: None,
         }
     }
 }
@@ -118,7 +125,11 @@ pub enum ErrorCategory {
     PortInUse,
     ConfigCorrupt,
     BinaryNotFound,
+    /// A dependency (typically `git`) needed by npm to resolve git-based packages is missing.
+    GitNotInstalled,
     VersionTooOld,
+    /// Node.js version used by pm2/gateway doesn't meet the minimum requirement.
+    NodeVersionMismatch,
     ProcessStalled,
     ProcessCrash,
     Unknown,
@@ -150,6 +161,10 @@ pub enum Remedy {
     RefreshPath,
     TryNextStrategy,
     DirectDownload,
+    /// Re-scan for a v22+ node binary and rewrite the gateway wrapper.
+    RescanNodeVersion,
+    /// Install Git (required by npm for git-based dependencies).
+    InstallGit,
 }
 
 /// Full diagnosis result produced by the diagnosis engine.
@@ -161,6 +176,78 @@ pub struct Diagnosis {
     pub remedies: Vec<Remedy>,
     pub raw_message: String,
 }
+
+// ── Environment scan types ───────────────────────────────────────────────────
+
+/// Trust level of a download source, used by the UI to show green/blue/yellow badges.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum TrustLevel {
+    /// Official upstream source (e.g. nodejs.org, npmjs.org).
+    Official,
+    /// Officially recognized mirror (e.g. npmmirror.com).
+    OfficialMirror,
+    /// Third-party / community source.
+    Community,
+}
+
+/// Whether a dependency is satisfied, needs upgrade, or is missing.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum DepStatus {
+    Satisfied,
+    NeedsUpgrade,
+    NotInstalled,
+}
+
+/// A download/install source for a dependency.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DepSource {
+    pub url: String,
+    pub label: String,
+    pub trust_level: TrustLevel,
+    pub expected_sha256: Option<String>,
+    pub is_primary: bool,
+}
+
+/// Status and metadata for a single dependency (Node.js, npm, openclaw, pm2, etc.).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct DependencyInfo {
+    pub id: String,
+    pub display_name: String,
+    pub required_version: String,
+    pub current_version: Option<String>,
+    pub status: DepStatus,
+    pub sources: Vec<DepSource>,
+    pub strategies: Vec<String>,
+    pub size_estimate_mb: u32,
+    pub is_optional: bool,
+}
+
+/// Info about a package manager available on the host system.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PackageManagerInfo {
+    pub name: String,
+    pub available: bool,
+    pub version: Option<String>,
+}
+
+/// Full environment report returned by `scan_environment`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EnvironmentReport {
+    pub os: String,
+    pub os_version: String,
+    pub arch: String,
+    pub total_memory_mb: u64,
+    pub free_disk_mb: u64,
+    pub is_admin: bool,
+    pub is_chinese_locale: bool,
+    pub http_proxy: Option<String>,
+    pub package_managers: Vec<PackageManagerInfo>,
+    pub dependencies: Vec<DependencyInfo>,
+}
+
+// ── Deploy step result ───────────────────────────────────────────────────────
 
 /// Unified deploy step result used by both desktop and mobile.
 #[derive(Serialize, Deserialize, Clone)]

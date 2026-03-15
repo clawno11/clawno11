@@ -123,12 +123,14 @@ export function DeployResult(props: DeployResultProps) {
                   : aiVerifyStatus === "ok"
                     ? "已配置（可用）"
                     : aiVerifyStatus === "failed"
-                      ? "配置失败"
-                      : aiVerifyStatus === "relay"
-                        ? "已写入（中转）"
-                        : aiConfigResult?.ok
-                          ? t("instances.ai.configured")
-                          : t("instances.actions.write")}
+                      ? "Key 无效"
+                      : aiVerifyStatus === "unreachable"
+                        ? "已写入（待验证）"
+                        : aiVerifyStatus === "relay"
+                          ? "已写入（中转）"
+                          : aiConfigResult?.ok
+                            ? t("instances.ai.configured")
+                            : t("instances.actions.write")}
             </button>
           </div>
           {aiConfigResult && !aiConfigResult.ok && (
@@ -145,9 +147,14 @@ export function DeployResult(props: DeployResultProps) {
           {aiConfigResult?.ok && aiVerifyStatus === "relay" && (
             <p className="text-xs mt-2 text-amber-600">✓ Key 已写入（中转模式），请确保 OpenRouter 也已配置</p>
           )}
+          {aiConfigResult?.ok && aiVerifyStatus === "unreachable" && (
+            <p className="text-xs mt-2 text-amber-600">
+              ⚠ Key 已成功写入 · {aiVerifyMsg ?? "暂时无法连接到服务商验证"} · 不影响正常使用
+            </p>
+          )}
           {aiConfigResult?.ok && aiVerifyStatus === "failed" && (
             <p className="text-xs mt-2 text-red-500">
-              ✗ Key 已写入但验证失败：{aiVerifyMsg ?? "无法连接服务商"} · 请检查 Key 是否正确
+              ✗ Key 已写入但验证失败 · {aiVerifyMsg ?? "Key 无效或已过期"} · 请检查 Key 是否正确
             </p>
           )}
         </div>

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  ExternalLink, RefreshCw, Loader, AlertCircle, CheckCircle,
+  ExternalLink, RefreshCw, Loader, AlertCircle, CheckCircle, AlertTriangle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { maskApiKey } from "../../utils";
@@ -39,15 +39,18 @@ export function FeaturedCard({ p, isConfigured: configured, onConfigure, onMarkC
     try {
       const res = await onConfigure(p.id, key);
       if (res.ok) {
+        // Rust 侧已验证 OpenClaw 识别了该 Key，可以标记为已配置
         await onMarkConfigured(p.id);
         setResult({ ok: true, msg: maskApiKey(key) });
         setApiKey("");
         setUpdateMode(false);
+        // 进一步前端侧验证 Key 可用性（直连探测）
         setVerifyStatus("verifying");
         const v = await verifyProviderKey(p.id, key, true);
         setVerifyStatus(v.status);
         setVerifyMsg(v.message);
       } else {
+        // Rust 侧写入或验证失败，不标记为已配置
         setResult({ ok: false, msg: res.detail });
       }
     } catch (e) {
@@ -68,9 +71,14 @@ export function FeaturedCard({ p, isConfigured: configured, onConfigure, onMarkC
         <CheckCircle size={8} /> 已配置（可用）
       </span>
     );
+    if (verifyStatus === "unreachable") return (
+      <span className="flex-shrink-0 flex items-center gap-0.5 text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded-full px-1.5 py-0.5">
+        <AlertTriangle size={8} /> 已写入（待验证）
+      </span>
+    );
     if (verifyStatus === "failed") return (
       <span className="flex-shrink-0 flex items-center gap-0.5 text-[9px] font-semibold text-red-700 bg-red-50 border border-red-200 rounded-full px-1.5 py-0.5">
-        <AlertCircle size={8} /> 配置失败
+        <AlertCircle size={8} /> Key 无效
       </span>
     );
     if (configured) return (
@@ -86,6 +94,7 @@ export function FeaturedCard({ p, isConfigured: configured, onConfigure, onMarkC
   };
 
   const borderColor = verifyStatus === "failed" ? "border-red-300 bg-red-50/30"
+    : verifyStatus === "unreachable" ? "border-amber-300 bg-amber-50/30"
     : verifyStatus === "ok" || (configured && verifyStatus === "idle") ? "border-green-300 bg-green-50/40"
     : "border-border bg-background hover:border-primary/40";
 
@@ -112,12 +121,19 @@ export function FeaturedCard({ p, isConfigured: configured, onConfigure, onMarkC
 
       {configured && !updateMode ? (
         <div className="flex items-center justify-between">
-          <div className={`flex items-center gap-1 text-[10px] ${verifyStatus === "failed" ? "text-red-600" : "text-green-600"}`}>
+          <div className={`flex items-center gap-1 text-[10px] ${
+            verifyStatus === "failed" ? "text-red-600"
+            : verifyStatus === "unreachable" ? "text-amber-600"
+            : "text-green-600"
+          }`}>
             {verifyStatus === "failed"
               ? <AlertCircle size={11} className="flex-shrink-0" />
-              : <CheckCircle size={11} className="flex-shrink-0" />}
+              : verifyStatus === "unreachable"
+                ? <AlertTriangle size={11} className="flex-shrink-0" />
+                : <CheckCircle size={11} className="flex-shrink-0" />}
             <span>
-              {verifyStatus === "failed" ? verifyMsg ?? "Key 验证失败，请重新配置"
+              {verifyStatus === "failed" ? verifyMsg ?? "Key 无效或已过期"
+                : verifyStatus === "unreachable" ? "Key 已写入，暂时无法在线验证"
                 : verifyStatus === "ok" ? "Key 验证通过，可直接使用"
                 : "Key 已写入"}
             </span>
@@ -173,9 +189,14 @@ export function FeaturedCard({ p, isConfigured: configured, onConfigure, onMarkC
       {result?.ok && verifyStatus === "ok" && (
         <p className="text-[10px] mt-1.5 text-green-600">✓ {result.msg} · Key 验证通过，配置成功</p>
       )}
+      {result?.ok && verifyStatus === "unreachable" && (
+        <p className="text-[10px] mt-1.5 text-amber-600">
+          ⚠ Key 已成功写入 · {verifyMsg ?? "暂时无法连接到服务商验证"} · 不影响正常使用
+        </p>
+      )}
       {result?.ok && verifyStatus === "failed" && (
         <p className="text-[10px] mt-1.5 text-red-500">
-          ✗ Key 已写入但验证失败：{verifyMsg ?? "无法连接到服务商"} · 请检查 Key 是否正确
+          ✗ Key 已写入但验证失败 · {verifyMsg ?? "Key 无效或已过期"} · 请检查 Key 是否正确
         </p>
       )}
     </div>

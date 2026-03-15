@@ -82,6 +82,24 @@ fn classify(combined: &str, _exit_code: Option<i32>) -> (ErrorCategory, String) 
         return (ErrorCategory::ConfigCorrupt, "config-corrupt".into());
     }
 
+    // Node.js version mismatch — openclaw or other tools require v22+
+    // Patterns: "Node.js v22.12+ is required (current: v20.20.1)"
+    //           "node.js v22+ is required"
+    if (combined.contains("is required") && combined.contains("node"))
+        || (combined.contains("node.js v") && combined.contains("required"))
+        || (combined.contains("current: v") && combined.contains("required"))
+    {
+        return (
+            ErrorCategory::NodeVersionMismatch,
+            "node-version-mismatch".into(),
+        );
+    }
+
+    // Git not installed — npm needs git to resolve git:// dependencies
+    if combined.contains("spawn git") || (combined.contains("enoent") && combined.contains("git")) {
+        return (ErrorCategory::GitNotInstalled, "git-not-installed".into());
+    }
+
     // Binary / command not found
     if combined.contains("not found")
         || combined.contains("not recognized")
@@ -115,9 +133,10 @@ pub fn retry_policy(category: &ErrorCategory) -> RetryPolicy {
         | ErrorCategory::ConfigCorrupt
         | ErrorCategory::BinaryNotFound
         | ErrorCategory::VersionTooOld
+        | ErrorCategory::NodeVersionMismatch
         | ErrorCategory::Unknown => RetryPolicy::AutoRetry,
 
-        ErrorCategory::PermissionDenied => RetryPolicy::UserPrompt,
+        ErrorCategory::PermissionDenied | ErrorCategory::GitNotInstalled => RetryPolicy::UserPrompt,
 
         ErrorCategory::DiskFull => RetryPolicy::Abort,
     }
@@ -152,6 +171,9 @@ fn suggest_remedies(category: &ErrorCategory) -> Vec<Remedy> {
         ErrorCategory::ConfigCorrupt => {
             vec![Remedy::ResetConfig, Remedy::RestartDaemon]
         }
+        ErrorCategory::GitNotInstalled => {
+            vec![Remedy::InstallGit]
+        }
         ErrorCategory::BinaryNotFound => {
             vec![
                 Remedy::RefreshPath,
@@ -161,6 +183,13 @@ fn suggest_remedies(category: &ErrorCategory) -> Vec<Remedy> {
         }
         ErrorCategory::VersionTooOld => {
             vec![Remedy::TryNextStrategy, Remedy::DirectDownload]
+        }
+        ErrorCategory::NodeVersionMismatch => {
+            vec![
+                Remedy::RescanNodeVersion,
+                Remedy::RestartDaemon,
+                Remedy::DirectDownload,
+            ]
         }
         ErrorCategory::ProcessStalled => {
             vec![Remedy::TryNextStrategy]
@@ -251,6 +280,30 @@ mod tests {
         let d = diagnose("config: invalid JSON unexpected token", "", None);
         assert_eq!(d.category, ErrorCategory::ConfigCorrupt);
         assert!(d.remedies.contains(&Remedy::ResetConfig));
+    }
+
+    #[test]
+    fn diagnoses_node_version_mismatch() {
+        let d = diagnose(
+            "openclaw: Node.js v22.12+ is required (current: v20.20.1)",
+            "",
+            None,
+        );
+        assert_eq!(d.category, ErrorCategory::NodeVersionMismatch);
+        assert_eq!(d.policy, RetryPolicy::AutoRetry);
+        assert!(d.remedies.contains(&Remedy::RescanNodeVersion));
+    }
+
+    #[test]
+    fn diagnoses_git_not_installed() {
+        let d = diagnose(
+            "npm error code ENOENT\nnpm error syscall spawn git\nnpm error path git\nnpm error errno -4058\nnpm error enoent An unknown git error occurred",
+            "",
+            Some(1),
+        );
+        assert_eq!(d.category, ErrorCategory::GitNotInstalled);
+        assert_eq!(d.policy, RetryPolicy::UserPrompt);
+        assert!(d.remedies.contains(&Remedy::InstallGit));
     }
 
     #[test]

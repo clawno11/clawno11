@@ -208,16 +208,21 @@ pub fn augmented_path() -> String {
 // ── Shell execution ─────────────────────────────────────────────────────────
 
 /// Run a shell command string and return the raw `Output`.
-pub fn shell_cmd(cmd: &str) -> std::io::Result<std::process::Output> {
+/// When `allow_window` is true on Windows, the process is NOT created with
+/// CREATE_NO_WINDOW, so UAC and installer GUIs can appear.
+pub fn shell_cmd(cmd: &str, allow_window: bool) -> std::io::Result<std::process::Output> {
     #[cfg(target_os = "windows")]
     {
         let mut c = Command::new("cmd");
         c.args(["/C", cmd]).env("PATH", augmented_path());
-        c.creation_flags(CREATE_NO_WINDOW);
+        if !allow_window {
+            c.creation_flags(CREATE_NO_WINDOW);
+        }
         c.output()
     }
     #[cfg(not(target_os = "windows"))]
     {
+        let _ = allow_window;
         Command::new("sh")
             .args(["-c", cmd])
             .env("PATH", augmented_path())
@@ -226,41 +231,63 @@ pub fn shell_cmd(cmd: &str) -> std::io::Result<std::process::Output> {
 }
 
 /// Run a command; return `(success, stdout, stderr)`.
+/// Uses CREATE_NO_WINDOW on Windows (hidden).
 pub fn shell_result(cmd: &str) -> (bool, String, String) {
-    match shell_cmd(cmd) {
-        Ok(o) => (
-            o.status.success(),
-            String::from_utf8_lossy(&o.stdout).trim().to_string(),
-            String::from_utf8_lossy(&o.stderr).trim().to_string(),
-        ),
+    shell_result_opt(cmd, false, false)
+}
+
+/// Run a command; when allow_window is true on Windows, UAC/installer can show.
+pub fn shell_result_visible(cmd: &str) -> (bool, String, String) {
+    shell_result_opt(cmd, true, false)
+}
+
+/// Like shell_result_visible, but treats exit codes 3010 (reboot required) and
+/// 1641 (installer restarted) as success — common for Windows installers.
+pub fn shell_result_visible_installer(cmd: &str) -> (bool, String, String) {
+    shell_result_opt(cmd, true, true)
+}
+
+fn shell_result_opt(
+    cmd: &str,
+    allow_window: bool,
+    allow_reboot_codes: bool,
+) -> (bool, String, String) {
+    match shell_cmd(cmd, allow_window) {
+        Ok(o) => {
+            let success = if allow_reboot_codes {
+                #[cfg(target_os = "windows")]
+                {
+                    matches!(o.status.code(), Some(0) | Some(1641) | Some(3010))
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = allow_reboot_codes;
+                    o.status.success()
+                }
+            } else {
+                o.status.success()
+            };
+            (
+                success,
+                String::from_utf8_lossy(&o.stdout).trim().to_string(),
+                String::from_utf8_lossy(&o.stderr).trim().to_string(),
+            )
+        }
         Err(e) => (false, String::new(), e.to_string()),
     }
 }
 
 /// Run a command; return `true` if it exits with code 0.
 pub fn shell_ok(cmd: &str) -> bool {
-    shell_cmd(cmd).map(|o| o.status.success()).unwrap_or(false)
+    shell_cmd(cmd, false)
+        .map(|o| o.status.success())
+        .unwrap_or(false)
 }
 
 /// Run a command; return trimmed stdout (empty string on error).
 pub fn shell_output(cmd: &str) -> String {
-    shell_cmd(cmd)
+    shell_cmd(cmd, false)
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-        .unwrap_or_default()
-}
-
-/// Run a command; return stdout if non-empty, otherwise stderr.
-pub fn shell_output_both(cmd: &str) -> String {
-    shell_cmd(cmd)
-        .map(|o| {
-            let out = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            let err = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            if out.is_empty() {
-                err
-            } else {
-                out
-            }
-        })
         .unwrap_or_default()
 }
 
@@ -307,7 +334,9 @@ pub fn free_disk_mb(path: &str) -> u64 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlatformProfile {
     pub os: String,
+    pub os_version: String,
     pub arch: String,
+    pub total_memory_mb: u64,
     pub is_chinese_locale: bool,
     pub has_winget: bool,
     pub has_choco: bool,
@@ -328,7 +357,9 @@ pub fn detect_platform() -> PlatformProfile {
 
     PlatformProfile {
         os: std::env::consts::OS.to_string(),
+        os_version: detect_os_version(),
         arch: std::env::consts::ARCH.to_string(),
+        total_memory_mb: detect_total_memory_mb(),
         is_chinese_locale: detect_chinese_locale(),
         has_winget: has_command("winget --version"),
         has_choco: has_command("choco --version"),
@@ -395,6 +426,46 @@ fn detect_nvm() -> bool {
     }
 }
 
+fn detect_os_version() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        let ver = shell_output(
+            "powershell -NoProfile -Command \"[System.Environment]::OSVersion.Version.ToString()\"",
+        );
+        let trimmed = ver.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let ver = shell_output("sw_vers -productVersion 2>/dev/null");
+        let trimmed = ver.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let ver = shell_output(
+            "cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | head -1 | cut -d= -f2 | tr -d '\"'",
+        );
+        let trimmed = ver.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    "unknown".to_string()
+}
+
+fn detect_total_memory_mb() -> u64 {
+    use sysinfo::System;
+    let sys = System::new_with_specifics(
+        sysinfo::RefreshKind::nothing().with_memory(sysinfo::MemoryRefreshKind::everything()),
+    );
+    sys.total_memory() / 1_048_576
+}
+
 fn detect_admin() -> bool {
     #[cfg(target_os = "windows")]
     {
@@ -407,6 +478,38 @@ fn detect_admin() -> bool {
 }
 
 impl PlatformProfile {
+    /// Collect version strings for all detected package managers.
+    pub fn package_manager_versions(&self) -> Vec<clawno_core::types::PackageManagerInfo> {
+        use clawno_core::types::PackageManagerInfo;
+        let pm = |name: &str, available: bool, cmd: &str| -> PackageManagerInfo {
+            PackageManagerInfo {
+                name: name.to_string(),
+                available,
+                version: if available {
+                    let v = shell_output(cmd).trim().to_string();
+                    if v.is_empty() {
+                        None
+                    } else {
+                        Some(v)
+                    }
+                } else {
+                    None
+                },
+            }
+        };
+        vec![
+            pm("winget", self.has_winget, "winget --version"),
+            pm("choco", self.has_choco, "choco --version"),
+            pm("brew", self.has_brew, "brew --version"),
+            pm("nvm", self.has_nvm, "nvm --version"),
+            pm("fnm", self.has_fnm, "fnm --version"),
+            pm("volta", self.has_volta, "volta --version"),
+            pm("apt", self.has_apt, "apt-get --version"),
+            pm("dnf", self.has_dnf, "dnf --version"),
+            pm("pacman", self.has_pacman, "pacman --version"),
+        ]
+    }
+
     /// Return the nodejs.org download URL for this platform.
     pub fn node_download_url(&self, version: &str) -> String {
         let os_part = match self.os.as_str() {
@@ -426,6 +529,20 @@ impl PlatformProfile {
             "tar.gz"
         };
         format!("https://nodejs.org/dist/{version}/node-{version}-{os_part}-{arch_part}.{ext}")
+    }
+
+    /// Return the nodejs.org MSI installer URL for Windows (x64/arm64/x86).
+    /// Used for direct install — MSI 运行时可可靠触发 UAC。
+    #[cfg(target_os = "windows")]
+    pub fn node_msi_download_url(&self, version: &str) -> String {
+        let arch_part = match self.arch.as_str() {
+            "aarch64" => "arm64",
+            "x86_64" => "x64",
+            "x86" => "x86",
+            _ => "x64",
+        };
+        let ver_strip = version.trim_start_matches('v');
+        format!("https://nodejs.org/dist/{version}/node-{ver_strip}-{arch_part}.msi")
     }
 
     /// Preferred npm registry based on locale.

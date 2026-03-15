@@ -1,30 +1,167 @@
-use crate::platform::{augmented_path, path_join, user_home};
-/// Auth file management for OpenClaw deployment.
-///
-/// Handles writing provider API keys to the correct auth-profiles.json
-/// locations and syncing them between global and agent directories.
-use std::process::Command;
+use crate::platform::{path_join, shell_output, user_home};
 
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
-#[cfg(target_os = "windows")]
-const CREATE_NO_WINDOW: u32 = 0x08000000;
+/// Query OpenClaw for auth store path and config path.
+/// Returns (auth_store_path, config_path).
+fn locate_auth_files() -> (String, String) {
+    let out = shell_output("openclaw models status --json");
+    let v: serde_json::Value = serde_json::from_str(&out).unwrap_or_default();
+
+    let store_path = v
+        .get("auth")
+        .and_then(|a| a.get("storePath"))
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let config_path = v
+        .get("configPath")
+        .and_then(|s| s.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    (store_path, config_path)
+}
+
+/// Fallback paths when CLI query fails (e.g. OpenClaw not yet onboarded).
+fn fallback_auth_paths() -> (String, String) {
+    let home = user_home();
+    let store = path_join(&home, ".openclaw/agents/main/agent/auth-profiles.json");
+    let config = path_join(&home, ".openclaw/openclaw.json");
+    (store, config)
+}
+
+/// Write a provider key into OpenClaw's auth system.
+///
+/// Mirrors what `openclaw models auth paste-token` does internally:
+///   1. Upsert credential in `auth-profiles.json`  (the actual token)
+///   2. Upsert skeleton in `openclaw.json`          (provider + mode, no secret)
+pub(super) fn write_provider_key(provider: &str, api_key: &str, fixes: &mut Vec<String>) {
+    let (store_path, config_path) = locate_auth_files();
+    let (store_path, config_path) = if store_path.is_empty() || config_path.is_empty() {
+        let fb = fallback_auth_paths();
+        fixes.push("auth-paths-from-fallback".into());
+        fb
+    } else {
+        fixes.push(format!("auth-store:{}", store_path));
+        (store_path, config_path)
+    };
+
+    // Ensure parent dirs exist
+    if let Some(parent) = std::path::Path::new(&store_path).parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    // ── Step 1: auth-profiles.json ──
+    let profile_key = format!("{provider}:manual");
+
+    let mut store: serde_json::Value = std::fs::read_to_string(&store_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({ "version": 1, "profiles": {} }));
+
+    let profiles = store.as_object_mut().and_then(|o| {
+        o.entry("profiles")
+            .or_insert_with(|| serde_json::json!({}))
+            .as_object_mut()
+    });
+
+    if let Some(profiles) = profiles {
+        if let Some(existing) = profiles.get_mut(&profile_key) {
+            // Slot exists — only update the token value
+            existing["token"] = serde_json::json!(api_key);
+            if existing.get("type").is_none() {
+                existing["type"] = serde_json::json!("token");
+            }
+            if existing.get("provider").is_none() {
+                existing["provider"] = serde_json::json!(provider);
+            }
+        } else {
+            // Slot doesn't exist — create full entry
+            profiles.insert(
+                profile_key.clone(),
+                serde_json::json!({
+                    "type": "token",
+                    "provider": provider,
+                    "token": api_key
+                }),
+            );
+        }
+    }
+
+    // Update lastGood
+    if let Some(obj) = store.as_object_mut() {
+        let last_good = obj
+            .entry("lastGood")
+            .or_insert_with(|| serde_json::json!({}));
+        if let Some(lg) = last_good.as_object_mut() {
+            lg.insert(provider.to_string(), serde_json::json!(profile_key));
+        }
+    }
+
+    match std::fs::write(
+        &store_path,
+        serde_json::to_string_pretty(&store).unwrap_or_default(),
+    ) {
+        Ok(_) => fixes.push(format!("auth-profiles-written:{provider}")),
+        Err(e) => {
+            fixes.push(format!("auth-profiles-write-failed:{e}"));
+            return;
+        }
+    }
+
+    // ── Step 2: openclaw.json (skeleton) ──
+    let mut cfg: serde_json::Value = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+
+    let auth_profiles = cfg
+        .as_object_mut()
+        .and_then(|o| {
+            o.entry("auth")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+        })
+        .and_then(|auth| {
+            auth.entry("profiles")
+                .or_insert_with(|| serde_json::json!({}))
+                .as_object_mut()
+        });
+
+    if let Some(ap) = auth_profiles {
+        if !ap.contains_key(&profile_key) {
+            ap.insert(
+                profile_key.clone(),
+                serde_json::json!({
+                    "provider": provider,
+                    "mode": "token"
+                }),
+            );
+        }
+    }
+
+    match std::fs::write(
+        &config_path,
+        serde_json::to_string_pretty(&cfg).unwrap_or_default(),
+    ) {
+        Ok(_) => fixes.push(format!("openclaw-json-updated:{provider}")),
+        Err(e) => fixes.push(format!("openclaw-json-update-failed:{e}")),
+    }
+}
 
 /// Configure Ollama as a provider in the OpenClaw gateway.
-/// OpenClaw discovers Ollama via the OLLAMA_API_KEY environment variable.
-/// We set it persistently ("ollama-local" is the conventional placeholder)
-/// so the gateway picks it up on next start without any manual user action.
 pub(super) fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
-    // ── 1. Persist OLLAMA_API_KEY so the gateway sees it on every restart ──
     #[cfg(target_os = "windows")]
-    let env_ok = {
-        // setx writes to the user-level registry (persists across reboots).
+    {
         let (ok, _) = super::run_silent("setx OLLAMA_API_KEY \"ollama-local\"");
-        ok
-    };
+        if ok {
+            fixes.push("ollama-env-key-set".into());
+        } else {
+            fixes.push("ollama-env-key-skipped-non-fatal".into());
+        }
+    }
     #[cfg(not(target_os = "windows"))]
-    let env_ok = {
-        // Append to shell rc files so it survives new terminal sessions.
+    {
         let line = "\nexport OLLAMA_API_KEY=\"ollama-local\"\n";
         let home = user_home();
         let mut wrote = false;
@@ -46,188 +183,17 @@ pub(super) fn configure_ollama_in_gateway(fixes: &mut Vec<String>) {
                                 use std::io::Write;
                                 f.write_all(line.as_bytes())
                             });
-                        wrote = true;
-                    } else {
-                        wrote = true; // already set
                     }
+                    wrote = true;
                 }
             }
         }
-        wrote
-    };
-
-    if env_ok {
-        fixes.push("ollama-env-key-set".to_string());
-    } else {
-        fixes.push("ollama-env-key-skipped-non-fatal".to_string());
-    }
-
-    // ── 2. Also try CLI paste-token (works even if env var approach differs) ──
-    let cmd_str = "openclaw models auth paste-token --provider ollama";
-    #[cfg(target_os = "windows")]
-    let mut c = {
-        let mut b = Command::new("cmd");
-        b.args(["/C", cmd_str]);
-        b.creation_flags(CREATE_NO_WINDOW);
-        b
-    };
-    #[cfg(not(target_os = "windows"))]
-    let mut c = {
-        let mut b = Command::new("sh");
-        b.args(["-c", cmd_str]);
-        b
-    };
-    c.env("PATH", augmented_path())
-        .env("OLLAMA_API_KEY", "ollama-local")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-
-    let result = (|| -> Result<bool, String> {
-        let mut child = c.spawn().map_err(|e| format!("spawn:{e}"))?;
-        if let Some(mut stdin) = child.stdin.take() {
-            use std::io::Write;
-            stdin
-                .write_all(b"ollama-local")
-                .map_err(|e| format!("stdin:{e}"))?;
-        }
-        Ok(child
-            .wait_with_output()
-            .map(|o| o.status.success())
-            .unwrap_or(false))
-    })();
-
-    match result {
-        Ok(true) => fixes.push("ollama-gateway-configured".to_string()),
-        Ok(false) => fixes.push("ollama-gateway-skipped-non-fatal".to_string()),
-        Err(e) => fixes.push(format!("ollama-gateway-error:{}", e)),
-    }
-
-    // Guarantee the ollama key is also written to the agent auth file.
-    // paste-token may write to a location the agent doesn't read from.
-    ensure_auth_in_agent_file("ollama", "ollama-local", fixes);
-}
-
-/// Ensure auth-profiles.json exists in the main agent directory.
-///
-/// `paste-token` may write to a global store that the agent runtime doesn't
-/// read from.  On some openclaw versions the `agents/main/agent/` directory
-/// isn't even created by `onboard`.  This function:
-///   1. Creates the directory tree if missing.
-///   2. Copies auth from WHEREVER it exists (global → agent, or agent → global).
-///   3. If neither exists, does nothing (auth hasn't been configured yet).
-pub(super) fn sync_auth_to_agents(fixes: &mut Vec<String>) {
-    let home = user_home();
-    let oc = path_join(&home, ".openclaw");
-    let global = path_join(&oc, "auth-profiles.json");
-    let agent_dir = path_join(&oc, "agents/main/agent");
-    let agent_auth = path_join(&agent_dir, "auth-profiles.json");
-
-    let g_exists = std::path::Path::new(&global).exists();
-    let a_exists = std::path::Path::new(&agent_auth).exists();
-
-    // Ensure the agent directory tree exists regardless
-    let _ = std::fs::create_dir_all(&agent_dir);
-
-    if g_exists && !a_exists {
-        // global → agent
-        if std::fs::copy(&global, &agent_auth).is_ok() {
-            fixes.push("auth-synced:global-to-agent".to_string());
-        }
-    } else if !g_exists && a_exists {
-        // agent → global (so next sync / list_configured_providers sees it)
-        if std::fs::copy(&agent_auth, &global).is_ok() {
-            fixes.push("auth-synced:agent-to-global".to_string());
-        }
-    } else if g_exists && a_exists {
-        // Both exist — pick the one with more content (more providers configured)
-        let g_len = std::fs::metadata(&global).map(|m| m.len()).unwrap_or(0);
-        let a_len = std::fs::metadata(&agent_auth).map(|m| m.len()).unwrap_or(0);
-        if g_len > a_len {
-            let _ = std::fs::copy(&global, &agent_auth);
-            fixes.push("auth-synced:global-larger".to_string());
-        } else if a_len > g_len {
-            let _ = std::fs::copy(&agent_auth, &global);
-            fixes.push("auth-synced:agent-larger".to_string());
+        if wrote {
+            fixes.push("ollama-env-key-set".into());
+        } else {
+            fixes.push("ollama-env-key-skipped-non-fatal".into());
         }
     }
-    // Neither exists → nothing to sync yet
 
-    // Also sync to any other agent directories (custom agents)
-    let agents_dir = path_join(&oc, "agents");
-    let source = if std::path::Path::new(&agent_auth).exists() {
-        &agent_auth
-    } else if std::path::Path::new(&global).exists() {
-        &global
-    } else {
-        return;
-    };
-    if let Ok(entries) = std::fs::read_dir(&agents_dir) {
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().to_string();
-            if name == "main" {
-                continue;
-            } // already handled
-            if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                continue;
-            }
-            let dest_dir = path_join(&entry.path().to_string_lossy(), "agent");
-            let _ = std::fs::create_dir_all(&dest_dir);
-            let dest = path_join(&dest_dir, "auth-profiles.json");
-            let _ = std::fs::copy(source, &dest);
-        }
-    }
-}
-
-/// Directly write a provider's API key into the agent auth-profiles.json file.
-/// This is the nuclear option — guarantees the key ends up in the right place
-/// even if `openclaw models auth paste-token` writes to the wrong location
-/// or fails to create the directory.
-pub(super) fn ensure_auth_in_agent_file(provider: &str, api_key: &str, fixes: &mut Vec<String>) {
-    let home = user_home();
-    let agent_dir = path_join(&home, ".openclaw/agents/main/agent");
-    let agent_auth = path_join(&agent_dir, "auth-profiles.json");
-
-    let _ = std::fs::create_dir_all(&agent_dir);
-
-    // Read existing file or start fresh
-    let mut doc: serde_json::Value = std::fs::read_to_string(&agent_auth)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| {
-            serde_json::json!({
-                "version": 1,
-                "profiles": {},
-                "lastGood": {}
-            })
-        });
-
-    // Insert the provider key
-    let profile_key = format!("{provider}:manual");
-    if let Some(profiles) = doc.get_mut("profiles").and_then(|p| p.as_object_mut()) {
-        profiles.insert(
-            profile_key.clone(),
-            serde_json::json!({
-                "type": "token",
-                "provider": provider,
-                "token": api_key
-            }),
-        );
-    }
-    if let Some(last_good) = doc.get_mut("lastGood").and_then(|l| l.as_object_mut()) {
-        last_good.insert(provider.to_string(), serde_json::json!(profile_key));
-    }
-
-    // Write back
-    match std::fs::write(
-        &agent_auth,
-        serde_json::to_string_pretty(&doc).unwrap_or_default(),
-    ) {
-        Ok(_) => fixes.push(format!("auth-direct-write:{provider}")),
-        Err(e) => fixes.push(format!("auth-direct-write-failed:{provider}:{e}")),
-    }
-
-    // Also write to global location for consistency
-    let global = path_join(&home, ".openclaw/auth-profiles.json");
-    let _ = std::fs::copy(&agent_auth, &global);
+    write_provider_key("ollama", "ollama-local", fixes);
 }
