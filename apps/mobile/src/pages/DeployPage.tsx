@@ -19,12 +19,15 @@ import {
   deployRemoteInstallOpenclaw,
   deployRemoteOnboard,
   deployRemoteStartGateway,
+  deployRemoteInstallClawnoServer,
+  deployRemoteStartClawnoServer,
   type SshArgs,
   type StepResult,
 } from "../ipc";
 import { setSecureValue } from "../ipc";
 import { useInstanceStore } from "../store/instances";
 import { TopBar } from "../components/TopBar";
+import { REMOTE_STEP_DEFS, CLAWNO_SERVER_STEP_DEFS } from "@clawno/shared/deploy/stepDefs";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -44,14 +47,6 @@ function fmtSec(s: number) {
   return `${Math.floor(s / 60)}m ${s % 60}s`;
 }
 
-const REMOTE_STEP_DEFS = [
-  { labelKey: "deploy.ssh.steps.remoteConnect",         estimatedSec: 5  },
-  { labelKey: "deploy.ssh.steps.remoteCheckNode",       estimatedSec: 60 },
-  { labelKey: "deploy.ssh.steps.remoteInstallOpenclaw", estimatedSec: 90 },
-  { labelKey: "deploy.ssh.steps.remoteOnboard",         estimatedSec: 5  },
-  { labelKey: "deploy.ssh.steps.remoteStart",           estimatedSec: 15 },
-] as const;
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function DeployPage() {
@@ -67,6 +62,8 @@ export function DeployPage() {
   const [showPass, setShowPass]           = useState(false);
   const [openclawPort, setOpenclawPort]   = useState("18789");
   const [instanceName, setInstanceName]   = useState("");
+  const [includeClawnoServer, setIncludeClawnoServer] = useState(true);
+  const [clawnoServerPort, setClawnoServerPort] = useState("18800");
 
   // State
   const [steps, setSteps]                 = useState<StepState[]>([]);
@@ -142,8 +139,9 @@ export function DeployPage() {
   const handleDeploy = async () => {
     if (!canDeploy) return;
     const sshArgs = buildSshArgs();
+    const csPort = parseInt(clawnoServerPort, 10) || 18800;
 
-    const stepDefs: StepState[] = REMOTE_STEP_DEFS.map((d) => ({
+    const baseStepDefs: StepState[] = REMOTE_STEP_DEFS.map((d) => ({
       label: t(d.labelKey),
       estimatedSec: d.estimatedSec,
       status: "pending" as const,
@@ -151,13 +149,34 @@ export function DeployPage() {
       elapsedSec: 0,
     }));
 
-    const stepFns: Array<() => Promise<StepResult>> = [
+    const csStepDefs: StepState[] = includeClawnoServer
+      ? CLAWNO_SERVER_STEP_DEFS.map((d) => ({
+          label: t(d.labelKey),
+          estimatedSec: d.estimatedSec,
+          status: "pending" as const,
+          fixesApplied: [],
+          elapsedSec: 0,
+        }))
+      : [];
+
+    const stepDefs = [...baseStepDefs, ...csStepDefs];
+
+    const baseStepFns: Array<() => Promise<StepResult>> = [
       () => deployRemoteConnect(sshArgs),
       () => deployRemoteCheckNode(sshArgs),
       () => deployRemoteInstallOpenclaw(sshArgs),
       () => deployRemoteOnboard(sshArgs),
       () => deployRemoteStartGateway(sshArgs),
     ];
+
+    const csStepFns: Array<() => Promise<StepResult>> = includeClawnoServer
+      ? [
+          () => deployRemoteInstallClawnoServer(sshArgs),
+          () => deployRemoteStartClawnoServer(sshArgs, csPort),
+        ]
+      : [];
+
+    const stepFns = [...baseStepFns, ...csStepFns];
 
     setSteps(stepDefs);
     setFinalResult(null);
@@ -197,6 +216,7 @@ export function DeployPage() {
               port,
               deployedAt: Date.now(),
               health: "online",
+              ...(includeClawnoServer ? { chatProxyUrl: `http://${sshArgs.host}:${csPort}` } : {}),
             });
 
             // Persist SSH metadata for management commands
@@ -344,7 +364,36 @@ export function DeployPage() {
                       placeholder={hostTrimmed || t("deploy.ssh.title")}
                       className="mt-1 w-full px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30" />
                   </div>
-                </div>
+              </div>
+            </div>
+          </section>
+
+            {/* ClawNO11 Server option */}
+            <section className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
+              <div className="p-4 space-y-3">
+                <label className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={includeClawnoServer}
+                    onChange={(e) => setIncludeClawnoServer(e.target.checked)}
+                    disabled={isDeploying}
+                    className="mt-1 h-4 w-4 rounded border-[hsl(var(--border))] text-[hsl(var(--primary))] focus:ring-primary disabled:opacity-50"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold">{t("deploy.ssh.includeClawnoServer")}</p>
+                    <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-0.5">{t("deploy.ssh.includeClawnoServerDesc")}</p>
+                  </div>
+                </label>
+
+                {includeClawnoServer && (
+                  <div className="ml-7">
+                    <label className="text-[11px] font-medium text-[hsl(var(--muted-foreground))] uppercase tracking-wide">
+                      {t("deploy.ssh.clawnoServerPort")}
+                    </label>
+                    <input type="number" value={clawnoServerPort} onChange={(e) => setClawnoServerPort(e.target.value)}
+                      className="mt-1 w-32 px-3 py-2.5 rounded-xl border border-[hsl(var(--border))] text-sm bg-[hsl(var(--card))] focus:outline-none focus:ring-2 focus:ring-primary/30" />
+                  </div>
+                )}
               </div>
             </section>
 

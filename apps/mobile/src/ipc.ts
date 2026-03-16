@@ -16,6 +16,7 @@ export {
   scanMcpServer, readTextFile, getTailscaleStatus,
   deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
   deployRemoteOnboard, deployRemoteStartGateway,
+  deployRemoteInstallClawnoServer, deployRemoteStartClawnoServer,
   sshKillSwitch,
 } from "@clawno/shared/ipc/types";
 

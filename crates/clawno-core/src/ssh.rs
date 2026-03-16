@@ -190,6 +190,97 @@ pub fn cmd_check_node() -> String {
     format!("{PATH_PREAMBLE}\nnode --version 2>/dev/null || echo node-not-found")
 }
 
+// ── ClawNO11 Server deploy scripts ───────────────────────────────────────────
+
+pub const INSTALL_CLAWNO_SERVER_SCRIPT: &str = r#"
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null || true
+export PATH="$HOME/.fnm:$HOME/.local/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"
+eval "$(~/.fnm/fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
+
+_cs_check() {
+    NPM_BIN_DIR="$(npm prefix -g 2>/dev/null)/bin"
+    export PATH="$NPM_BIN_DIR:$HOME/.local/bin:$PATH"
+    command -v clawno-server >/dev/null 2>&1
+}
+
+# Attempt 1: default registry
+npm install -g @clawno/server 2>/dev/null && _cs_check && {
+    echo "installed:$(clawno-server version 2>/dev/null || echo unknown)"; exit 0; }
+
+# Attempt 2: China mirror
+npm install -g @clawno/server --registry https://registry.npmmirror.com 2>/dev/null && _cs_check && {
+    echo "installed:$(clawno-server version 2>/dev/null || echo unknown)"; exit 0; }
+
+# Attempt 3: user prefix
+USER_PREFIX="$HOME/.local"
+mkdir -p "$USER_PREFIX/bin" 2>/dev/null
+npm install -g @clawno/server --prefix "$USER_PREFIX" 2>/dev/null && {
+    export PATH="$USER_PREFIX/bin:$PATH"
+    _cs_check && { echo "installed:$(clawno-server version 2>/dev/null || echo unknown)"; exit 0; }
+}
+
+echo "clawno-server-not-found-after-install"
+exit 1
+"#;
+
+pub fn start_clawno_server_script(port: u16, gateway_port: u16) -> String {
+    format!(
+        r#"
+export NVM_DIR="$HOME/.nvm"
+[ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" 2>/dev/null || true
+export PATH="$HOME/.fnm:$HOME/.local/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"
+eval "$(~/.fnm/fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
+
+CS_BIN=$(which clawno-server 2>/dev/null || echo "clawno-server")
+
+if ! command -v pm2 >/dev/null 2>&1; then
+    npm install -g pm2 > /dev/null 2>&1 || true
+fi
+
+if command -v pm2 >/dev/null 2>&1; then
+    pm2 delete clawno-server > /dev/null 2>&1 || true
+    pm2 start "$CS_BIN" \
+        --name clawno-server \
+        --interpreter none \
+        -- start --port {port} --gateway http://localhost:{gateway_port} > /dev/null 2>&1
+    pm2 save > /dev/null 2>&1 || true
+else
+    pkill -f "clawno-server start" > /dev/null 2>&1 || true
+    mkdir -p ~/clawno-server-logs
+    nohup "$CS_BIN" start --port {port} --gateway http://localhost:{gateway_port} \
+        > ~/clawno-server-logs/server.log 2>&1 &
+fi
+
+for i in $(seq 1 20); do
+    if nc -z localhost {port} > /dev/null 2>&1 || \
+       curl -sf "http://localhost:{port}/health" > /dev/null 2>&1; then
+        echo "clawno-server-ready:{port}"
+        exit 0
+    fi
+    sleep 1
+done
+
+echo "clawno-server-start-failed:port {port} not listening after 20s"
+exit 1
+"#
+    )
+}
+
+pub fn cmd_check_clawno_server() -> String {
+    format!("{PATH_PREAMBLE}\nclawno-server version 2>/dev/null || echo clawno-server-not-found")
+}
+
+pub fn cmd_stop_clawno_server() -> String {
+    format!(
+        "{PATH_PREAMBLE}\npm2 stop clawno-server 2>/dev/null || true\necho clawno-server-stopped"
+    )
+}
+
+pub fn cmd_restart_clawno_server() -> String {
+    format!("{PATH_PREAMBLE}\npm2 restart clawno-server 2>/dev/null || true\necho clawno-server-restarted")
+}
+
 pub fn cmd_check_openclaw() -> String {
     format!("{PATH_PREAMBLE}\nopenclaw --version 2>/dev/null || echo openclaw-not-found")
 }

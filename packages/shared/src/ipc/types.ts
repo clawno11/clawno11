@@ -145,3 +145,11 @@ export const deployRemoteOnboard = (args: SshArgs) =>
 
 export const deployRemoteStartGateway = (args: SshArgs) =>
   invoke<StepResult>("deploy_remote_start_gateway", { args });
+
+/* ---- SSH Remote Deploy: ClawNO11 Server (optional 2 extra steps) ---- */
+
+export const deployRemoteInstallClawnoServer = (args: SshArgs) =>
+  invoke<StepResult>("deploy_remote_install_clawno_server", { args });
+
+export const deployRemoteStartClawnoServer = (args: SshArgs, serverPort: number) =>
+  invoke<StepResult>("deploy_remote_start_clawno_server", { args, serverPort });

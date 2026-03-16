@@ -14,6 +14,7 @@ export interface VerifyResult {
 /** Provider IDs that are supported natively by OpenClaw (direct connection). */
 export const DIRECT_PROVIDER_IDS = new Set([
   "zai", "minimax", "anthropic", "openai", "openrouter",
+  "moonshot", "qwen", "doubao",
 ]);
 
 type ProbeSpec = { url: string; headers: Record<string, string> };
@@ -39,6 +40,8 @@ const PROBES: Record<string, ProbeSpec> = {
     url:     "https://api.minimaxi.com/v1/models",
     headers: {},
   },
+  // moonshot / qwen / doubao: 厂商 API 无 CORS 头，webview fetch 会被阻止。
+  // 不设探针 → verifyProviderKey 直接返回 "ok"（key 已由后端写入）。
 };
 
 /**

@@ -43,17 +43,17 @@
     "ai": {
       "title": "Configure AI Models",
       "quickSetup": "Quick Setup",
-      "directTip": "'Direct' providers work immediately after key entry — no relay needed.",
-      "relayTip": "Providers marked 'Relay' require OpenRouter to be configured first.",
+      "directTip": "'Direct' providers work immediately after key entry — no extra setup needed.",
+      "relayTip": "Providers marked 'Needs OpenRouter' have no native OpenClaw plugin; use an OpenRouter key instead.",
       "directGroup": "✅ Direct (ready after key entry)",
-      "relayGroup": "⚠️ Requires OpenRouter relay",
+      "relayGroup": "⚠️ No native OpenClaw plugin — requires OpenRouter",
       "configured": "Configured",
       "notConfigured": "Not configured",
       "direct": "Direct",
-      "relay": "Relay",
+      "relay": "Needs OpenRouter",
       "getKey": "Get API Key",
       "placeholder": "Enter API Key",
-      "relayWarn": "This provider requires OpenRouter relay. Direct key entry may not work.",
+      "relayWarn": "OpenClaw has no native plugin for this provider. The key you enter won't work directly — configure an OpenRouter key instead.",
       "configuredMsg": "Configured {{key}} — restart service to apply",
       "keyWritten": "API Key saved",
       "keyWrittenHint": "Key is written to OpenClaw config. Click to replace if needed.",
@@ -96,12 +96,17 @@
     "ssh": {
       "port": "SSH Port",
       "password": "SSH Password",
+      "includeClawnoServer": "Also deploy ClawNO11 Server",
+      "includeClawnoServerDesc": "Deploy the chat proxy so mobile clients can work without the desktop app",
+      "clawnoServerPort": "Server Port",
       "steps": {
         "remoteConnect": "Test SSH Connection",
         "remoteCheckNode": "Install Node.js (server)",
         "remoteInstallOpenclaw": "Install OpenClaw (server)",
         "remoteOnboard": "Initialize Config (server)",
-        "remoteStart": "Start Gateway (server)"
+        "remoteStart": "Start Gateway (server)",
+        "remoteInstallClawnoServer": "Install ClawNO11 Server",
+        "remoteStartClawnoServer": "Start ClawNO11 Server"
       }
     },
     "steps": {

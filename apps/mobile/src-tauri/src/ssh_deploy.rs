@@ -7,6 +7,36 @@
 
 clawno_core::define_ssh_deploy_commands!(include_system_fallback: false);
 
+// ── ClawNO11 Server deploy commands ──────────────────────────────────────────
+
+#[tauri::command]
+pub async fn deploy_remote_install_clawno_server(args: SshArgs) -> StepResult {
+    if let Err(e) = ssh::validate_ssh_args(&args) {
+        return StepResult::err(e);
+    }
+    match ssh::ssh_exec(&args, ssh::INSTALL_CLAWNO_SERVER_SCRIPT).await {
+        Ok((0, out)) => StepResult::ok(last_line(&out)),
+        Ok((_, out)) => {
+            StepResult::err(format!("install-clawno-server-failed:{}", last_line(&out)))
+        }
+        Err(e) => StepResult::err(e),
+    }
+}
+
+#[tauri::command]
+pub async fn deploy_remote_start_clawno_server(args: SshArgs, server_port: u16) -> StepResult {
+    if let Err(e) = ssh::validate_ssh_args(&args) {
+        return StepResult::err(e);
+    }
+    let gateway_port = args.gateway_port;
+    let script = ssh::start_clawno_server_script(server_port, gateway_port);
+    match ssh::ssh_exec(&args, &script).await {
+        Ok((0, _)) => StepResult::ok(format!("clawno-server-ready:{server_port}")),
+        Ok((_, out)) => StepResult::err(format!("clawno-server-start-failed:{}", last_line(&out))),
+        Err(e) => StepResult::err(e),
+    }
+}
+
 // ── Remote management commands (mobile-only) ────────────────────────────────
 
 #[tauri::command]

@@ -121,6 +121,10 @@ export function DeployPage() {
           handleTestConnection={state.handleTestConnection}
           handleRemoteDeploy={state.handleRemoteDeploy}
           keyFileRef={state.keyFileRef}
+          includeClawnoServer={state.includeClawnoServer}
+          setIncludeClawnoServer={state.setIncludeClawnoServer}
+          clawnoServerPort={state.clawnoServerPort}
+          setClawnoServerPort={state.setClawnoServerPort}
         />
       )}
 

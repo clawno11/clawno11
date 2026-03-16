@@ -1,0 +1,34 @@
+{
+  "name": "@clawno/server",
+  "version": "0.1.0",
+  "description": "Standalone ClawNO11 server — chat proxy, provider management, and pairing API for mobile clients",
+  "type": "module",
+  "bin": {
+    "clawno-server": "./dist/cli.js"
+  },
+  "main": "./dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "start": "node dist/cli.js"
+  },
+  "dependencies": {
+    "express": "^5.1.0",
+    "commander": "^13.1.0",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.2",
+    "@types/cors": "^2.8.17",
+    "@types/node": "^22.15.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "files": [
+    "dist"
+  ],
+  "license": "MIT"
+}

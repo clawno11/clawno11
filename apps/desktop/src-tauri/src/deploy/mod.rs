@@ -24,8 +24,10 @@ use crate::types::{RemoteDeployResult, StepResult};
 
 pub use models::{auto_select_active_model, restore_default_model};
 
-/// Provider IDs that OpenClaw's model catalog actually supports.
-/// Matches the output of `openclaw models list --all` provider prefixes.
+/// Provider IDs accepted from the UI.
+///
+/// Some UI ids don't match OpenClaw's internal provider name;
+/// `resolve_openclaw_provider()` translates them before writing auth.
 const VALID_PROVIDERS: &[&str] = &[
     "anthropic",
     "openai",
@@ -37,7 +39,23 @@ const VALID_PROVIDERS: &[&str] = &[
     "mistral",
     "xai",
     "ollama",
+    "moonshot",
+    "qwen",
+    "doubao",
+    "volcengine",
+    "modelstudio",
+    "kimi-coding",
 ];
+
+/// Map UI-facing provider id to the id OpenClaw actually recognises
+/// in auth-profiles.json and its implicit provider loaders.
+fn resolve_openclaw_provider(ui_id: &str) -> &str {
+    match ui_id {
+        "qwen" => "modelstudio",
+        "doubao" => "volcengine",
+        _ => ui_id,
+    }
+}
 
 // ── Onboard ───────────────────────────────────────────────────────────────────
 
@@ -236,7 +254,20 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
         return StepResult::err(format!("invalid-provider:{}", provider));
     }
 
-    auth::write_provider_key(&provider, &api_key, &mut fixes);
+    let oc_provider = resolve_openclaw_provider(&provider);
+    if oc_provider != provider {
+        fixes.push(format!("provider-mapped:{}→{}", provider, oc_provider));
+    }
+
+    auth::write_provider_key(oc_provider, &api_key, &mut fixes);
+
+    // Key write is the source of truth — check it directly
+    let write_ok = fixes
+        .iter()
+        .any(|f| f.starts_with("auth-profiles-written:"));
+    if !write_ok {
+        return StepResult::err_fixed("auth-profiles-write-failed".to_string(), fixes);
+    }
 
     let (restart_ok, _, _) = crate::pm2::run_pm2(&["restart", "openclaw"]);
     if restart_ok {
@@ -245,19 +276,19 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
         fixes.push("gateway-restart-skipped".into());
     }
 
-    std::thread::sleep(std::time::Duration::from_secs(3));
-
-    let (verified, verify_detail) = verify_provider_configured(&provider);
+    // Non-blocking verify: check if OpenClaw picked up the provider.
+    // For implicit providers (moonshot, modelstudio, volcengine) that aren't
+    // in agents.defaults.models yet, verify may report "not found" even
+    // though the key is correctly written — this is expected.
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    let (verified, verify_detail) = verify_provider_configured(oc_provider);
     if verified {
         fixes.push("verify-ok".into());
-        StepResult::ok_fixed("api-key-configured-and-verified".to_string(), fixes)
     } else {
-        fixes.push(format!("verify-failed:{}", verify_detail));
-        StepResult::err_fixed(
-            format!("key-written-but-not-recognized:{}", verify_detail),
-            fixes,
-        )
+        fixes.push(format!("verify-pending:{}", verify_detail));
     }
+
+    StepResult::ok_fixed("api-key-configured".to_string(), fixes)
 }
 
 /// 验证 OpenClaw 是否识别了指定 provider 的 Key。

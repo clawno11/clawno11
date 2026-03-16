@@ -113,21 +113,17 @@ export const STEP_DEFS_BY_ACTION = {
   ],
 } as const;
 
-export const REMOTE_STEP_DEFS = [
-  { labelKey: "deploy.ssh.steps.remoteConnect",           estimatedSec: 5  },
-  { labelKey: "deploy.ssh.steps.remoteCheckNode",         estimatedSec: 60 },
-  { labelKey: "deploy.ssh.steps.remoteInstallOpenclaw",   estimatedSec: 90 },
-  { labelKey: "deploy.ssh.steps.remoteOnboard",           estimatedSec: 5  },
-  { labelKey: "deploy.ssh.steps.remoteStart",             estimatedSec: 15 },
-] as const;
+export { REMOTE_STEP_DEFS, CLAWNO_SERVER_STEP_DEFS } from "@clawno/shared/deploy/stepDefs";
 
 export const AI_PROVIDERS = [
   { id: "zai",        label: "智谱 AI / ZAI (GLM)",         placeholder: "..." },
-  { id: "deepseek",   label: "DeepSeek（深度求索）",        placeholder: "sk-..." },
-  { id: "minimax",    label: "MiniMax",                     placeholder: "..." },
+  { id: "minimax",    label: "MiniMax（海螺）",              placeholder: "..." },
   { id: "anthropic",  label: "Anthropic (Claude)",          placeholder: "sk-ant-api03-..." },
   { id: "openai",     label: "OpenAI (GPT)",                placeholder: "sk-proj-..." },
-  { id: "openrouter", label: "OpenRouter",                  placeholder: "sk-or-v1-..." },
+  { id: "openrouter", label: "OpenRouter（聚合平台）",       placeholder: "sk-or-v1-..." },
+  { id: "moonshot",   label: "Moonshot / Kimi",             placeholder: "sk-..." },
+  { id: "qwen",       label: "阿里通义千问 (Qwen)",          placeholder: "sk-..." },
+  { id: "doubao",     label: "字节豆包 (Doubao)",            placeholder: "..." },
 ] as const;
 
 export const SSH_USER_PRESETS = [

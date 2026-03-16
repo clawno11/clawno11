@@ -31,6 +31,10 @@ interface SshFormProps {
   handleTestConnection: () => void;
   handleRemoteDeploy: () => void;
   keyFileRef: RefObject<HTMLInputElement | null>;
+  includeClawnoServer: boolean;
+  setIncludeClawnoServer: (v: boolean) => void;
+  clawnoServerPort: number;
+  setClawnoServerPort: (v: number) => void;
 }
 
 export function SshForm(props: SshFormProps) {
@@ -41,6 +45,7 @@ export function SshForm(props: SshFormProps) {
     sshPrivateKey, setSshPrivateKey, sshGatewayPort, setSshGatewayPort,
     showPassword, setShowPassword, isTestingConn, connTestResult, setConnTestResult,
     isDeploying, handleTestConnection, handleRemoteDeploy, keyFileRef,
+    includeClawnoServer, setIncludeClawnoServer, clawnoServerPort, setClawnoServerPort,
   } = props;
 
   return (
@@ -266,6 +271,36 @@ export function SshForm(props: SshFormProps) {
             <p className="text-[11px] leading-relaxed">{t("deploy.ssh.securityGroupWarn")}</p>
           </div>
         </div>
+      </div>
+
+      {/* ── ClawNO11 Server option ── */}
+      <div className="rounded-xl border border-border bg-card p-4 space-y-3">
+        <label className="flex items-start gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={includeClawnoServer}
+            onChange={(e) => setIncludeClawnoServer(e.target.checked)}
+            disabled={isDeploying}
+            className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary disabled:opacity-50"
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold">{t("deploy.ssh.includeClawnoServer")}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{t("deploy.ssh.includeClawnoServerDesc")}</p>
+          </div>
+        </label>
+
+        {includeClawnoServer && (
+          <div className="ml-7 space-y-1">
+            <label className="text-xs text-muted-foreground block">{t("deploy.ssh.clawnoServerPort")}</label>
+            <input
+              type="number"
+              value={clawnoServerPort}
+              onChange={(e) => setClawnoServerPort(Number(e.target.value) || 18800)}
+              disabled={isDeploying}
+              className="w-40 px-3 py-2 rounded-lg border border-border bg-background text-sm focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50"
+            />
+          </div>
+        )}
       </div>
 
       {/* ── ③ Test connection ── */}

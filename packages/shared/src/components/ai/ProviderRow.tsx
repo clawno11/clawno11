@@ -41,21 +41,19 @@ export function ProviderRow({ p, isConfigured: configured, onConfigure, onMarkCo
     try {
       const res = await onConfigure(p.id, key);
       if (res.ok) {
-        // 先设为验证中并请求探测
         setVerifyStatus("verifying");
         const v = await verifyProviderKey(p.id, key, p.direct);
         setVerifyStatus(v.status);
         setVerifyMsg(v.message);
-        
-        if (v.status === "ok" || v.status === "relay") {
-          // 验证通过才标记为已配置
+
+        if (v.status === "failed") {
+          setResult({ ok: false, msg: v.message ?? "Key 无效或已过期" });
+        } else {
+          // ok / relay / unreachable → key 已由后端写入，标记为已配置
           await onMarkConfigured(p.id);
           setResult({ ok: true, msg: t("instances.ai.configuredMsg", { key: maskApiKey(key) }) });
           setApiKey("");
           setUpdateMode(false);
-        } else {
-          // 验证不通过时，不标记为已配置，并提示错误
-          setResult({ ok: false, msg: v.message ?? "Key 写入成功但验证未通过" });
         }
       } else {
         setResult({ ok: false, msg: res.detail });

@@ -46,6 +46,7 @@
     "./components/ai/ProviderRow": "./src/components/ai/ProviderRow.tsx",
     "./components/ai/FeaturedCard": "./src/components/ai/FeaturedCard.tsx",
     "./stores/aiVerify": "./src/stores/aiVerify.ts",
+    "./deploy/stepDefs": "./src/deploy/stepDefs.ts",
     "./i18n": "./src/i18n.ts",
     "./locales/en": "./src/locales/en.json",
     "./locales/zh": "./src/locales/zh.json"

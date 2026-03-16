@@ -75,3 +75,38 @@ pub async fn deploy_remote_start_gateway(args: SshArgs, app: tauri::AppHandle) -
         Err(e) => StepResult::err(e),
     }
 }
+
+#[tauri::command]
+pub async fn deploy_remote_install_clawno_server(
+    args: SshArgs,
+    app: tauri::AppHandle,
+) -> StepResult {
+    let on_line = make_emitter(&app, "remote-install-clawno-server");
+    match ssh::ssh_exec_streaming(&args, ssh::INSTALL_CLAWNO_SERVER_SCRIPT, on_line).await {
+        Ok((0, out)) => StepResult::ok(ssh::last_line(&out)),
+        Ok((_, out)) => StepResult::err(format!(
+            "install-clawno-server-failed:{}",
+            ssh::last_line(&out)
+        )),
+        Err(e) => StepResult::err(e),
+    }
+}
+
+#[tauri::command]
+pub async fn deploy_remote_start_clawno_server(
+    args: SshArgs,
+    server_port: u16,
+    app: tauri::AppHandle,
+) -> StepResult {
+    let gateway_port = args.gateway_port;
+    let script = ssh::start_clawno_server_script(server_port, gateway_port);
+    let on_line = make_emitter(&app, "remote-start-clawno-server");
+    match ssh::ssh_exec_streaming(&args, &script, on_line).await {
+        Ok((0, _)) => StepResult::ok(format!("clawno-server-ready:{server_port}")),
+        Ok((_, out)) => StepResult::err(format!(
+            "clawno-server-start-failed:{}",
+            ssh::last_line(&out)
+        )),
+        Err(e) => StepResult::err(e),
+    }
+}

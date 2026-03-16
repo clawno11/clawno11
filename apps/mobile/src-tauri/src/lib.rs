@@ -55,6 +55,8 @@ pub fn run() {
             ssh_deploy::deploy_remote_install_openclaw,
             ssh_deploy::deploy_remote_onboard,
             ssh_deploy::deploy_remote_start_gateway,
+            ssh_deploy::deploy_remote_install_clawno_server,
+            ssh_deploy::deploy_remote_start_clawno_server,
             ssh_deploy::ssh_stop_instance,
             ssh_deploy::ssh_start_instance,
             ssh_deploy::ssh_restart_instance,

@@ -17,6 +17,7 @@ export {
   scanMcpServer, readTextFile, getTailscaleStatus,
   deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
   deployRemoteOnboard, deployRemoteStartGateway,
+  deployRemoteInstallClawnoServer, deployRemoteStartClawnoServer,
 } from "@clawno/shared/ipc/types";
 
 import type { StepResult, ProbeResult } from "@clawno/shared/ipc/types";

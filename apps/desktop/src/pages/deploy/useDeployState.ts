@@ -6,6 +6,7 @@ import {
   getBrowserUrl, openInBrowser, checkDeployStatus, updateOpenclaw,
   deployRemoteConnect, deployRemoteCheckNode, deployRemoteInstallOpenclaw,
   deployRemoteOnboard, deployRemoteStartGateway,
+  deployRemoteInstallClawnoServer, deployRemoteStartClawnoServer,
   ollamaEnsureInstalled,
   scanEnvironment, installSingleDep,
   type StepResult,
@@ -20,7 +21,7 @@ import type {
   TrustLevel, DependencyInfo,
 } from "./types";
 import {
-  STEP_DEFS_BY_ACTION, REMOTE_STEP_DEFS,
+  STEP_DEFS_BY_ACTION, REMOTE_STEP_DEFS, CLAWNO_SERVER_STEP_DEFS,
   DEP_INSTALL_ORDER, DEP_LABELS, DEP_ESTIMATED_SEC, DEP_HINTS,
 } from "./types";
 import { useStepProgress, computeOverallPct } from "./useStepProgress";
@@ -74,6 +75,10 @@ export function useDeployState() {
   const [ollamaPhase, setOllamaPhase] = useState<"idle" | "installing" | "ok" | "fail">("idle");
   const [activeIdx, setActiveIdx] = useState<number>(-1);
   const addOrUpdate = useInstanceStore((s) => s.addOrUpdate);
+
+  // ClawNO11 Server option for remote deploy
+  const [includeClawnoServer, setIncludeClawnoServer] = useState(false);
+  const [clawnoServerPort, setClawnoServerPort] = useState(18800);
 
   // Delegate to focused hooks
   const ssh = useSshForm();
@@ -435,16 +440,33 @@ export function useDeployState() {
     if (!ssh.sshHost.trim()) return;
     const sshArgs = ssh.buildSshArgs();
     const port = ssh.sshGatewayPort;
-    const stepDefs: StepDef[] = REMOTE_STEP_DEFS.map((k) => ({
+
+    const baseStepDefs: StepDef[] = REMOTE_STEP_DEFS.map((k) => ({
       label: t(k.labelKey), estimatedSec: k.estimatedSec,
     }));
-    const stepFns: Array<() => Promise<StepResult>> = [
+    const baseStepFns: Array<() => Promise<StepResult>> = [
       () => deployRemoteConnect(sshArgs),
       () => deployRemoteCheckNode(sshArgs),
       () => deployRemoteInstallOpenclaw(sshArgs),
       () => deployRemoteOnboard(sshArgs),
       () => deployRemoteStartGateway(sshArgs),
     ];
+
+    const csPort = clawnoServerPort;
+    const csStepDefs: StepDef[] = includeClawnoServer
+      ? CLAWNO_SERVER_STEP_DEFS.map((k) => ({
+          label: t(k.labelKey), estimatedSec: k.estimatedSec,
+        }))
+      : [];
+    const csStepFns: Array<() => Promise<StepResult>> = includeClawnoServer
+      ? [
+          () => deployRemoteInstallClawnoServer(sshArgs),
+          () => deployRemoteStartClawnoServer(sshArgs, csPort),
+        ]
+      : [];
+
+    const stepDefs = [...baseStepDefs, ...csStepDefs];
+    const stepFns = [...baseStepFns, ...csStepFns];
     const LAST = stepFns.length - 1;
 
     await runDeployPipeline(
@@ -462,6 +484,7 @@ export function useDeployState() {
             port,
             deployedAt: Date.now(),
             health: "online",
+            ...(includeClawnoServer ? { chatProxyUrl: `http://${sshArgs.host}:${csPort}` } : {}),
           };
           addOrUpdate(inst);
           setFinalResult({ success: true, serviceStarted: true, message: t("deploy.success"), inst });
@@ -723,6 +746,9 @@ export function useDeployState() {
     aiProvider: ai.selectedProvider, setAiProvider: ai.setSelectedProvider,
     aiApiKey: ai.apiKey, setAiApiKey: ai.setApiKey,
     isConfiguringAI, aiConfigResult, aiVerifyStatus, setAiVerifyStatus, aiVerifyMsg,
+    // ClawNO11 Server option
+    includeClawnoServer, setIncludeClawnoServer,
+    clawnoServerPort, setClawnoServerPort,
     // Actions
     handleDeploy, prepareSteps, executeStep,
     handleTestConnection: ssh.handleTestConnection,

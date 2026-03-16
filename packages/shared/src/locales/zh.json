@@ -43,17 +43,17 @@
     "ai": {
       "title": "配置 AI 模型",
       "quickSetup": "快速配置",
-      "directTip": "「直连」provider 配完 Key 即可立即使用。",
-      "relayTip": "标有「需中转」的 provider 需配合 OpenRouter 才能使用。",
+      "directTip": "「直连」provider 填入 Key 即可使用，无需额外配置。",
+      "relayTip": "标有「需中转」的 provider 在 OpenClaw 中无原生插件，需通过 OpenRouter 使用。",
       "directGroup": "✅ 直连（配完即用）",
-      "relayGroup": "⚠️ 需通过 OpenRouter 中转",
+      "relayGroup": "⚠️ OpenClaw 暂无原生插件，需通过 OpenRouter 中转",
       "configured": "已配置",
       "notConfigured": "未配置",
       "direct": "直连",
-      "relay": "需中转",
+      "relay": "需 OpenRouter",
       "getKey": "注册获取 Key",
       "placeholder": "填入 API Key",
-      "relayWarn": "此 provider 需通过 OpenRouter 中转，直接填 Key 可能无法使用。",
+      "relayWarn": "OpenClaw 暂无此 provider 的原生插件，填入的 Key 无法直接使用，建议配置 OpenRouter Key。",
       "configuredMsg": "已配置 {{key}}，重启服务后生效",
       "keyWritten": "API Key 已写入",
       "keyWrittenHint": "Key 已保存到 OpenClaw 配置，如需更换请点击右侧按钮",
@@ -72,12 +72,17 @@
     "ssh": {
       "port": "SSH 端口",
       "password": "SSH 密码",
+      "includeClawnoServer": "同时部署 ClawNO11 Server",
+      "includeClawnoServerDesc": "部署聊天代理服务，移动端无需桌面端即可完整使用",
+      "clawnoServerPort": "Server 端口",
       "steps": {
         "remoteConnect": "测试 SSH 连接",
         "remoteCheckNode": "安装 Node.js（服务器）",
         "remoteInstallOpenclaw": "安装 OpenClaw（服务器）",
         "remoteOnboard": "初始化配置（服务器）",
-        "remoteStart": "启动 Gateway（服务器）"
+        "remoteStart": "启动 Gateway（服务器）",
+        "remoteInstallClawnoServer": "安装 ClawNO11 Server",
+        "remoteStartClawnoServer": "启动 ClawNO11 Server"
       }
     },
     "startDeploy": "开始部署",

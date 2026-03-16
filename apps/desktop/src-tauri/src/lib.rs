@@ -82,6 +82,8 @@ pub fn run() {
             ssh_deploy::deploy_remote_install_openclaw,
             ssh_deploy::deploy_remote_onboard,
             ssh_deploy::deploy_remote_start_gateway,
+            ssh_deploy::deploy_remote_install_clawno_server,
+            ssh_deploy::deploy_remote_start_clawno_server,
             // ── Service management ───────────────────────────────────────────
             pm2::get_local_service_info,
             pm2::stop_local_service,
