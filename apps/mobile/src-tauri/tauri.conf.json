@@ -37,7 +37,7 @@
     },
     "iOS": {
       "minimumSystemVersion": "16.0",
-      "developmentTeam": "YOUR_TEAM_ID",
+      "developmentTeam": "LJ42SZVMKU",
       "bundleVersion": "1"
     }
   },
