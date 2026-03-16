@@ -38,21 +38,12 @@ export function ChatPage() {
     setShowPicker(false);
   };
 
-  const isMac = navigator.platform.toUpperCase().includes("MAC");
-
   const getBounds = useCallback(() => {
     const el = containerRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
-    let y = rect.y;
-    if (isMac) {
-      // macOS AppKit positions child webviews with a bottom-left origin
-      // (y increases upward), but getBoundingClientRect uses top-left origin.
-      // Flip y so the webview lands below the header instead of over it.
-      y = window.innerHeight - rect.y - rect.height;
-    }
-    return { x: rect.x, y, width: rect.width, height: rect.height };
-  }, [isMac]);
+    return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+  }, []);
 
   const handleRepair = useCallback(async () => {
     if (!selectedInst) return;

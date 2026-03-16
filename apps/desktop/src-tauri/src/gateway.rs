@@ -678,11 +678,15 @@ pub async fn mount_chat_webview(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    eprintln!("[chat-webview] mount x={x} y={y} w={width} h={height}");
+
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
-        wv.set_size(tauri::LogicalSize::new(width, height))
-            .map_err(|e| format!("{e}"))?;
-        wv.set_position(tauri::LogicalPosition::new(x, y))
-            .map_err(|e| format!("{e}"))?;
+        wv.set_bounds(tauri::Rect {
+            position: tauri::Position::Logical(tauri::LogicalPosition::new(x, y)),
+            size: tauri::Size::Logical(tauri::LogicalSize::new(width, height)),
+        })
+        .map_err(|e| format!("{e}"))?;
         return Ok(());
     }
 
@@ -714,10 +718,11 @@ pub async fn unmount_chat_webview(app: tauri::AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn hide_chat_webview(app: tauri::AppHandle) -> Result<(), String> {
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
-        wv.set_position(tauri::LogicalPosition::new(-9999.0, -9999.0))
-            .map_err(|e| format!("{e}"))?;
-        wv.set_size(tauri::LogicalSize::new(0.0, 0.0))
-            .map_err(|e| format!("{e}"))?;
+        wv.set_bounds(tauri::Rect {
+            position: tauri::Position::Logical(tauri::LogicalPosition::new(-9999.0, -9999.0)),
+            size: tauri::Size::Logical(tauri::LogicalSize::new(0.0, 0.0)),
+        })
+        .map_err(|e| format!("{e}"))?;
     }
     Ok(())
 }
@@ -731,10 +736,14 @@ pub async fn resize_chat_webview(
     height: f64,
 ) -> Result<(), String> {
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
-        wv.set_size(tauri::LogicalSize::new(width, height))
-            .map_err(|e| format!("{e}"))?;
-        wv.set_position(tauri::LogicalPosition::new(x, y))
-            .map_err(|e| format!("{e}"))?;
+        #[cfg(target_os = "macos")]
+        eprintln!("[chat-webview] resize x={x} y={y} w={width} h={height}");
+
+        wv.set_bounds(tauri::Rect {
+            position: tauri::Position::Logical(tauri::LogicalPosition::new(x, y)),
+            size: tauri::Size::Logical(tauri::LogicalSize::new(width, height)),
+        })
+        .map_err(|e| format!("{e}"))?;
     }
     Ok(())
 }
