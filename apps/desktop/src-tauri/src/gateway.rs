@@ -670,26 +670,6 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
 
 const CHAT_WEBVIEW_LABEL: &str = "openclaw-chat";
 
-/// On macOS the title bar is part of the window frame but `getBoundingClientRect`
-/// in the webview returns coordinates relative to the content area.  Tauri's
-/// `add_child` / `set_position` however use coordinates relative to the window
-/// frame, so we must add the title-bar height on macOS.
-fn title_bar_offset(window: &tauri::Window) -> f64 {
-    #[cfg(target_os = "macos")]
-    {
-        use tauri::Manager;
-        if let (Ok(outer), Ok(inner)) = (window.outer_position(), window.inner_position()) {
-            return (inner.y - outer.y) as f64;
-        }
-        28.0 // fallback: standard macOS title bar
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = window;
-        0.0
-    }
-}
-
 #[tauri::command]
 pub async fn mount_chat_webview(
     app: tauri::AppHandle,
@@ -698,11 +678,10 @@ pub async fn mount_chat_webview(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    let window = app.get_window("main").ok_or("main window not found")?;
-    let offset = title_bar_offset(&window);
+    eprintln!("[chat-webview] mount x={x} y={y} w={width} h={height}");
 
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
-        wv.set_position(tauri::LogicalPosition::new(x, y + offset))
+        wv.set_position(tauri::LogicalPosition::new(x, y))
             .map_err(|e| format!("{e}"))?;
         wv.set_size(tauri::LogicalSize::new(width, height))
             .map_err(|e| format!("{e}"))?;
@@ -710,6 +689,11 @@ pub async fn mount_chat_webview(
     }
 
     let url = get_browser_url(None).await;
+    let window = app.get_window("main").ok_or("main window not found")?;
+
+    eprintln!(
+        "[chat-webview] creating child webview at ({x}, {y}) size ({width}, {height}) url={url}"
+    );
 
     window
         .add_child(
@@ -717,7 +701,7 @@ pub async fn mount_chat_webview(
                 CHAT_WEBVIEW_LABEL,
                 tauri::WebviewUrl::External(url.parse().map_err(|e| format!("{e}"))?),
             ),
-            tauri::LogicalPosition::new(x, y + offset),
+            tauri::LogicalPosition::new(x, y),
             tauri::LogicalSize::new(width, height),
         )
         .map_err(|e| format!("mount failed: {e}"))?;
@@ -753,9 +737,7 @@ pub async fn resize_chat_webview(
     height: f64,
 ) -> Result<(), String> {
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
-        let window = app.get_window("main").ok_or("main window not found")?;
-        let offset = title_bar_offset(&window);
-        wv.set_position(tauri::LogicalPosition::new(x, y + offset))
+        wv.set_position(tauri::LogicalPosition::new(x, y))
             .map_err(|e| format!("{e}"))?;
         wv.set_size(tauri::LogicalSize::new(width, height))
             .map_err(|e| format!("{e}"))?;
