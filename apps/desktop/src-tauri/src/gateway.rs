@@ -670,9 +670,15 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
 
 const CHAT_WEBVIEW_LABEL: &str = "openclaw-chat";
 
-/// Diagnostic: on macOS, add a hardcoded y-offset to verify the coordinate
-/// path is working.  +50 should produce a clearly visible gap between the
-/// header and the child webview.
+/// On macOS the main webview's viewport origin sits at the top of the
+/// NSWindow (behind the native title bar) while `getBoundingClientRect()`
+/// returns coordinates relative to that viewport.  The child webview is
+/// positioned in the same coordinate space, so we must add the title-bar
+/// height to `y` so it lines up with the HTML container visually.
+///
+/// We try `inner_position – outer_position` first (Tauri converts both to
+/// screen-top-left); if that yields 0 (fullSizeContentView makes them
+/// identical on some builds) we fall back to a safe constant.
 fn platform_adjust_bounds(
     window: &tauri::Window,
     x: f64,
@@ -682,10 +688,25 @@ fn platform_adjust_bounds(
 ) -> (f64, f64, f64, f64) {
     #[cfg(target_os = "macos")]
     {
-        let diag_offset = 50.0_f64;
-        let adj_y = y + diag_offset;
-        let adj_h = height - diag_offset;
-        eprintln!("[chat-webview] DIAG y={y} +{diag_offset} → adj_y={adj_y} adj_h={adj_h}");
+        let sf = window.scale_factor().unwrap_or(1.0);
+        let inner = window
+            .inner_position()
+            .unwrap_or(tauri::PhysicalPosition::new(0, 0));
+        let outer = window
+            .outer_position()
+            .unwrap_or(tauri::PhysicalPosition::new(0, 0));
+        let detected = ((inner.y - outer.y) as f64 / sf).max(0.0);
+
+        // Standard macOS title bar ≈ 28 pts; notch models are taller.
+        let offset = if detected > 1.0 { detected } else { 28.0 };
+
+        eprintln!(
+            "[chat-webview] mac adjust: inner_pos={:?} outer_pos={:?} sf={sf} detected={detected} offset={offset}",
+            inner, outer
+        );
+
+        let adj_y = y + offset;
+        let adj_h = (height - offset).max(100.0);
         return (x, adj_y, width, adj_h);
     }
 
