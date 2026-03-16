@@ -670,26 +670,6 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
 
 const CHAT_WEBVIEW_LABEL: &str = "openclaw-chat";
 
-/// macOS AppKit uses a bottom-left origin (y increases upward) but
-/// `getBoundingClientRect()` in the webview uses a top-left origin
-/// (y increases downward).  `add_child` / `set_position` on macOS
-/// passes coordinates straight through to AppKit, so we must flip y.
-fn flip_y_for_platform(app: &tauri::AppHandle, y: f64, height: f64) -> Result<f64, String> {
-    #[cfg(target_os = "macos")]
-    {
-        let window = app.get_window("main").ok_or("main window not found")?;
-        let scale = window.scale_factor().unwrap_or(2.0);
-        let inner = window.inner_size().map_err(|e| format!("{e}"))?;
-        let content_h = inner.height as f64 / scale;
-        Ok(content_h - y - height)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = (app, height);
-        Ok(y)
-    }
-}
-
 #[tauri::command]
 pub async fn mount_chat_webview(
     app: tauri::AppHandle,
@@ -698,12 +678,10 @@ pub async fn mount_chat_webview(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
-    let actual_y = flip_y_for_platform(&app, y, height)?;
-
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
         wv.set_size(tauri::LogicalSize::new(width, height))
             .map_err(|e| format!("{e}"))?;
-        wv.set_position(tauri::LogicalPosition::new(x, actual_y))
+        wv.set_position(tauri::LogicalPosition::new(x, y))
             .map_err(|e| format!("{e}"))?;
         return Ok(());
     }
@@ -717,7 +695,7 @@ pub async fn mount_chat_webview(
                 CHAT_WEBVIEW_LABEL,
                 tauri::WebviewUrl::External(url.parse().map_err(|e| format!("{e}"))?),
             ),
-            tauri::LogicalPosition::new(x, actual_y),
+            tauri::LogicalPosition::new(x, y),
             tauri::LogicalSize::new(width, height),
         )
         .map_err(|e| format!("mount failed: {e}"))?;
@@ -753,10 +731,9 @@ pub async fn resize_chat_webview(
     height: f64,
 ) -> Result<(), String> {
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
-        let actual_y = flip_y_for_platform(&app, y, height)?;
         wv.set_size(tauri::LogicalSize::new(width, height))
             .map_err(|e| format!("{e}"))?;
-        wv.set_position(tauri::LogicalPosition::new(x, actual_y))
+        wv.set_position(tauri::LogicalPosition::new(x, y))
             .map_err(|e| format!("{e}"))?;
     }
     Ok(())

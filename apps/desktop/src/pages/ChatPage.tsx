@@ -38,16 +38,21 @@ export function ChatPage() {
     setShowPicker(false);
   };
 
-  const [debugBounds, setDebugBounds] = useState<string>("");
+  const isMac = navigator.platform.toUpperCase().includes("MAC");
 
   const getBounds = useCallback(() => {
     const el = containerRef.current;
     if (!el) return null;
     const rect = el.getBoundingClientRect();
-    const b = { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
-    setDebugBounds(`x=${b.x.toFixed(0)} y=${b.y.toFixed(0)} w=${b.width.toFixed(0)} h=${b.height.toFixed(0)} dpr=${window.devicePixelRatio}`);
-    return b;
-  }, []);
+    let y = rect.y;
+    if (isMac) {
+      // macOS AppKit positions child webviews with a bottom-left origin
+      // (y increases upward), but getBoundingClientRect uses top-left origin.
+      // Flip y so the webview lands below the header instead of over it.
+      y = window.innerHeight - rect.y - rect.height;
+    }
+    return { x: rect.x, y, width: rect.width, height: rect.height };
+  }, [isMac]);
 
   const handleRepair = useCallback(async () => {
     if (!selectedInst) return;
@@ -295,11 +300,6 @@ export function ChatPage() {
       </div>
 
       {showPicker && <div className="fixed inset-0 z-40" onClick={() => setShowPicker(false)} />}
-      {debugBounds && (
-        <div className="fixed bottom-2 right-2 bg-black/80 text-green-400 text-[10px] font-mono px-2 py-1 rounded z-[9999] pointer-events-none">
-          {debugBounds}
-        </div>
-      )}
     </div>
   );
 }
