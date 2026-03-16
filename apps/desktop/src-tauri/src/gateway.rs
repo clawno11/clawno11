@@ -670,10 +670,9 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
 
 const CHAT_WEBVIEW_LABEL: &str = "openclaw-chat";
 
-/// On macOS the child webview is positioned relative to the window's content
-/// view, but getBoundingClientRect returns coords relative to the *viewport*
-/// which starts below the title bar.  Compute the title bar offset from
-/// outer_size − inner_size and add it to y so the two coordinate systems align.
+/// Diagnostic: on macOS, add a hardcoded y-offset to verify the coordinate
+/// path is working.  +50 should produce a clearly visible gap between the
+/// header and the child webview.
 fn platform_adjust_bounds(
     window: &tauri::Window,
     x: f64,
@@ -683,24 +682,11 @@ fn platform_adjust_bounds(
 ) -> (f64, f64, f64, f64) {
     #[cfg(target_os = "macos")]
     {
-        let sf = window.scale_factor().unwrap_or(1.0);
-        let inner = window
-            .inner_size()
-            .unwrap_or(tauri::PhysicalSize::new(0, 0));
-        let outer = window
-            .outer_size()
-            .unwrap_or(tauri::PhysicalSize::new(0, 0));
-        let title_bar = (outer.height as f64 - inner.height as f64) / sf;
-        eprintln!(
-            "[chat-webview] adjust x={x} y={y} w={width} h={height} \
-             inner={}x{} outer={}x{} sf={sf} title_bar={title_bar} adj_y={}",
-            inner.width,
-            inner.height,
-            outer.width,
-            outer.height,
-            y + title_bar
-        );
-        return (x, y + title_bar, width, height);
+        let diag_offset = 50.0_f64;
+        let adj_y = y + diag_offset;
+        let adj_h = height - diag_offset;
+        eprintln!("[chat-webview] DIAG y={y} +{diag_offset} → adj_y={adj_y} adj_h={adj_h}");
+        return (x, adj_y, width, adj_h);
     }
 
     #[cfg(not(target_os = "macos"))]
