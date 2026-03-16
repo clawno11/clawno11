@@ -670,6 +670,46 @@ pub async fn open_in_browser(url: String) -> Result<(), String> {
 
 const CHAT_WEBVIEW_LABEL: &str = "openclaw-chat";
 
+/// On macOS the child webview is positioned relative to the window's content
+/// view, but getBoundingClientRect returns coords relative to the *viewport*
+/// which starts below the title bar.  Compute the title bar offset from
+/// outer_size − inner_size and add it to y so the two coordinate systems align.
+fn platform_adjust_bounds(
+    window: &tauri::Window,
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+) -> (f64, f64, f64, f64) {
+    #[cfg(target_os = "macos")]
+    {
+        let sf = window.scale_factor().unwrap_or(1.0);
+        let inner = window
+            .inner_size()
+            .unwrap_or(tauri::PhysicalSize::new(0, 0));
+        let outer = window
+            .outer_size()
+            .unwrap_or(tauri::PhysicalSize::new(0, 0));
+        let title_bar = (outer.height as f64 - inner.height as f64) / sf;
+        eprintln!(
+            "[chat-webview] adjust x={x} y={y} w={width} h={height} \
+             inner={}x{} outer={}x{} sf={sf} title_bar={title_bar} adj_y={}",
+            inner.width,
+            inner.height,
+            outer.width,
+            outer.height,
+            y + title_bar
+        );
+        return (x, y + title_bar, width, height);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        (x, y, width, height)
+    }
+}
+
 #[tauri::command]
 pub async fn mount_chat_webview(
     app: tauri::AppHandle,
@@ -680,26 +720,12 @@ pub async fn mount_chat_webview(
 ) -> Result<(), String> {
     let window = app.get_window("main").ok_or("main window not found")?;
 
-    #[cfg(target_os = "macos")]
-    {
-        let sf = window.scale_factor().unwrap_or(1.0);
-        let inner = window
-            .inner_size()
-            .unwrap_or(tauri::PhysicalSize::new(0, 0));
-        let logical_h = inner.height as f64 / sf;
-        eprintln!(
-            "[chat-webview] mount x={x} y={y} w={width} h={height} \
-             inner_phys={}x{} sf={sf} logical_h={logical_h} y+h={}",
-            inner.width,
-            inner.height,
-            y + height
-        );
-    }
+    let (adj_x, adj_y, adj_w, adj_h) = platform_adjust_bounds(&window, x, y, width, height);
 
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
         wv.set_bounds(tauri::Rect {
-            position: tauri::Position::Logical(tauri::LogicalPosition::new(x, y)),
-            size: tauri::Size::Logical(tauri::LogicalSize::new(width, height)),
+            position: tauri::Position::Logical(tauri::LogicalPosition::new(adj_x, adj_y)),
+            size: tauri::Size::Logical(tauri::LogicalSize::new(adj_w, adj_h)),
         })
         .map_err(|e| format!("{e}"))?;
         return Ok(());
@@ -713,8 +739,8 @@ pub async fn mount_chat_webview(
                 CHAT_WEBVIEW_LABEL,
                 tauri::WebviewUrl::External(url.parse().map_err(|e| format!("{e}"))?),
             ),
-            tauri::LogicalPosition::new(x, y),
-            tauri::LogicalSize::new(width, height),
+            tauri::LogicalPosition::new(adj_x, adj_y),
+            tauri::LogicalSize::new(adj_w, adj_h),
         )
         .map_err(|e| format!("mount failed: {e}"))?;
 
@@ -750,12 +776,12 @@ pub async fn resize_chat_webview(
     height: f64,
 ) -> Result<(), String> {
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
-        #[cfg(target_os = "macos")]
-        eprintln!("[chat-webview] resize x={x} y={y} w={width} h={height}");
+        let window = app.get_window("main").ok_or("main window not found")?;
+        let (adj_x, adj_y, adj_w, adj_h) = platform_adjust_bounds(&window, x, y, width, height);
 
         wv.set_bounds(tauri::Rect {
-            position: tauri::Position::Logical(tauri::LogicalPosition::new(x, y)),
-            size: tauri::Size::Logical(tauri::LogicalSize::new(width, height)),
+            position: tauri::Position::Logical(tauri::LogicalPosition::new(adj_x, adj_y)),
+            size: tauri::Size::Logical(tauri::LogicalSize::new(adj_w, adj_h)),
         })
         .map_err(|e| format!("{e}"))?;
     }
