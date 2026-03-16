@@ -25,9 +25,10 @@ target
 npm-debug.log*
 pnpm-debug.log*
 
-# Editor
+# Editor / IDE
 .vscode
 .idea
+.cursor
 *.suo
 *.ntvs*
 *.njsproj

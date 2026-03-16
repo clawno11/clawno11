@@ -7,9 +7,18 @@
 [![React](https://img.shields.io/badge/React-19-61dafb.svg)](https://react.dev)
 [![Rust](https://img.shields.io/badge/Rust-1.80+-orange.svg)](https://rustup.rs)
 
-**ClawNo.11** 是一款基于 [Tauri 2](https://tauri.app) + [React 19](https://react.dev) 构建的桌面应用，为 [OpenClaw](https://github.com/clawno11/clawno11) AI 网关提供**一键部署、可视化管理和本地 AI 对话**能力。
+**ClawNo.11** 是一款基于 [Tauri 2](https://tauri.app) + [React 19](https://react.dev) 构建的**跨平台应用**（Windows / macOS / iOS / Android），为 [OpenClaw](https://github.com/clawno11/clawno11) AI 网关提供**一键部署、可视化管理和本地 AI 对话**能力。
 
 *Your AI, Your Data, Your Home.*
+
+### 支持平台
+
+| 平台 | 状态 | 安装方式 |
+|------|------|---------|
+| Windows | ✅ | `.msi` / `.exe` |
+| macOS | ✅ | `.dmg` |
+| iOS | ✅ | Xcode 构建 / TestFlight |
+| Android | ✅ | `.apk` |
 
 ---
 
@@ -113,7 +122,16 @@ DeepSeek · Moonshot/Kimi · 阿里通义千问 · 字节豆包 · 腾讯混元 
 ```
 clawno11/
 ├── apps/
-│   └── desktop/
+│   ├── desktop/                           # 桌面版（Windows / macOS）
+│   └── mobile/                            # 移动版（iOS / Android）
+├── packages/
+│   ├── shared/                            # 共享前端代码（组件/Store/国际化）
+│   ├── openclaw-client/                   # OpenClaw SSE 流式客户端
+│   ├── deploy-engine/                     # 远程部署引擎
+│   └── clawno-server/                     # ClawNO11 独立服务端
+├── crates/
+│   └── clawno-core/                       # 共享 Rust 核心逻辑
+├── apps/desktop/                          # ──── 桌面版详细结构 ────
 │       ├── package.json                    # 前端依赖配置
 │       ├── vite.config.ts                  # Vite 构建配置
 │       ├── src/                            # React 前端源码
@@ -202,13 +220,34 @@ cd clawno11
 
 # 2. 安装依赖
 pnpm install
+```
 
-# 3. 开发模式（热更新）
+#### 桌面版（Windows / macOS）
+
+```bash
 cd apps/desktop
-pnpm tauri:dev
+pnpm tauri:dev          # 开发模式（热更新）
+pnpm tauri:build        # 生产构建
+```
 
-# 4. 生产构建
-pnpm tauri:build
+#### iOS 移动版
+
+```bash
+cd apps/mobile
+npx tauri ios init      # 首次：生成 Xcode 项目
+npx tauri ios dev --open  # 开发模式（Xcode 打开后选择模拟器运行）
+npx tauri ios build     # 生产构建
+```
+
+> **注意**：iOS 构建需要 macOS + Xcode 15+。请在 `apps/mobile/src-tauri/tauri.conf.json` 中将 `developmentTeam` 替换为你的 Apple Developer Team ID。
+
+#### Android 移动版
+
+```bash
+cd apps/mobile
+npx tauri android init   # 首次：生成 Android 项目
+npx tauri android dev    # 开发模式
+npx tauri android build  # 生产构建
 ```
 
 > 详细环境搭建请参阅 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)

@@ -700,11 +700,6 @@ fn platform_adjust_bounds(
         // Standard macOS title bar ≈ 28 pts; notch models are taller.
         let offset = if detected > 1.0 { detected } else { 28.0 };
 
-        eprintln!(
-            "[chat-webview] mac adjust: inner_pos={:?} outer_pos={:?} sf={sf} detected={detected} offset={offset}",
-            inner, outer
-        );
-
         let adj_y = y + offset;
         let adj_h = (height - offset).max(100.0);
         return (x, adj_y, width, adj_h);

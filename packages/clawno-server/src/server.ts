@@ -42,7 +42,7 @@ export function createServer(config: ServerConfig) {
         console.log(`  ─────────────────────────────`);
         console.log(`  Listening:  http://${config.host}:${config.port}`);
         console.log(`  Gateway:    ${config.gatewayUrl}`);
-        console.log(`  Auth token: ${token}`);
+        console.log(`  Auth token: ${token.slice(0, 6)}..${token.slice(-4)}`);
         console.log(`  Health:     http://${config.host}:${config.port}/health\n`);
       });
     },
