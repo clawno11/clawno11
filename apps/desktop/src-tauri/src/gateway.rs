@@ -678,8 +678,23 @@ pub async fn mount_chat_webview(
     width: f64,
     height: f64,
 ) -> Result<(), String> {
+    let window = app.get_window("main").ok_or("main window not found")?;
+
     #[cfg(target_os = "macos")]
-    eprintln!("[chat-webview] mount x={x} y={y} w={width} h={height}");
+    {
+        let sf = window.scale_factor().unwrap_or(1.0);
+        let inner = window
+            .inner_size()
+            .unwrap_or(tauri::PhysicalSize::new(0, 0));
+        let logical_h = inner.height as f64 / sf;
+        eprintln!(
+            "[chat-webview] mount x={x} y={y} w={width} h={height} \
+             inner_phys={}x{} sf={sf} logical_h={logical_h} y+h={}",
+            inner.width,
+            inner.height,
+            y + height
+        );
+    }
 
     if let Some(wv) = app.get_webview(CHAT_WEBVIEW_LABEL) {
         wv.set_bounds(tauri::Rect {
@@ -691,7 +706,6 @@ pub async fn mount_chat_webview(
     }
 
     let url = get_browser_url(None).await;
-    let window = app.get_window("main").ok_or("main window not found")?;
 
     window
         .add_child(
