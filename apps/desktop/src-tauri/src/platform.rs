@@ -70,6 +70,7 @@ pub fn path_join(a: &str, b: &str) -> String {
 
 /// Build a PATH string that includes all common Node.js install locations.
 /// Prepended so our managed installs take precedence over system installs.
+#[allow(unused_variables)]
 pub fn augmented_path() -> String {
     let home = user_home();
     let roaming = data_roaming();

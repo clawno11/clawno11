@@ -1,4 +1,5 @@
 use crate::node::npm_install_with_fallback;
+#[allow(unused_imports)]
 use crate::platform::{augmented_path, data_local, data_roaming, first_line, path_join};
 use crate::types::{ServiceInfo, StepResult};
 /// pm2 process manager — installation, lifecycle, and service queries.

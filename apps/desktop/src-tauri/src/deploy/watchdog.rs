@@ -70,7 +70,7 @@ pub async fn run_with_watchdog<F>(
     cmd: &str,
     stall_timeout: Duration,
     on_output: F,
-    allow_window: bool,
+    _allow_window: bool,
 ) -> WatchdogResult
 where
     F: Fn(&str) + Send + Sync + 'static,
@@ -82,7 +82,7 @@ where
     let mut child = {
         let mut c = TokioCommand::new("cmd");
         c.args(["/C", cmd]);
-        if !allow_window {
+        if !_allow_window {
             c.creation_flags(CREATE_NO_WINDOW);
         }
         c.env("PATH", augmented_path());

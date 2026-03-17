@@ -170,6 +170,7 @@ fn inject_git_paths() {
 }
 
 #[cfg(not(target_os = "windows"))]
+#[allow(dead_code)]
 fn inject_git_paths() {}
 
 fn scan_git() -> DependencyInfo {

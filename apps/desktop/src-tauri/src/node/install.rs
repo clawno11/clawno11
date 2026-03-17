@@ -152,6 +152,7 @@ pub fn ensure_npm(fixes: &mut Vec<String>) -> bool {
     false
 }
 
+#[allow(dead_code, clippy::ptr_arg)]
 fn refresh_windows_path(#[allow(unused_variables)] fixes: &mut Vec<String>) {
     #[cfg(target_os = "windows")]
     {
@@ -714,7 +715,7 @@ impl Strategy for AptStrategy {
         "apt-nodesource"
     }
 
-    async fn execute(&self, ctx: &mut StepContext) -> StrategyOutcome {
+    async fn execute(&self, _ctx: &mut StepContext) -> StrategyOutcome {
         let cmd = "curl -fsSL https://deb.nodesource.com/setup_22.x 2>/dev/null | bash - >/dev/null 2>&1 && apt-get install -y nodejs >/dev/null 2>&1";
         let result =
             watchdog::run_with_watchdog(cmd, Duration::from_secs(120), |_| {}, false).await;
@@ -763,7 +764,7 @@ impl Strategy for DnfStrategy {
         "dnf"
     }
 
-    async fn execute(&self, ctx: &mut StepContext) -> StrategyOutcome {
+    async fn execute(&self, _ctx: &mut StepContext) -> StrategyOutcome {
         let result = watchdog::run_with_watchdog(
             "dnf install -y nodejs >/dev/null 2>&1",
             Duration::from_secs(120),
@@ -816,7 +817,7 @@ impl Strategy for PacmanStrategy {
         "pacman"
     }
 
-    async fn execute(&self, ctx: &mut StepContext) -> StrategyOutcome {
+    async fn execute(&self, _ctx: &mut StepContext) -> StrategyOutcome {
         let result = watchdog::run_with_watchdog(
             "pacman -Sy --noconfirm nodejs npm >/dev/null 2>&1",
             Duration::from_secs(120),

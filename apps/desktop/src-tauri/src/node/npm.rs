@@ -1,4 +1,5 @@
 /// npm error classification and install helpers with automatic fallbacks.
+#[allow(unused_imports)]
 use crate::platform::{data_local, path_join, shell_ok, shell_output, shell_result};
 use serde::Serialize;
 
