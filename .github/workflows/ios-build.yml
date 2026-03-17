@@ -93,6 +93,23 @@ jobs:
         working-directory: apps/mobile
         run: pnpm tauri ios build --export-method app-store-connect || true
 
+      # Diagnose signing assets to identify mismatches
+      - name: Debug signing info
+        env:
+          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          echo "=== Certificates in keychain ==="
+          security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" || true
+
+          echo ""
+          echo "=== Provisioning profile Team & App ID ==="
+          security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
+            | grep -A1 -E "TeamIdentifier|application-identifier|TeamName|UUID" || true
+
+          echo ""
+          echo "=== TEAM_ID length: ${#TEAM_ID}, SIGN_IDENTITY length: ${#SIGN_IDENTITY} ==="
+
       # Run xcodebuild directly with manual signing overrides on the command line
       - name: Build iOS with manual signing
         working-directory: apps/mobile/src-tauri/gen/apple
