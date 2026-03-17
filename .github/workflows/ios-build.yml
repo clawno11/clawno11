@@ -99,17 +99,17 @@ jobs:
           sudo mv "$XCODEBUILD" "${XCODEBUILD}.orig"
           printf '%s\n' \
             '#!/bin/bash' \
-            '# Patch ExportOptions.plist for manual signing when exporting' \
+            '# Rebuild ExportOptions.plist from scratch for manual signing' \
             'prev=""' \
             'for arg in "$@"; do' \
-            '  if [ "$prev" = "-exportOptionsPlist" ] && [ -f "$arg" ]; then' \
-            '    /usr/libexec/PlistBuddy -c "Set :signingStyle manual" "$arg" 2>/dev/null ||' \
-            '      /usr/libexec/PlistBuddy -c "Add :signingStyle string manual" "$arg"' \
-            '    /usr/libexec/PlistBuddy -c "Set :teamID ${CI_TEAM_ID}" "$arg" 2>/dev/null ||' \
-            '      /usr/libexec/PlistBuddy -c "Add :teamID string ${CI_TEAM_ID}" "$arg"' \
-            '    /usr/libexec/PlistBuddy -c "Delete :provisioningProfiles" "$arg" 2>/dev/null' \
-            '    /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$arg" 2>/dev/null' \
-            '    /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:ai.clawno11.mobile string ${CI_PROFILE_UUID}" "$arg" 2>/dev/null' \
+            '  if [ "$prev" = "-exportOptionsPlist" ]; then' \
+            '    rm -f "$arg"' \
+            '    /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$arg"' \
+            '    /usr/libexec/PlistBuddy -c "Add :teamID string ${CI_TEAM_ID}" "$arg"' \
+            '    /usr/libexec/PlistBuddy -c "Add :signingStyle string manual" "$arg"' \
+            '    /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$arg"' \
+            '    /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:ai.clawno11.mobile string ${CI_PROFILE_UUID}" "$arg"' \
+            '    break' \
             '  fi' \
             '  prev="$arg"' \
             'done' \
