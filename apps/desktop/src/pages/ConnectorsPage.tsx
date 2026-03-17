@@ -26,7 +26,7 @@ export function ConnectorsPage() {
         </p>
       </div>
 
-      {/* 手机 App 扫码连接 */}
+      {/* 手机 App 连接 */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-0.5">
           {t("connectors.mobileConnTitle")}

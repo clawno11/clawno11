@@ -115,20 +115,23 @@
   "connectors": {
     "title": "连接器",
     "desc": "将 OpenClaw AI 接入即时通讯工具，并配置手机远程访问",
-    "mobileConnTitle": "手机 App 扫码连接",
+    "mobileConnTitle": "手机 App 连接",
     "imTitle": "即时通讯连接器",
     "intlImTitle": "国际 IM 连接器（Telegram · Discord）",
     "remoteAccessTitle": "远程访问隧道",
-    "mobileQr": {
-      "title": "手机 App 扫码连接",
-      "desc": "OTP 一次性令牌，2 分钟自动过期，扫码即连",
-      "step1": "在手机上安装 ClawNo.11 App",
-      "step2": "打开 App → 连接页 → 点击「扫一扫」，对准此二维码即可完成连接",
-      "noLan": "未检测到局域网 IP，请确保已连接 WiFi 或以太网",
-      "noLanWarn": "未检测到局域网 IP，二维码无法生成。请先连接局域网。",
-      "genError": "生成失败，请刷新重试",
-      "refreshing": "正在刷新...",
-      "refreshBtn": "立即刷新二维码"
+    "mobileIp": {
+      "title": "手机 App 连接",
+      "desc": "将下方地址输入手机端 ClawNo.11 App 即可连接",
+      "detecting": "正在检测网络地址...",
+      "noIp": "未检测到局域网 IP",
+      "noIpHint": "请确保电脑已连接 WiFi 或以太网。",
+      "availableAddresses": "可用连接地址（复制一个到手机）：",
+      "copy": "复制地址",
+      "howTo": "连接步骤：",
+      "step1": "在手机上安装 ClawNo.11 App（iOS：TestFlight / App Store，Android：APK）",
+      "step2": "打开 App → 连接页 → 粘贴或输入上方地址",
+      "step3": "点击「测试连接」→ 成功后点击「添加」保存",
+      "portNote": "端口 18800 是聊天代理 —— 它监听所有网络接口，手机通过局域网即可访问。如果有防火墙，请确保放行此端口。Windows 用户请将网络设为「专用网络」。"
     },
     "tailscale": {
       "title": "Tailscale VPN",

@@ -151,12 +151,16 @@ export function ChatPage() {
     return () => { cancelled = true; };
   }, [selectedId, instances, configuredProviders]);
 
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     const onResize = () => {
+      if (chatContainerRef.current) {
+        chatContainerRef.current.style.height = `${vv.height}px`;
+      }
       const offset = window.innerHeight - vv.height;
-      document.documentElement.style.setProperty("--keyboard-offset", `${offset}px`);
       if (offset > 50) requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }));
     };
     vv.addEventListener("resize", onResize);
@@ -164,7 +168,7 @@ export function ChatPage() {
     return () => {
       vv.removeEventListener("resize", onResize);
       vv.removeEventListener("scroll", onResize);
-      document.documentElement.style.setProperty("--keyboard-offset", "0px");
+      if (chatContainerRef.current) chatContainerRef.current.style.height = "";
     };
   }, []);
 
@@ -366,7 +370,7 @@ export function ChatPage() {
 
   if (instances.length === 0) {
     return (
-      <div className="flex flex-col h-full">
+      <div ref={chatContainerRef} className="flex flex-col h-full">
         <TopBar title={t("chat.title")} />
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -440,7 +444,7 @@ export function ChatPage() {
   );
 
   return (
-    <div className="flex flex-col h-full relative overflow-hidden">
+    <div ref={chatContainerRef} className="flex flex-col h-full relative overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 flex-shrink-0 top-bar"
         style={{ borderBottom: "1px solid rgba(6,182,212,0.12)", background: "rgba(6,182,212,0.02)" }}>

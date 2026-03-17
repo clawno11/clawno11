@@ -126,6 +126,7 @@ pub fn run() {
             security::network::remove_allowed_ip,
             security::network::scan_lan_devices,
             security::network::get_local_lan_info,
+            security::network::get_all_lan_ips,
             // ── Connectors ───────────────────────────────────────────────────
             connectors::test_feishu_connection,
             connectors::save_feishu_config,

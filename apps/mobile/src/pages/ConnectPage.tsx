@@ -4,21 +4,22 @@
  * Supports two connection methods:
  *  1. xEdge (WeChat login, easy setup)
  *  2. Tailscale VPN (global, cross-platform)
+ *
+ * Users enter the server address manually (shown on the desktop Connectors page).
  */
 import { useState, useEffect, useCallback } from "react";
 import {
   Network, ExternalLink, Wifi, WifiOff, Plus, CheckCircle2,
   AlertTriangle, Loader, ChevronDown, ChevronUp, Info, Zap,
-  QrCode, ClipboardPaste, Server, ChevronRight, Camera,
+  Server, ChevronRight,
 } from "lucide-react";
-import { scan, Format } from "@tauri-apps/plugin-barcode-scanner";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { getTailscaleStatus, probeGatewayUrl, fetchChatProxyToken, type TailscaleStatus } from "../ipc";
 import { useInstanceStore, type ClawInstance } from "../store/instances";
 import { TopBar } from "../components/TopBar";
 
-const DEFAULT_PORT = 18789;
+const DEFAULT_PORT = 18800;
 
 type ConnectMethod = "xedge" | "tailscale";
 
@@ -69,340 +70,7 @@ function Section({ title, color, children }: { title: string; color: string; chi
   );
 }
 
-// ── QR / Deep-link parser ─────────────────────────────────────────────────
-
-const PIN_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
-
-/** Derive a 6-char PIN from the first 6 bytes of a UTF-8 token string.
- *  Must match the Rust `derive_pin` function in pairing.rs. */
-function derivePin(token: string): string {
-  return Array.from(token.slice(0, 6)).map(
-    (ch) => PIN_ALPHABET[ch.charCodeAt(0) % PIN_ALPHABET.length]
-  ).join("");
-}
-
-/** Decode URL-safe Base64 (no padding) to a UTF-8 string.
- *  Uses TextDecoder so that non-ASCII server names (e.g. Chinese) are handled correctly. */
-function b64Decode(s: string): string {
-  try {
-    const padded  = s.replace(/-/g, "+").replace(/_/g, "/");
-    const withPad = padded + "==".slice(0, (4 - (padded.length % 4)) % 4);
-    // atob returns a binary string — convert to Uint8Array then decode as UTF-8.
-    const binary  = atob(withPad);
-    const bytes   = Uint8Array.from(binary, (c) => c.charCodeAt(0));
-    return new TextDecoder().decode(bytes);
-  } catch {
-    return "";
-  }
-}
-
-interface ParsedPairLink {
-  host: string;       // e.g. "192.168.1.5:18789"
-  name: string;
-  token: string;
-  expiresAt: number;  // unix seconds
-  pin: string;
-  /** Verify-server port (optional — present only when desktop supports it). */
-  verifyPort?: number;
-  /** Chat proxy Bearer token for authenticating REST chat requests (port 18800). */
-  chatKey?: string;
-}
-
-interface ParsedConnectLink {
-  url: string;
-  name: string;
-  method: ConnectMethod;
-}
-
-/** Parse the new secure format: clawno11://pair?h=B64&n=B64&t=TOKEN&exp=TS */
-function parsePairLink(raw: string): ParsedPairLink | null {
-  try {
-    const text = raw.trim();
-    if (!text.startsWith("clawno11://pair")) return null;
-    const withHttp = text.replace("clawno11://pair", "https://x.invalid/pair");
-    const parsed = new URL(withHttp);
-    const host      = b64Decode(parsed.searchParams.get("h") ?? "");
-    const name      = b64Decode(parsed.searchParams.get("n") ?? "");
-    const token     = parsed.searchParams.get("t") ?? "";
-    const expiresAt = parseInt(parsed.searchParams.get("exp") ?? "0", 10);
-    const vpRaw     = parsed.searchParams.get("vp");
-    const verifyPort = vpRaw ? parseInt(vpRaw, 10) : undefined;
-    const chatKey   = parsed.searchParams.get("ck") ?? undefined;
-    if (!host || !token || !expiresAt) return null;
-    return { host, name, token, expiresAt, pin: derivePin(token), verifyPort, chatKey };
-  } catch { return null; }
-}
-
-/** Parse the legacy format: clawno11://connect?url=...&name=...&method=... */
-function parseConnectLink(raw: string): ParsedConnectLink | null {
-  try {
-    const text = raw.trim();
-    if (text.startsWith("clawno11://connect")) {
-      const withHttp = text.replace("clawno11://connect", "https://x.invalid/connect");
-      const parsed = new URL(withHttp);
-      const url    = decodeURIComponent(parsed.searchParams.get("url") ?? "");
-      const name   = decodeURIComponent(parsed.searchParams.get("name") ?? "");
-      const method = (parsed.searchParams.get("method") ?? "xedge") as ConnectMethod;
-      if (url) return { url, name, method };
-    }
-    if (text.startsWith("http://") || text.startsWith("https://")) {
-      return { url: text, name: "", method: "xedge" };
-    }
-  } catch { /* invalid */ }
-  return null;
-}
-
-// ── PIN Confirmation Modal ─────────────────────────────────────────────────
-
-function PinConfirmModal({
-  pairInfo,
-  onConfirm,
-  onCancel,
-}: {
-  pairInfo: ParsedPairLink;
-  onConfirm: (host: string, name: string) => void | Promise<void>;
-  onCancel: () => void;
-}) {
-  const { t } = useTranslation();
-  const nowSecs = () => Math.floor(Date.now() / 1000);
-  const [remaining, setRemaining] = useState(pairInfo.expiresAt - nowSecs());
-  const [confirming, setConfirming] = useState(false);
-
-  useEffect(() => {
-    const tick = setInterval(() => {
-      setRemaining(pairInfo.expiresAt - nowSecs());
-    }, 1000);
-    return () => clearInterval(tick);
-  }, [pairInfo.expiresAt]);
-
-  const expired = remaining <= 0;
-
-  const handleConfirm = async () => {
-    if (expired || confirming) return;
-    setConfirming(true);
-    try {
-      await onConfirm(pairInfo.host, pairInfo.name);
-    } finally {
-      setConfirming(false);
-    }
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="w-full max-w-sm rounded-2xl bg-[hsl(var(--card))] overflow-hidden shadow-2xl">
-        {/* Header */}
-        <div className="px-5 pt-5 pb-3 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-[hsl(var(--primary))]/10 flex items-center justify-center mx-auto mb-3">
-            <QrCode size={22} className="text-[hsl(var(--primary))]" />
-          </div>
-          <p className="font-bold text-base">{t("connect.pinConfirmTitle")}</p>
-          <p className="text-xs text-[hsl(var(--muted-foreground))] mt-1">
-            {pairInfo.name || pairInfo.host}
-          </p>
-        </div>
-
-        {/* PIN */}
-        <div className="mx-5 mb-4 rounded-xl border-2 border-[hsl(var(--primary))]/20 bg-[hsl(var(--primary))]/5 p-4 text-center">
-          <p className="text-[10px] font-semibold text-[hsl(var(--muted-foreground))] uppercase tracking-wider mb-2">
-            {t("connect.pinLabel")}
-          </p>
-          <p className="text-4xl font-black tracking-[0.3em] text-[hsl(var(--primary))] font-mono">
-            {pairInfo.pin}
-          </p>
-          <p className="text-[11px] text-[hsl(var(--muted-foreground))] mt-2 leading-relaxed">
-            {t("connect.pinInstruction")}
-          </p>
-        </div>
-
-        {/* Expiry */}
-        {expired ? (
-          <p className="text-center text-xs text-red-500 font-semibold mb-4 flex items-center justify-center gap-1">
-            <AlertTriangle size={12} /> {t("connect.pinExpired")}
-          </p>
-        ) : (
-          <p className="text-center text-xs text-[hsl(var(--muted-foreground))] mb-4">
-            {t("connect.pinExpiry", { seconds: Math.max(0, remaining) })}
-          </p>
-        )}
-
-        {/* Buttons */}
-        <div className="flex gap-3 px-5 pb-5">
-          <button
-            onClick={onCancel}
-            className="flex-1 py-3 rounded-xl border border-[hsl(var(--border))] text-sm font-semibold text-[hsl(var(--foreground))]"
-          >
-            {t("connect.pinCancel")}
-          </button>
-          <button
-            onClick={handleConfirm}
-            disabled={expired || confirming}
-            className="flex-1 py-3 rounded-xl text-sm font-semibold text-white disabled:opacity-40 flex items-center justify-center gap-2"
-            style={{ background: "linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary)/0.8))" }}
-          >
-            {confirming && <Loader size={14} className="animate-spin" />}
-            {t("connect.pinConfirmBtn")}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Scan / Paste QR banner ────────────────────────────────────────────────
-
-/** Consume a pairing token via the desktop verify micro-server (best-effort). */
-async function consumePairToken(pair: ParsedPairLink) {
-  if (!pair.verifyPort || pair.verifyPort <= 0) return;
-  const lanIp = pair.host.split(":")[0];
-  const verifyUrl = `http://${lanIp}:${pair.verifyPort}/pair/verify`;
-  try {
-    await fetch(verifyUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: pair.token }),
-      signal: AbortSignal.timeout(3000),
-    });
-  } catch {
-    // Non-fatal — token TTL + single-use still protect against replay.
-  }
-}
-
-function QrPasteBanner({ onPairConfirmed, onLegacyParsed }: {
-  onPairConfirmed: (url: string, name: string, method: ConnectMethod, chatKey?: string) => void;
-  onLegacyParsed: (url: string, name: string, method: ConnectMethod) => void;
-}) {
-  const { t } = useTranslation();
-  const [scanning, setScanning]     = useState(false);
-  const [pasting, setPasting]       = useState(false);
-  const [err, setErr]               = useState<string | null>(null);
-  const [pendingPair, setPendingPair] = useState<ParsedPairLink | null>(null);
-
-  const finishPair = useCallback(async (pair: ParsedPairLink) => {
-    await consumePairToken(pair);
-    onPairConfirmed(`http://${pair.host}`, pair.name, "xedge", pair.chatKey);
-  }, [onPairConfirmed]);
-
-  const handleScan = async () => {
-    setScanning(true);
-    setErr(null);
-    try {
-      const result = await scan({ formats: [Format.QRCode] });
-      const content = result.content;
-
-      const pair = parsePairLink(content);
-      if (pair) {
-        if (pair.expiresAt <= Math.floor(Date.now() / 1000)) {
-          setErr(t("connect.qrExpiredErr"));
-          return;
-        }
-        await finishPair(pair);
-        return;
-      }
-
-      const legacy = parseConnectLink(content);
-      if (legacy) {
-        onLegacyParsed(legacy.url, legacy.name, legacy.method);
-      } else {
-        setErr(t("connect.qrInvalidErr"));
-      }
-    } catch {
-      setErr(t("connect.qrScanErr"));
-    } finally {
-      setScanning(false);
-    }
-  };
-
-  const handlePaste = async () => {
-    setPasting(true);
-    setErr(null);
-    try {
-      const text = await navigator.clipboard.readText();
-
-      const pair = parsePairLink(text);
-      if (pair) {
-        if (pair.expiresAt <= Math.floor(Date.now() / 1000)) {
-          setErr(t("connect.qrExpiredErr"));
-          return;
-        }
-        setPendingPair(pair);
-        return;
-      }
-
-      const legacy = parseConnectLink(text);
-      if (legacy) {
-        onLegacyParsed(legacy.url, legacy.name, legacy.method);
-      } else {
-        setErr(t("connect.qrPasteErr"));
-      }
-    } catch {
-      setErr(t("connect.qrClipboardErr"));
-    } finally {
-      setPasting(false);
-    }
-  };
-
-  const handlePinConfirm = async (host: string, name: string) => {
-    if (pendingPair) await consumePairToken(pendingPair);
-    onPairConfirmed(`http://${host}`, name, "xedge", pendingPair?.chatKey);
-    setPendingPair(null);
-  };
-
-  return (
-    <>
-      {pendingPair && (
-        <PinConfirmModal
-          pairInfo={pendingPair}
-          onConfirm={handlePinConfirm}
-          onCancel={() => setPendingPair(null)}
-        />
-      )}
-
-      <div className="rounded-2xl border border-[hsl(var(--border))] bg-[hsl(var(--card))] overflow-hidden">
-        <div className="flex items-center gap-3 px-4 py-3 border-b border-[hsl(var(--border))]/60"
-          style={{ background: "rgba(6,182,212,0.04)" }}>
-          <QrCode size={16} className="text-[hsl(var(--primary))]" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold">{t("connect.qrTitle")}</p>
-            <p className="text-xs text-[hsl(var(--muted-foreground))]">{t("connect.qrDesc")}</p>
-          </div>
-        </div>
-        <div className="p-4 space-y-3">
-          <p className="text-xs text-[hsl(var(--muted-foreground))] leading-relaxed">
-            {t("connect.qrScanInstruction")}
-          </p>
-
-          {/* Primary: in-app QR scan */}
-          <button
-            onClick={handleScan}
-            disabled={scanning}
-            className="touch-btn w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-semibold text-white disabled:opacity-50"
-            style={{ background: "linear-gradient(135deg, hsl(var(--primary)), hsl(var(--primary)/0.8))" }}
-          >
-            {scanning ? <Loader size={15} className="animate-spin" /> : <Camera size={15} />}
-            {t("connect.qrScanBtn")}
-          </button>
-
-          {/* Secondary: paste fallback */}
-          <button
-            onClick={handlePaste}
-            disabled={pasting}
-            className="touch-btn w-full flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs text-[hsl(var(--muted-foreground))] disabled:opacity-50"
-            style={{ border: "1px solid hsl(var(--border))" }}
-          >
-            {pasting ? <Loader size={12} className="animate-spin" /> : <ClipboardPaste size={12} />}
-            {t("connect.qrPasteBtn")}
-          </button>
-
-          {err && (
-            <p className="text-xs text-red-500 flex items-center gap-1.5">
-              <AlertTriangle size={12} /> {err}
-            </p>
-          )}
-        </div>
-      </div>
-    </>
-  );
-}
+// ── URL parser ────────────────────────────────────────────────────────────
 
 // ── Main ─────────────────────────────────────────────────────────────────
 
@@ -498,35 +166,11 @@ export function ConnectPage() {
 
   const activeMethod = METHOD_META.find((m) => m.id === method)!;
 
-  const applyParsed = useCallback((parsedUrl: string, parsedName: string, parsedMethod: ConnectMethod, chatKey?: string) => {
-    // Always persist the chat proxy token globally so ANY instance (even one
-    // added manually with a different IP like 10.0.2.2) can authenticate.
-    if (chatKey) {
-      setGlobalChatProxyToken(chatKey);
-
-      // Also update existing instances whose host matches (best-effort).
-      try {
-        const host = new URL(parsedUrl).host;
-        if (host) updateTokenByHost(host, chatKey);
-      } catch { /* ignore */ }
-    }
-
-    setUrl(parsedUrl);
-    if (parsedName) setName(parsedName);
-    setMethod(parsedMethod);
-    setChatProxyToken(chatKey);
-    setTestResult(null);
-    setAdded(false);
-  }, [updateTokenByHost, setGlobalChatProxyToken]);
-
   return (
     <div className="flex flex-col h-full">
       <TopBar title={t("connect.title")} subtitle={t("connect.desc")} />
 
       <div className="flex-1 scrollable p-4 pb-6 space-y-4">
-
-        {/* ── QR / Paste Banner (OTP + PIN) ── */}
-        <QrPasteBanner onPairConfirmed={applyParsed} onLegacyParsed={applyParsed} />
 
         {/* ── Method selector ── */}
         <div className="grid grid-cols-2 gap-2 mb-4">

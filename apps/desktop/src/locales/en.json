@@ -107,20 +107,23 @@
   "connectors": {
     "title": "Connectors",
     "desc": "Connect OpenClaw AI to messaging platforms and configure mobile remote access",
-    "mobileConnTitle": "Mobile App QR Connect",
+    "mobileConnTitle": "Mobile App Connection",
     "imTitle": "Instant Messaging Connectors",
     "intlImTitle": "International IM (Telegram · Discord)",
     "remoteAccessTitle": "Remote Access Tunnels",
-    "mobileQr": {
-      "title": "Mobile App QR Connect",
-      "desc": "One-time OTP token, auto-expires in 2 minutes, scan to connect",
-      "step1": "Install ClawNo.11 on your phone",
-      "step2": "Open App → Connect tab → tap 'Scan QR Code' and point at this QR code",
-      "noLan": "No LAN IP detected. Please connect to WiFi or Ethernet.",
-      "noLanWarn": "No LAN IP detected — QR code cannot be generated. Connect to a local network first.",
-      "genError": "Generation failed. Please try refreshing.",
-      "refreshing": "Refreshing...",
-      "refreshBtn": "Refresh QR code now"
+    "mobileIp": {
+      "title": "Mobile App Connection",
+      "desc": "Enter the address below into your phone's ClawNo.11 app to connect",
+      "detecting": "Detecting network addresses...",
+      "noIp": "No LAN IP detected",
+      "noIpHint": "Please connect your computer to WiFi or Ethernet first.",
+      "availableAddresses": "Available connection addresses (copy one to your phone):",
+      "copy": "Copy address",
+      "howTo": "How to connect:",
+      "step1": "Install ClawNo.11 on your phone (iOS: TestFlight / App Store, Android: APK)",
+      "step2": "Open the app → Connect tab → paste or type one of the addresses above",
+      "step3": "Tap 'Test Connection' → if successful, tap 'Add' to save",
+      "portNote": "Port 18800 is the Chat Proxy — it listens on all network interfaces so your phone can reach it over LAN. If you have a firewall, make sure this port is allowed. On Windows, set your network to 'Private'."
     },
     "tailscale": {
       "title": "Tailscale VPN",

@@ -130,19 +130,12 @@ body,
   scroll-behavior: smooth;
 }
 
-/* ── Keyboard offset (set by JS via visualViewport API on iOS) ──────────── */
-
-:root {
-  --keyboard-offset: 0px;
-}
-
-/* ── Chat input bar – stay above keyboard ───────────────────────────────── */
+/* ── Chat input bar ────────────────────────────────────────────────────── */
 
 .chat-input-bar {
-  padding-bottom: max(calc(var(--safe-bottom) + var(--keyboard-offset)), 8px);
+  padding-bottom: max(var(--safe-bottom), 8px);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
-  transition: padding-bottom 0.15s ease-out;
 }
 
 /* ── Message bubble animations ─────────────────────────────────────────── */

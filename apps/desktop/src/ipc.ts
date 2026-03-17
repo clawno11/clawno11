@@ -150,19 +150,7 @@ export const testFeishuConnection   = (appId: string, appSecret: string) => invo
 export const saveFeishuConfig       = (appId: string, appSecret: string)  => invoke<string>("save_feishu_config", { appId, appSecret });
 export const getFeishuConfig        = ()                                   => invoke<string | null>("get_feishu_config");
 export const getLanInfo             = ()                                   => invoke<LanInfo | null>("get_local_lan_info");
-
-// ── Secure Pairing commands ──────────────────────────────────────────────────
-
-export interface PairQrPayload {
-  qr_data: string;
-  pin: string;
-  expires_at: number;
-}
-
-export const generatePairQr         = (port: number, serverName: string)              => invoke<PairQrPayload>("generate_pair_qr", { port, serverName });
-export const generatePairQrWithHost = (host: string, port: number, serverName: string) => invoke<PairQrPayload>("generate_pair_qr_with_host", { host, port, serverName });
-export const verifyPairToken        = (token: string)                                  => invoke<void>("verify_pair_token", { token });
-export const getCurrentPairPin      = ()                                               => invoke<string | null>("get_current_pair_pin");
+export const getAllLanIps           = ()                                   => invoke<string[]>("get_all_lan_ips");
 
 // ── Telegram Bot commands ────────────────────────────────────────────────────
 

@@ -229,6 +229,12 @@ pub fn get_local_lan_info() -> Option<LanInfo> {
 /// Enumerate network interfaces via OS commands and return the first
 /// private LAN IPv4 address found.
 fn find_private_lan_ip() -> Option<String> {
+    find_all_private_lan_ips().into_iter().next()
+}
+
+/// Enumerate ALL private LAN IPv4 addresses from all network interfaces.
+fn find_all_private_lan_ips() -> Vec<String> {
+    let mut ips = Vec::new();
     #[cfg(target_os = "windows")]
     {
         let out = run_cmd("ipconfig");
@@ -240,8 +246,8 @@ fn find_private_lan_ip() -> Option<String> {
                     .nth(1)
                     .map(|s| s.trim().to_string())
                     .unwrap_or_default();
-                if is_private_lan_ip(&addr) {
-                    return Some(addr);
+                if is_private_lan_ip(&addr) && !ips.contains(&addr) {
+                    ips.push(addr);
                 }
             }
         }
@@ -254,11 +260,20 @@ fn find_private_lan_ip() -> Option<String> {
             if trimmed.starts_with("inet ") && !trimmed.contains("127.0.0.1") {
                 if let Some(addr) = trimmed.split_whitespace().nth(1) {
                     if is_private_lan_ip(addr) {
-                        return Some(addr.to_string());
+                        let addr = addr.to_string();
+                        if !ips.contains(&addr) {
+                            ips.push(addr);
+                        }
                     }
                 }
             }
         }
     }
-    None
+    ips
+}
+
+/// Return all detected private LAN IPv4 addresses.
+#[tauri::command]
+pub fn get_all_lan_ips() -> Vec<String> {
+    find_all_private_lan_ips()
 }
