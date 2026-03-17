@@ -88,12 +88,29 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'ClawNo.11'" "$PLIST_PATH" || true
 
+      # Switch to manual code signing for CI
+      - name: Configure manual signing
+        working-directory: apps/mobile
+        run: |
+          PBXPROJ="src-tauri/gen/apple/clawno-mobile.xcodeproj/project.pbxproj"
+          # Switch from Automatic to Manual signing
+          sed -i '' 's/CODE_SIGN_STYLE = Automatic/CODE_SIGN_STYLE = Manual/g' "$PBXPROJ"
+          # Inject provisioning profile UUID
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c "Print :UUID" /dev/stdin <<< "$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null)" 2>/dev/null || true)
+          if [ -n "$PROFILE_UUID" ]; then
+            sed -i '' "s/PROVISIONING_PROFILE_SPECIFIER = \"\"/PROVISIONING_PROFILE_SPECIFIER = \"$PROFILE_UUID\"/g" "$PBXPROJ"
+          fi
+          echo "Manual signing configured. Profile UUID: $PROFILE_UUID"
+
       # Build iOS app
       - name: Build iOS
         working-directory: apps/mobile
         run: pnpm tauri ios build --export-method app-store-connect
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          DEVELOPMENT_TEAM: ${{ secrets.APPLE_TEAM_ID }}
 
       # Upload IPA as artifact (always)
       - name: Upload IPA artifact
