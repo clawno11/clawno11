@@ -136,7 +136,10 @@ body,
   padding-bottom: max(var(--safe-bottom), 8px);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
-  /* Shrinks safe-bottom when keyboard is open (container height handles it) */
+}
+
+.kb-open .chat-input-bar {
+  padding-bottom: 8px;
 }
 
 /* ── Message bubble animations ─────────────────────────────────────────── */
