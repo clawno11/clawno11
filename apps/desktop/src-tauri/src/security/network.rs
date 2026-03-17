@@ -184,10 +184,29 @@ pub fn scan_lan_devices() -> Vec<String> {
         .collect()
 }
 
+/// True when an IPv4 string falls in a common private LAN range
+/// (192.168.x.x, 10.x.x.x, 172.16-31.x.x).
+fn is_private_lan_ip(ip: &str) -> bool {
+    let parts: Vec<u8> = ip.split('.').filter_map(|s| s.parse().ok()).collect();
+    if parts.len() != 4 {
+        return false;
+    }
+    match parts[0] {
+        10 => true,
+        172 => (16..=31).contains(&parts[1]),
+        192 => parts[1] == 168,
+        _ => false,
+    }
+}
+
 /// Detect the machine's primary outbound LAN IP and the subnet it belongs to.
+///
+/// When a VPN/proxy is active the default-route trick may return a virtual
+/// interface IP (198.18.x.x, 100.x.x.x, etc.).  In that case we fall back
+/// to enumerating all interfaces and picking the first private LAN address.
 #[tauri::command]
 pub fn get_local_lan_info() -> Option<LanInfo> {
-    let ip = std::net::UdpSocket::bind("0.0.0.0:0")
+    let udp_ip = std::net::UdpSocket::bind("0.0.0.0:0")
         .and_then(|s| {
             s.connect("8.8.8.8:80")?;
             Ok(s)
@@ -195,9 +214,51 @@ pub fn get_local_lan_info() -> Option<LanInfo> {
         .ok()
         .and_then(|s| s.local_addr().ok())
         .map(|a| a.ip().to_string())
-        .filter(|ip| !ip.starts_with("127."))?;
+        .filter(|ip| !ip.starts_with("127."));
+
+    let ip = match &udp_ip {
+        Some(ip) if is_private_lan_ip(ip) => ip.clone(),
+        _ => find_private_lan_ip().or(udp_ip)?,
+    };
 
     let prefix = subnet_prefix_for_ip(&ip).unwrap_or(24);
     let subnet = ip_to_network(&ip, prefix)?;
     Some(LanInfo { ip, subnet, prefix })
+}
+
+/// Enumerate network interfaces via OS commands and return the first
+/// private LAN IPv4 address found.
+fn find_private_lan_ip() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    {
+        let out = run_cmd("ipconfig");
+        for line in out.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("IPv4") {
+                let addr = rest
+                    .split(':')
+                    .nth(1)
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+                if is_private_lan_ip(&addr) {
+                    return Some(addr);
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let out = run_cmd("ifconfig");
+        for line in out.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("inet ") && !trimmed.contains("127.0.0.1") {
+                if let Some(addr) = trimmed.split_whitespace().nth(1) {
+                    if is_private_lan_ip(addr) {
+                        return Some(addr.to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
 }

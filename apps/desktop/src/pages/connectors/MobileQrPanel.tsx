@@ -25,7 +25,7 @@ export function MobileQrPanel() {
   const [expired, setExpired]     = useState(false);
 
   const onlineInstance = instances.find((i) => i.health === "online");
-  const port           = onlineInstance?.port ?? 18789;
+  const port           = 18800; // chat proxy port — LAN-accessible (0.0.0.0)
   const serverName     = onlineInstance?.name ?? "My Server";
 
   useEffect(() => {
