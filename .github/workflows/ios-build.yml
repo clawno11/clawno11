@@ -76,6 +76,19 @@ jobs:
         working-directory: apps/mobile
         run: pnpm tauri ios init
 
+      # Ensure Xcode workspace exists (xcodegen sometimes skips it)
+      - name: Fix Xcode workspace
+        working-directory: apps/mobile
+        run: |
+          WS_DIR="src-tauri/gen/apple/clawno-mobile.xcodeproj/project.xcworkspace"
+          mkdir -p "$WS_DIR"
+          cat > "$WS_DIR/contents.xcworkspacedata" << 'WSEOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <Workspace version="1.0">
+            <FileRef location="self:"/>
+          </Workspace>
+          WSEOF
+
       # Merge Info.plist permissions
       - name: Merge Info.plist
         working-directory: apps/mobile
