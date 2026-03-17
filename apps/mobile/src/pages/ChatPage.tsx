@@ -151,66 +151,7 @@ export function ChatPage() {
     return () => { cancelled = true; };
   }, [selectedId, instances, configuredProviders]);
 
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-
-    let wasOpen = false;
-
-    const sync = () => {
-      const el = chatContainerRef.current;
-      if (!el) return;
-
-      const keyboardOpen = window.innerHeight - vv.height > 100;
-
-      if (keyboardOpen) {
-        el.style.position = "fixed";
-        el.style.top = `${vv.offsetTop}px`;
-        el.style.left = "0";
-        el.style.right = "0";
-        el.style.height = `${vv.height}px`;
-        el.style.zIndex = "100";
-        el.classList.add("kb-open");
-
-        if (!wasOpen) {
-          requestAnimationFrame(() =>
-            bottomRef.current?.scrollIntoView({ behavior: "smooth" }),
-          );
-        }
-        wasOpen = true;
-      } else {
-        el.style.position = "";
-        el.style.top = "";
-        el.style.left = "";
-        el.style.right = "";
-        el.style.height = "";
-        el.style.zIndex = "";
-        el.classList.remove("kb-open");
-        wasOpen = false;
-      }
-    };
-
-    vv.addEventListener("resize", sync);
-    vv.addEventListener("scroll", sync);
-
-    return () => {
-      vv.removeEventListener("resize", sync);
-      vv.removeEventListener("scroll", sync);
-      const el = chatContainerRef.current;
-      if (el) {
-        el.style.position = "";
-        el.style.top = "";
-        el.style.left = "";
-        el.style.right = "";
-        el.style.height = "";
-        el.style.zIndex = "";
-        el.classList.remove("kb-open");
-      }
-      wasOpen = false;
-    };
-  }, []);
+  // Keyboard handling is done globally in main.tsx via --app-height.
 
   // ── Chat proxy port discovery ──────────────────────────────────────────
 
@@ -410,7 +351,7 @@ export function ChatPage() {
 
   if (instances.length === 0) {
     return (
-      <div ref={chatContainerRef} className="flex flex-col h-full">
+      <div className="flex flex-col h-full">
         <TopBar title={t("chat.title")} />
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -484,7 +425,7 @@ export function ChatPage() {
   );
 
   return (
-    <div ref={chatContainerRef} className="flex flex-col h-full relative overflow-hidden bg-[hsl(var(--background))]">
+    <div className="flex flex-col h-full relative overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 flex-shrink-0 top-bar"
         style={{ borderBottom: "1px solid rgba(6,182,212,0.12)", background: "rgba(6,182,212,0.02)" }}>

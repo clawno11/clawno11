@@ -45,7 +45,7 @@
 html,
 body,
 #root {
-  height: 100%;
+  height: var(--app-height, 100%);
   margin: 0;
   padding: 0;
   overflow: hidden;
@@ -136,10 +136,6 @@ body,
   padding-bottom: max(var(--safe-bottom), 8px);
   padding-left: var(--safe-left);
   padding-right: var(--safe-right);
-}
-
-.kb-open .chat-input-bar {
-  padding-bottom: 8px;
 }
 
 /* ── Message bubble animations ─────────────────────────────────────────── */
