@@ -13,9 +13,13 @@ on:
         required: false
         default: 'true'
 
+permissions:
+  contents: write
+
 jobs:
   build-desktop:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - platform: windows-latest
