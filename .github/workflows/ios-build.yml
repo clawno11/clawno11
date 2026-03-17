@@ -78,6 +78,7 @@ jobs:
         working-directory: apps/mobile
         run: |
           PLIST_PATH="src-tauri/gen/apple/clawno-mobile_iOS/Info.plist"
+          /usr/libexec/PlistBuddy -c "Add :NSCameraUsageDescription string 'Used to scan QR codes for connecting to ClawNo.11 instances'" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :NSDocumentsFolderUsageDescription string '需要访问文档以导入知识库文件'" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string '需要访问本地网络以连接您的 OpenClaw AI 网关'" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$PLIST_PATH" || true
