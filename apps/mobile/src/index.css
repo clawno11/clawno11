@@ -43,15 +43,20 @@
 }
 
 html,
-body,
-#root {
+body {
   height: 100%;
-  height: 100dvh;
+  margin: 0;
+  padding: 0;
   overflow: hidden;
   overscroll-behavior: none;
-  /* Prevent text size adjustment on orientation change */
+  background: hsl(var(--background));
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+#root {
+  height: 100dvh;
+  overflow: hidden;
 }
 
 /* Safe area support for notched phones */
