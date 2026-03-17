@@ -156,19 +156,28 @@ export function ChatPage() {
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
-    const onResize = () => {
-      if (chatContainerRef.current) {
-        chatContainerRef.current.style.height = `${vv.height}px`;
+
+    const sync = () => {
+      const el = chatContainerRef.current;
+      if (!el) return;
+      el.style.height = `${vv.height}px`;
+      el.style.top = `${vv.offsetTop}px`;
+
+      const keyboardOpen = window.innerHeight - vv.height > 50;
+      if (keyboardOpen) {
+        requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }));
       }
-      const offset = window.innerHeight - vv.height;
-      if (offset > 50) requestAnimationFrame(() => bottomRef.current?.scrollIntoView({ behavior: "smooth" }));
     };
-    vv.addEventListener("resize", onResize);
-    vv.addEventListener("scroll", onResize);
+
+    vv.addEventListener("resize", sync);
+    vv.addEventListener("scroll", sync);
+    sync();
+
     return () => {
-      vv.removeEventListener("resize", onResize);
-      vv.removeEventListener("scroll", onResize);
-      if (chatContainerRef.current) chatContainerRef.current.style.height = "";
+      vv.removeEventListener("resize", sync);
+      vv.removeEventListener("scroll", sync);
+      const el = chatContainerRef.current;
+      if (el) { el.style.height = ""; el.style.top = ""; }
     };
   }, []);
 
@@ -370,7 +379,7 @@ export function ChatPage() {
 
   if (instances.length === 0) {
     return (
-      <div ref={chatContainerRef} className="flex flex-col h-full">
+      <div ref={chatContainerRef} className="flex flex-col fixed inset-0">
         <TopBar title={t("chat.title")} />
         <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 text-center">
           <div className="w-16 h-16 rounded-2xl flex items-center justify-center"
@@ -444,7 +453,7 @@ export function ChatPage() {
   );
 
   return (
-    <div ref={chatContainerRef} className="flex flex-col h-full relative overflow-hidden">
+    <div ref={chatContainerRef} className="flex flex-col fixed inset-0 overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 flex-shrink-0 top-bar"
         style={{ borderBottom: "1px solid rgba(6,182,212,0.12)", background: "rgba(6,182,212,0.02)" }}>
