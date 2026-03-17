@@ -55,10 +55,11 @@ body,
   text-size-adjust: 100%;
 }
 
-/* Safe area support for notched phones */
+/* Safe area support — plugin injects --safe-area-inset-top/bottom,
+   fall back to env() for non-plugin builds */
 :root {
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
 }
