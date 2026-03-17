@@ -88,105 +88,61 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'ClawNo.11'" "$PLIST_PATH" || true
 
-      # Let tauri do frontend build + xcodegen; xcodebuild will fail at signing
-      - name: Prepare iOS build
+      # Replace real xcodebuild with a wrapper that appends manual signing flags
+      - name: Setup xcodebuild signing wrapper
+        run: |
+          PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
+            | grep -A1 UUID | tail -1 | sed 's/.*<string>\(.*\)<\/string>/\1/' || true)
+          echo "CI_PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+
+          XCODEBUILD="$(xcode-select -p)/usr/bin/xcodebuild"
+          sudo mv "$XCODEBUILD" "${XCODEBUILD}.orig"
+          sudo tee "$XCODEBUILD" > /dev/null << 'WRAPPER'
+#!/bin/bash
+exec "${0}.orig" "$@" \
+  CODE_SIGN_STYLE=Manual \
+  "CODE_SIGN_IDENTITY=${CI_SIGN_IDENTITY}" \
+  "DEVELOPMENT_TEAM=${CI_TEAM_ID}" \
+  "PROVISIONING_PROFILE_SPECIFIER=${CI_PROFILE_UUID}"
+WRAPPER
+          sudo chmod +x "$XCODEBUILD"
+          echo "xcodebuild wrapper installed; profile UUID=$PROFILE_UUID"
+
+      # Build iOS app — tauri handles frontend, xcodegen, Rust build, and xcodebuild
+      - name: Build iOS
         working-directory: apps/mobile
-        run: pnpm tauri ios build --export-method app-store-connect || true
-
-      # Diagnose signing assets to identify mismatches
-      - name: Debug signing info
         env:
-          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          echo "=== Certificates in keychain ==="
-          security find-identity -v -p codesigning "$RUNNER_TEMP/app-signing.keychain-db" || true
-
-          echo ""
-          echo "=== Provisioning profile Team & App ID ==="
-          security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
-            | grep -A1 -E "TeamIdentifier|application-identifier|TeamName|UUID" || true
-
-          echo ""
-          echo "=== TEAM_ID length: ${#TEAM_ID}, SIGN_IDENTITY length: ${#SIGN_IDENTITY} ==="
-
-      # Run xcodebuild directly with manual signing overrides on the command line
-      - name: Build iOS with manual signing
-        working-directory: apps/mobile/src-tauri/gen/apple
-        env:
-          SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
-            | grep -A1 UUID | tail -1 | sed 's/.*<string>\(.*\)<\/string>/\1/' || true)
-          echo "Using profile UUID: $PROFILE_UUID"
-
-          xcodebuild \
-            -scheme clawno-mobile_iOS \
-            -workspace clawno-mobile.xcodeproj/project.xcworkspace/ \
-            -sdk iphoneos \
-            -configuration release \
-            -archivePath "$RUNNER_TEMP/ClawNo11.xcarchive" \
-            CODE_SIGN_STYLE=Manual \
-            "CODE_SIGN_IDENTITY=$SIGN_IDENTITY" \
-            "DEVELOPMENT_TEAM=$TEAM_ID" \
-            "PROVISIONING_PROFILE_SPECIFIER=$PROFILE_UUID" \
-            archive
-
-      # Export IPA from archive
-      - name: Export IPA
-        env:
-          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
-            | grep -A1 UUID | tail -1 | sed 's/.*<string>\(.*\)<\/string>/\1/' || true)
-
-          cat > "$RUNNER_TEMP/ExportOptions.plist" << PLIST
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>app-store-connect</string>
-            <key>teamID</key>
-            <string>$TEAM_ID</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>provisioningProfiles</key>
-            <dict>
-              <key>ai.clawno11.mobile</key>
-              <string>$PROFILE_UUID</string>
-            </dict>
-          </dict>
-          </plist>
-          PLIST
-
-          xcodebuild -exportArchive \
-            -archivePath "$RUNNER_TEMP/ClawNo11.xcarchive" \
-            -exportPath "$RUNNER_TEMP/ios-export" \
-            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
+          CI_SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          CI_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: pnpm tauri ios build --export-method app-store-connect
 
       # Upload IPA as artifact
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: ClawNo11-iOS
-          path: ${{ runner.temp }}/ios-export/*.ipa
+          path: apps/mobile/src-tauri/gen/apple/build/**/*.ipa
           if-no-files-found: warn
 
       # Upload to TestFlight (optional)
       - name: Upload to TestFlight
         if: inputs.upload_testflight == 'true'
+        working-directory: apps/mobile
         run: |
           xcrun altool --upload-app \
             --type ios \
-            --file "$RUNNER_TEMP/ios-export/*.ipa" \
+            --file src-tauri/gen/apple/build/**/*.ipa \
             --apiKey "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
             --apiIssuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}"
         env:
           API_PRIVATE_KEY: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
 
-      # Clean up keychain
+      # Restore xcodebuild and clean up keychain
       - name: Clean up
         if: always()
-        run: security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
+        run: |
+          XCODEBUILD="$(xcode-select -p)/usr/bin/xcodebuild"
+          if [ -f "${XCODEBUILD}.orig" ]; then
+            sudo mv "${XCODEBUILD}.orig" "$XCODEBUILD"
+          fi
+          security delete-keychain $RUNNER_TEMP/app-signing.keychain-db || true
