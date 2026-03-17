@@ -82,12 +82,12 @@ jobs:
         run: |
           WS_DIR="src-tauri/gen/apple/clawno-mobile.xcodeproj/project.xcworkspace"
           mkdir -p "$WS_DIR"
-          cat > "$WS_DIR/contents.xcworkspacedata" << 'WSEOF'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <Workspace version="1.0">
-            <FileRef location="self:"/>
-          </Workspace>
-          WSEOF
+          printf '<?xml version="1.0" encoding="UTF-8"?>\n<Workspace version="1.0">\n  <FileRef location="self:"/>\n</Workspace>\n' > "$WS_DIR/contents.xcworkspacedata"
+          echo "=== Workspace file ==="
+          cat "$WS_DIR/contents.xcworkspacedata"
+          echo "=== Generated apple directory ==="
+          ls -la src-tauri/gen/apple/
+          ls -la "src-tauri/gen/apple/clawno-mobile.xcodeproj/"
 
       # Merge Info.plist permissions
       - name: Merge Info.plist
