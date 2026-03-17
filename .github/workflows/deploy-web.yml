@@ -38,8 +38,6 @@ jobs:
 
       - name: Build website
         working-directory: apps/web
-        env:
-          CUSTOM_DOMAIN: "true"
         run: pnpm build
 
       - name: Upload Pages artifact

@@ -76,7 +76,7 @@ export function AppIcon({ size = 144 }: { size?: number }) {
 
       ctx.putImageData(imageData, 0, 0);
     };
-    img.src = "/icon.png";
+    img.src = `${process.env.NEXT_PUBLIC_BASE ?? ""}/icon.png`;
   }, []);
 
   return (

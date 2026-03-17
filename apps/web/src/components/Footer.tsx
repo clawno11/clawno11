@@ -13,7 +13,7 @@ export function Footer() {
         <div className="flex flex-col md:flex-row items-center justify-between gap-6">
           {/* Logo + desc */}
           <div className="flex items-center gap-3">
-            <img src="/icon.png" alt="ClawNo.11" width={32} height={32} className="w-8 h-8 rounded-lg" />
+            <img src={`${process.env.NEXT_PUBLIC_BASE ?? ""}/icon.png`} alt="ClawNo.11" width={32} height={32} className="w-8 h-8 rounded-lg" />
             <div>
               <div className="font-bold text-white text-sm">
                 Claw<span className="text-primary">No.11</span>
