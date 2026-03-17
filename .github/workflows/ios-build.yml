@@ -88,36 +88,44 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'ClawNo.11'" "$PLIST_PATH" || true
 
-      # Replace real xcodebuild with a wrapper that appends manual signing flags
+      # Write signing values to files + create xcodebuild wrapper
       - name: Setup xcodebuild signing wrapper
+        env:
+          CI_SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          CI_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
             | grep -A1 UUID | tail -1 | sed 's/.*<string>\(.*\)<\/string>/\1/' || true)
-          echo "CI_PROFILE_UUID=$PROFILE_UUID" >> $GITHUB_ENV
+
+          echo "$CI_TEAM_ID" > /tmp/.ci-team-id
+          echo "$CI_SIGN_IDENTITY" > /tmp/.ci-sign-identity
+          echo "$PROFILE_UUID" > /tmp/.ci-profile-uuid
 
           XCODEBUILD="$(xcode-select -p)/usr/bin/xcodebuild"
           sudo mv "$XCODEBUILD" "${XCODEBUILD}.orig"
           printf '%s\n' \
             '#!/bin/bash' \
-            '# Rebuild ExportOptions.plist from scratch for manual signing' \
+            'TID=$(cat /tmp/.ci-team-id)' \
+            'SID=$(cat /tmp/.ci-sign-identity)' \
+            'PID=$(cat /tmp/.ci-profile-uuid)' \
             'prev=""' \
             'for arg in "$@"; do' \
             '  if [ "$prev" = "-exportOptionsPlist" ]; then' \
             '    rm -f "$arg"' \
             '    /usr/libexec/PlistBuddy -c "Add :method string app-store-connect" "$arg"' \
-            '    /usr/libexec/PlistBuddy -c "Add :teamID string ${CI_TEAM_ID}" "$arg"' \
+            '    /usr/libexec/PlistBuddy -c "Add :teamID string $TID" "$arg"' \
             '    /usr/libexec/PlistBuddy -c "Add :signingStyle string manual" "$arg"' \
             '    /usr/libexec/PlistBuddy -c "Add :provisioningProfiles dict" "$arg"' \
-            '    /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:ai.clawno11.mobile string ${CI_PROFILE_UUID}" "$arg"' \
+            '    /usr/libexec/PlistBuddy -c "Add :provisioningProfiles:ai.clawno11.mobile string $PID" "$arg"' \
             '    break' \
             '  fi' \
             '  prev="$arg"' \
             'done' \
             'exec "${0}.orig" "$@" \' \
             '  CODE_SIGN_STYLE=Manual \' \
-            '  "CODE_SIGN_IDENTITY=${CI_SIGN_IDENTITY}" \' \
-            '  "DEVELOPMENT_TEAM=${CI_TEAM_ID}" \' \
-            '  "PROVISIONING_PROFILE_SPECIFIER=${CI_PROFILE_UUID}"' \
+            '  "CODE_SIGN_IDENTITY=$SID" \' \
+            '  "DEVELOPMENT_TEAM=$TID" \' \
+            '  "PROVISIONING_PROFILE_SPECIFIER=$PID"' \
             | sudo tee "$XCODEBUILD" > /dev/null
           sudo chmod +x "$XCODEBUILD"
           echo "xcodebuild wrapper installed; profile UUID=$PROFILE_UUID"
@@ -125,9 +133,6 @@ jobs:
       # Build iOS app — tauri handles frontend, xcodegen, Rust build, and xcodebuild
       - name: Build iOS
         working-directory: apps/mobile
-        env:
-          CI_SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          CI_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: pnpm tauri ios build --export-method app-store-connect
 
       # Upload IPA as artifact
