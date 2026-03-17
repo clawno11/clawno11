@@ -65,7 +65,7 @@ export function Security() {
             {/* Open source trust */}
             <div className="inline-flex items-center gap-2 px-4 py-3 rounded-xl bg-bg-card border border-border-dim text-sm text-slate-400">
               <span className="text-primary">⟨/⟩</span>
-              代码完全开源，欢迎审计 ·
+              {t.security.openSourceCta} ·
               <a
                 href="https://github.com/clawno11/clawno11"
                 target="_blank"

@@ -8,12 +8,14 @@ export const zh = {
     langSwitch: "EN",
   },
   hero: {
-    badge: "完全开源 · MIT 协议",
+    badge: "完全开源 · Apache 2.0 协议",
     title: "ClawNo.11",
     tagline: "THE PRIVATE AI GATEWAY THAT NEVER LEAKS.",
     subtitle: "本地部署私有 AI 网关，手机 PC 随时安全访问。\n数据永不离开你的设备。",
     ctaMac: "下载 Mac (.dmg)",
     ctaWindows: "下载 Windows (.exe)",
+    ctaIos: "iOS (TestFlight)",
+    ctaAndroid: "Android (.apk)",
     ctaGithub: "GitHub →",
     announcement: "全新 支持 MiniMax M2 · DeepSeek V3 · GLM-4-Flash →",
     screenshotAlt: "ClawNo.11 应用截图",
@@ -23,7 +25,7 @@ export const zh = {
     { value: "~10MB", label: "安装包大小" },
     { value: "15+", label: "AI 提供商" },
     { value: "零遥测", label: "无追踪无埋点" },
-    { value: "双端", label: "桌面 + 移动" },
+    { value: "4 平台", label: "Win · Mac · iOS · Android" },
   ],
   features: {
     title: "一个应用，掌控你的 AI 全链路",
@@ -44,7 +46,7 @@ export const zh = {
       {
         icon: "Smartphone",
         title: "移动端远程连接",
-        desc: "OTP 二维码 + 6 位 PIN 双重验证，2 分钟自动过期。搭配 Tailscale 或 xEdge 干将互联，任意网络安全访问家中 AI。",
+        desc: "桌面端一键显示连接地址，手机输入即连。搭配 Tailscale 或 xEdge 干将互联，任意网络安全访问家中 AI。支持 iOS 和 Android。",
         badge: "国内友好",
       },
       {
@@ -82,8 +84,8 @@ export const zh = {
       },
       {
         num: "03",
-        title: "手机扫码连接",
-        desc: "手机安装 ClawNo.11 App，扫描桌面二维码，OTP + PIN 双重确认，安全接入。",
+        title: "手机输入地址连接",
+        desc: "手机安装 ClawNo.11 App，复制桌面端显示的连接地址粘贴到 App，一键测试并添加。",
       },
       {
         num: "04",
@@ -107,14 +109,15 @@ export const zh = {
     ],
     screenshotAlt: "Claw Guard 安全中心截图",
     screenshotHint: "在此处放置 Claw Guard 截图",
+    openSourceCta: "代码完全开源，欢迎审计",
   },
   download: {
     title: "现在开始，永久免费",
-    subtitle: "完全开源 · MIT 协议 · 无订阅费 · 无使用限制",
+    subtitle: "完全开源 · Apache 2.0 协议 · 无订阅费 · 无使用限制",
     mac: "下载 Mac (.dmg)",
     windows: "下载 Windows (.exe)",
-    mobile: "iOS / Android",
-    mobileSub: "即将上线",
+    ios: "下载 iOS (TestFlight)",
+    android: "下载 Android (.apk)",
     github: "Star on GitHub",
     githubSub: "查看源码 & 提 Issue",
     releasesLink: "https://github.com/clawno11/clawno11/releases",
@@ -128,7 +131,7 @@ export const zh = {
       { label: "免责声明", url: "https://github.com/clawno11/clawno11/blob/main/DISCLAIMER.md" },
       { label: "安全策略", url: "https://github.com/clawno11/clawno11/blob/main/SECURITY.md" },
     ],
-    copyright: "© 2025 ClawNo.11 · MIT License",
+    copyright: "© 2026 ClawNo.11 · Apache 2.0 License",
   },
 };
 

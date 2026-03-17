@@ -10,12 +10,14 @@ export const en: I18nDict = {
     langSwitch: "中文",
   },
   hero: {
-    badge: "Fully Open Source · MIT License",
+    badge: "Fully Open Source · Apache 2.0 License",
     title: "ClawNo.11",
     tagline: "THE PRIVATE AI GATEWAY THAT NEVER LEAKS.",
     subtitle: "Deploy a private AI gateway on your own device. Access securely from phone or PC.\nYour data never leaves your machine.",
     ctaMac: "Download Mac (.dmg)",
     ctaWindows: "Download Windows (.exe)",
+    ctaIos: "iOS (TestFlight)",
+    ctaAndroid: "Android (.apk)",
     ctaGithub: "GitHub →",
     announcement: "NEW  MiniMax M2 · DeepSeek V3 · GLM-4-Flash now supported →",
     screenshotAlt: "ClawNo.11 App Screenshot",
@@ -25,7 +27,7 @@ export const en: I18nDict = {
     { value: "~10MB", label: "Install size" },
     { value: "15+", label: "AI Providers" },
     { value: "Zero telemetry", label: "No tracking" },
-    { value: "Dual platform", label: "Desktop + Mobile" },
+    { value: "4 Platforms", label: "Win · Mac · iOS · Android" },
   ],
   features: {
     title: "One App. Full Control of Your AI.",
@@ -47,8 +49,8 @@ export const en: I18nDict = {
       {
         icon: "Smartphone",
         title: "Mobile Remote Access",
-        desc: "OTP QR code + 6-digit PIN dual verification, 2-minute expiry. Works with Tailscale or xEdge for secure access from anywhere.",
-        badge: "China-friendly",
+        desc: "Desktop shows the connection address, just enter it on your phone to connect. Works with Tailscale or xEdge for secure access from anywhere. Supports iOS and Android.",
+        badge: "Cross-platform",
       },
       {
         icon: "Brain",
@@ -85,8 +87,8 @@ export const en: I18nDict = {
       },
       {
         num: "03",
-        title: "Scan & Connect on Mobile",
-        desc: "Install the ClawNo.11 mobile app, scan the desktop QR code, and confirm with OTP + PIN for secure pairing.",
+        title: "Enter Address on Mobile",
+        desc: "Install the ClawNo.11 mobile app, copy the connection URL shown on your desktop, paste it into the app, and tap Connect.",
       },
       {
         num: "04",
@@ -110,14 +112,15 @@ export const en: I18nDict = {
     ],
     screenshotAlt: "Claw Guard Security Center Screenshot",
     screenshotHint: "Place Claw Guard screenshot here",
+    openSourceCta: "Fully open source — audit the code yourself",
   },
   download: {
     title: "Start Now, Forever Free",
-    subtitle: "Fully open source · MIT License · No subscription · No usage limits",
+    subtitle: "Fully open source · Apache 2.0 License · No subscription · No usage limits",
     mac: "Download Mac (.dmg)",
     windows: "Download Windows (.exe)",
-    mobile: "iOS / Android",
-    mobileSub: "Coming soon",
+    ios: "Download iOS (TestFlight)",
+    android: "Download Android (.apk)",
     github: "Star on GitHub",
     githubSub: "View source & open issues",
     releasesLink: "https://github.com/clawno11/clawno11/releases",
@@ -131,6 +134,6 @@ export const en: I18nDict = {
       { label: "Disclaimer", url: "https://github.com/clawno11/clawno11/blob/main/DISCLAIMER.md" },
       { label: "Security Policy", url: "https://github.com/clawno11/clawno11/blob/main/SECURITY.md" },
     ],
-    copyright: "© 2025 ClawNo.11 · MIT License",
+    copyright: "© 2026 ClawNo.11 · Apache 2.0 License",
   },
 };

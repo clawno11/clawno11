@@ -3,10 +3,10 @@ import "./globals.css";
 import { I18nProvider } from "@/i18n/context";
 
 export const metadata: Metadata = {
-  title: "ClawNo.11 — 私有 AI 网关管理控制台",
+  title: "ClawNo.11 — Private AI Gateway Console",
   description:
-    "一键部署 OpenClaw 私有 AI 网关，手机 PC 随时安全访问，数据永不离开你的设备。完全开源 · MIT 协议。",
-  keywords: ["AI", "private", "gateway", "OpenClaw", "ClawNo11", "deploy", "self-hosted"],
+    "Deploy a private AI gateway on your own device. Access securely from phone or PC. Your data never leaves your machine. Fully open-source · Apache 2.0.",
+  keywords: ["AI", "private", "gateway", "OpenClaw", "ClawNo11", "deploy", "self-hosted", "iOS", "Android", "desktop"],
   authors: [{ name: "ClawNo.11 Team" }],
   openGraph: {
     title: "ClawNo.11 — The 11th Way to Run Your AI",
@@ -19,14 +19,14 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "ClawNo.11 — The 11th Way to Run Your AI",
-    description: "Private AI gateway. One-click deploy. Zero telemetry.",
+    description: "Private AI gateway. One-click deploy. Zero telemetry. iOS + Android + Desktop.",
   },
   icons: { icon: "/favicon.png" },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="zh">
+    <html lang="en">
       <head>
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
