@@ -63,7 +63,6 @@ function AppContent() {
   return (
     <div
       className="flex flex-col h-full bg-[hsl(var(--background))] text-[hsl(var(--foreground))]"
-      style={{ height: "100dvh" }}
     >
       {/* Page content */}
       <main className="flex-1 min-h-0 overflow-hidden">

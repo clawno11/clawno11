@@ -43,7 +43,8 @@
 }
 
 html,
-body {
+body,
+#root {
   height: 100%;
   margin: 0;
   padding: 0;
@@ -52,11 +53,6 @@ body {
   background: hsl(var(--background));
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-}
-
-#root {
-  height: 100dvh;
-  overflow: hidden;
 }
 
 /* Safe area support for notched phones */
