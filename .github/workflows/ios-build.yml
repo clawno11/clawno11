@@ -88,80 +88,82 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'ClawNo.11'" "$PLIST_PATH" || true
 
-      # Inject manual signing settings into project.yml (xcodegen input)
-      - name: Configure manual signing
+      # Let tauri do frontend build + xcodegen; xcodebuild will fail at signing
+      - name: Prepare iOS build
         working-directory: apps/mobile
+        run: pnpm tauri ios build --export-method app-store-connect || true
+
+      # Run xcodebuild directly with manual signing overrides on the command line
+      - name: Build iOS with manual signing
+        working-directory: apps/mobile/src-tauri/gen/apple
         env:
           SIGN_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          PROJECT_YML="src-tauri/gen/apple/project.yml"
           PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
             | grep -A1 UUID | tail -1 | sed 's/.*<string>\(.*\)<\/string>/\1/' || true)
-          echo "Detected profile UUID: $PROFILE_UUID"
+          echo "Using profile UUID: $PROFILE_UUID"
 
-          export PROJECT_YML PROFILE_UUID
-          python3 << 'PYEOF'
-          import os, re
+          xcodebuild \
+            -scheme clawno-mobile_iOS \
+            -workspace clawno-mobile.xcodeproj/project.xcworkspace/ \
+            -sdk iphoneos \
+            -configuration release \
+            -archivePath "$RUNNER_TEMP/ClawNo11.xcarchive" \
+            CODE_SIGN_STYLE=Manual \
+            "CODE_SIGN_IDENTITY=$SIGN_IDENTITY" \
+            "DEVELOPMENT_TEAM=$TEAM_ID" \
+            "PROVISIONING_PROFILE_SPECIFIER=$PROFILE_UUID" \
+            archive
 
-          yml = os.environ["PROJECT_YML"]
-          uuid = os.environ.get("PROFILE_UUID", "")
-          identity = os.environ.get("SIGN_IDENTITY", "")
+      # Export IPA from archive
+      - name: Export IPA
+        env:
+          TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
+            | grep -A1 UUID | tail -1 | sed 's/.*<string>\(.*\)<\/string>/\1/' || true)
 
-          with open(yml) as f:
-              txt = f.read()
+          cat > "$RUNNER_TEMP/ExportOptions.plist" << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>app-store-connect</string>
+            <key>teamID</key>
+            <string>$TEAM_ID</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict>
+              <key>ai.clawno11.mobile</key>
+              <string>$PROFILE_UUID</string>
+            </dict>
+          </dict>
+          </plist>
+          PLIST
 
-          # Replace existing Automatic if present
-          txt = txt.replace("CODE_SIGN_STYLE: Automatic", "CODE_SIGN_STYLE: Manual")
+          xcodebuild -exportArchive \
+            -archivePath "$RUNNER_TEMP/ClawNo11.xcarchive" \
+            -exportPath "$RUNNER_TEMP/ios-export" \
+            -exportOptionsPlist "$RUNNER_TEMP/ExportOptions.plist"
 
-          # If CODE_SIGN_STYLE still not present, inject after DEVELOPMENT_TEAM
-          if "CODE_SIGN_STYLE" not in txt:
-              txt = re.sub(
-                  r"(( +)DEVELOPMENT_TEAM: .+\n)",
-                  lambda m: m.group(0)
-                      + f"{m.group(2)}CODE_SIGN_STYLE: Manual\n",
-                  txt, count=1,
-              )
-
-          # Inject profile and identity after CODE_SIGN_STYLE
-          if "PROVISIONING_PROFILE_SPECIFIER" not in txt:
-              txt = re.sub(
-                  r"(( +)CODE_SIGN_STYLE: Manual\n)",
-                  lambda m: m.group(0)
-                      + f'{m.group(2)}PROVISIONING_PROFILE_SPECIFIER: "{uuid}"\n'
-                      + f'{m.group(2)}CODE_SIGN_IDENTITY: "{identity}"\n',
-                  txt, count=1,
-              )
-
-          with open(yml, "w") as f:
-              f.write(txt)
-          print("project.yml patched for manual signing")
-          PYEOF
-
-          echo "=== project.yml signing settings ==="
-          grep -E "CODE_SIGN|PROVISIONING|DEVELOPMENT_TEAM" "$PROJECT_YML" || true
-
-      # Build iOS app
-      - name: Build iOS
-        working-directory: apps/mobile
-        run: pnpm tauri ios build --export-method app-store-connect
-
-      # Upload IPA as artifact (always)
+      # Upload IPA as artifact
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: ClawNo11-iOS
-          path: apps/mobile/src-tauri/gen/apple/build/**/*.ipa
+          path: ${{ runner.temp }}/ios-export/*.ipa
           if-no-files-found: warn
 
       # Upload to TestFlight (optional)
       - name: Upload to TestFlight
         if: inputs.upload_testflight == 'true'
-        working-directory: apps/mobile
         run: |
           xcrun altool --upload-app \
             --type ios \
-            --file src-tauri/gen/apple/build/**/*.ipa \
+            --file "$RUNNER_TEMP/ios-export/*.ipa" \
             --apiKey "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
             --apiIssuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}"
         env:
