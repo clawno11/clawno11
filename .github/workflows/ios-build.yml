@@ -73,6 +73,19 @@ jobs:
         working-directory: apps/mobile
         run: pnpm tauri ios init
 
+      # Copy iOS app icons into generated Xcode asset catalog
+      - name: Copy iOS icons
+        working-directory: apps/mobile
+        run: |
+          ASSET_DIR="src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset"
+          if [ -d "$ASSET_DIR" ] && [ -d "src-tauri/icons/ios" ]; then
+            cp src-tauri/icons/ios/*.png "$ASSET_DIR/"
+            echo "Copied iOS icons to asset catalog"
+          else
+            echo "Warning: asset dir or ios icons not found"
+            ls -la src-tauri/gen/apple/Assets.xcassets/ || true
+          fi
+
       # Merge Info.plist permissions
       - name: Merge Info.plist
         working-directory: apps/mobile
