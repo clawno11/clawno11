@@ -97,14 +97,14 @@ jobs:
 
           XCODEBUILD="$(xcode-select -p)/usr/bin/xcodebuild"
           sudo mv "$XCODEBUILD" "${XCODEBUILD}.orig"
-          sudo tee "$XCODEBUILD" > /dev/null << 'WRAPPER'
-#!/bin/bash
-exec "${0}.orig" "$@" \
-  CODE_SIGN_STYLE=Manual \
-  "CODE_SIGN_IDENTITY=${CI_SIGN_IDENTITY}" \
-  "DEVELOPMENT_TEAM=${CI_TEAM_ID}" \
-  "PROVISIONING_PROFILE_SPECIFIER=${CI_PROFILE_UUID}"
-WRAPPER
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'exec "${0}.orig" "$@" \' \
+            '  CODE_SIGN_STYLE=Manual \' \
+            '  "CODE_SIGN_IDENTITY=${CI_SIGN_IDENTITY}" \' \
+            '  "DEVELOPMENT_TEAM=${CI_TEAM_ID}" \' \
+            '  "PROVISIONING_PROFILE_SPECIFIER=${CI_PROFILE_UUID}"' \
+            | sudo tee "$XCODEBUILD" > /dev/null
           sudo chmod +x "$XCODEBUILD"
           echo "xcodebuild wrapper installed; profile UUID=$PROFILE_UUID"
 
