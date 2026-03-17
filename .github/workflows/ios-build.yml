@@ -77,13 +77,20 @@ jobs:
       - name: Copy iOS icons
         working-directory: apps/mobile
         run: |
-          ASSET_DIR="src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset"
-          if [ -d "$ASSET_DIR" ] && [ -d "src-tauri/icons/ios" ]; then
-            cp src-tauri/icons/ios/*.png "$ASSET_DIR/"
-            echo "Copied iOS icons to asset catalog"
+          echo "=== Searching for AppIcon.appiconset ==="
+          ASSET_DIR=$(find src-tauri/gen/apple -type d -name "AppIcon.appiconset" | head -1)
+          if [ -n "$ASSET_DIR" ] && [ -d "src-tauri/icons/ios" ]; then
+            echo "Found asset catalog at: $ASSET_DIR"
+            echo "Before copy:"
+            ls "$ASSET_DIR/"
+            cp -f src-tauri/icons/ios/*.png "$ASSET_DIR/"
+            echo "After copy:"
+            ls "$ASSET_DIR/"
+            echo "Done — iOS icons copied"
           else
-            echo "Warning: asset dir or ios icons not found"
-            ls -la src-tauri/gen/apple/Assets.xcassets/ || true
+            echo "ERROR: AppIcon.appiconset not found or icons/ios missing"
+            echo "Generated apple dir contents:"
+            find src-tauri/gen/apple -type d | head -30
           fi
 
       # Merge Info.plist permissions
