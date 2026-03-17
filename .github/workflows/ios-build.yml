@@ -88,7 +88,7 @@ jobs:
           /usr/libexec/PlistBuddy -c "Add :NSAppTransportSecurity:NSAllowsLocalNetworking bool true" "$PLIST_PATH" || true
           /usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string 'ClawNo.11'" "$PLIST_PATH" || true
 
-      # Modify project.yml so xcodegen produces a manual-signed pbxproj
+      # Inject manual signing settings into project.yml (xcodegen input)
       - name: Configure manual signing
         working-directory: apps/mobile
         env:
@@ -96,7 +96,6 @@ jobs:
           TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           PROJECT_YML="src-tauri/gen/apple/project.yml"
-          # Extract provisioning profile UUID
           PROFILE_UUID=$(security cms -D -i ~/Library/MobileDevice/Provisioning\ Profiles/*.mobileprovision 2>/dev/null \
             | grep -A1 UUID | tail -1 | sed 's/.*<string>\(.*\)<\/string>/\1/' || true)
           echo "Detected profile UUID: $PROFILE_UUID"
@@ -105,33 +104,41 @@ jobs:
           python3 << 'PYEOF'
           import os, re
 
-          project_yml = os.environ["PROJECT_YML"]
-          profile_uuid = os.environ.get("PROFILE_UUID", "")
-          sign_identity = os.environ.get("SIGN_IDENTITY", "")
+          yml = os.environ["PROJECT_YML"]
+          uuid = os.environ.get("PROFILE_UUID", "")
+          identity = os.environ.get("SIGN_IDENTITY", "")
 
-          with open(project_yml) as f:
-              content = f.read()
+          with open(yml) as f:
+              txt = f.read()
 
-          content = content.replace(
-              "CODE_SIGN_STYLE: Automatic",
-              "CODE_SIGN_STYLE: Manual"
-          )
+          # Replace existing Automatic if present
+          txt = txt.replace("CODE_SIGN_STYLE: Automatic", "CODE_SIGN_STYLE: Manual")
 
-          content = re.sub(
-              r"(    CODE_SIGN_STYLE: Manual\n)",
-              r"\g<1>"
-              + f'    PROVISIONING_PROFILE_SPECIFIER: "{profile_uuid}"\n'
-              + f'    CODE_SIGN_IDENTITY: "{sign_identity}"\n',
-              content,
-              count=1,
-          )
+          # If CODE_SIGN_STYLE still not present, inject after DEVELOPMENT_TEAM
+          if "CODE_SIGN_STYLE" not in txt:
+              txt = re.sub(
+                  r"(( +)DEVELOPMENT_TEAM: .+\n)",
+                  lambda m: m.group(0)
+                      + f"{m.group(2)}CODE_SIGN_STYLE: Manual\n",
+                  txt, count=1,
+              )
 
-          with open(project_yml, "w") as f:
-              f.write(content)
+          # Inject profile and identity after CODE_SIGN_STYLE
+          if "PROVISIONING_PROFILE_SPECIFIER" not in txt:
+              txt = re.sub(
+                  r"(( +)CODE_SIGN_STYLE: Manual\n)",
+                  lambda m: m.group(0)
+                      + f'{m.group(2)}PROVISIONING_PROFILE_SPECIFIER: "{uuid}"\n'
+                      + f'{m.group(2)}CODE_SIGN_IDENTITY: "{identity}"\n',
+                  txt, count=1,
+              )
+
+          with open(yml, "w") as f:
+              f.write(txt)
           print("project.yml patched for manual signing")
           PYEOF
 
-          echo "=== Signing settings ==="
+          echo "=== project.yml signing settings ==="
           grep -E "CODE_SIGN|PROVISIONING|DEVELOPMENT_TEAM" "$PROJECT_YML" || true
 
       # Build iOS app
