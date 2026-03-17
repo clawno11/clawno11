@@ -35,7 +35,7 @@ export function Nav() {
           {/* Logo */}
           <a href="#" className="flex items-center gap-2 group">
             <img
-              src={`${process.env.NEXT_PUBLIC_BASE ?? ""}/icon.png`}
+              src="/icon.png"
               alt="ClawNo.11"
               width={32}
               height={32}
