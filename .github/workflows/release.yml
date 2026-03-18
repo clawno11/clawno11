@@ -56,28 +56,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      # Diagnose notarytool connectivity before the long build
-      - name: Verify notarytool credentials
-        if: runner.os == 'macOS'
-        timeout-minutes: 2
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          echo "::group::notarytool info"
-          echo "APPLE_ID length: ${#APPLE_ID}"
-          echo "APPLE_APP_PASSWORD length: ${#APPLE_APP_PASSWORD}"
-          echo "APPLE_TEAM_ID length: ${#APPLE_TEAM_ID}"
-          echo "APPLE_TEAM_ID value: $APPLE_TEAM_ID"
-          echo "::endgroup::"
-          echo "Testing notarytool authentication..."
-          xcrun notarytool history \
-            --apple-id "$APPLE_ID" \
-            --password "$APPLE_APP_PASSWORD" \
-            --team-id "$APPLE_TEAM_ID" 2>&1 | head -20
-          echo "✅ notarytool auth OK"
-
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         timeout-minutes: 30
@@ -98,4 +76,4 @@ jobs:
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
           prerelease: false
           includeUpdaterJson: true
-          args: --target ${{ matrix.target }}
+          args: --target ${{ matrix.target }} --skip-stapling
