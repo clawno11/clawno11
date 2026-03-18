@@ -151,64 +151,19 @@ export function ChatPage() {
     return () => { cancelled = true; };
   }, [selectedId, instances, configuredProviders]);
 
-  // WeChat-style keyboard handling:
-  // Translate the entire chat container up by the keyboard height so
-  // the input bar sits directly above the keyboard.
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-
+  // Scroll messages to bottom when keyboard opens.
+  // edge-to-edge plugin fires safeAreaChanged with keyboard info.
   useEffect(() => {
-    let pollTimer: ReturnType<typeof setInterval> | null = null;
-    let appliedKb = 0;
-
-    function getKeyboardHeight(): number {
-      const vv = window.visualViewport;
-      if (!vv) return 0;
-      return Math.max(0, Math.round(window.innerHeight - vv.height));
-    }
-
-    function apply(kbHeight: number) {
-      const el = chatContainerRef.current;
-      if (!el || kbHeight === appliedKb) return;
-      appliedKb = kbHeight;
-      el.style.transform = kbHeight > 0 ? `translateY(-${kbHeight}px)` : "";
-      if (kbHeight > 0) {
+    function onSafeArea(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.keyboardVisible) {
         requestAnimationFrame(() => {
           bottomRef.current?.scrollIntoView({ behavior: "smooth" });
         });
       }
     }
-
-    function handleFocusIn(e: FocusEvent) {
-      if (!(e.target instanceof HTMLTextAreaElement)) return;
-      if (pollTimer) clearInterval(pollTimer);
-      let attempts = 0;
-      pollTimer = setInterval(() => {
-        const kbh = getKeyboardHeight();
-        if (kbh > 150) {
-          apply(kbh);
-          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-        }
-        if (++attempts > 30) {
-          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-          if (appliedKb === 0) apply(Math.round(window.innerHeight * 0.4));
-        }
-      }, 50);
-    }
-
-    function handleFocusOut(e: FocusEvent) {
-      if (!(e.target instanceof HTMLTextAreaElement)) return;
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-      setTimeout(() => apply(0), 100);
-    }
-
-    const el = chatContainerRef.current;
-    el?.addEventListener("focusin", handleFocusIn);
-    el?.addEventListener("focusout", handleFocusOut);
-    return () => {
-      if (pollTimer) clearInterval(pollTimer);
-      el?.removeEventListener("focusin", handleFocusIn);
-      el?.removeEventListener("focusout", handleFocusOut);
-    };
+    window.addEventListener("safeAreaChanged", onSafeArea);
+    return () => window.removeEventListener("safeAreaChanged", onSafeArea);
   }, [bottomRef]);
 
   // ── Chat proxy port discovery ──────────────────────────────────────────
@@ -483,8 +438,7 @@ export function ChatPage() {
   );
 
   return (
-    <div ref={chatContainerRef} className="flex flex-col h-full relative overflow-hidden"
-      style={{ transition: "transform 0.25s ease-out", willChange: "transform" }}>
+    <div className="flex flex-col h-full relative overflow-hidden keyboard-push">
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 flex-shrink-0 top-bar"
         style={{ borderBottom: "1px solid rgba(6,182,212,0.12)", background: "rgba(6,182,212,0.02)" }}>

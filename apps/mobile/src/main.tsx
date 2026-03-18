@@ -4,11 +4,10 @@ import "./i18n.ts";
 import "./index.css";
 import { App } from "./App.tsx";
 
-// Set --app-height to window height on init and resize.
-// Keyboard handling for the chat page is done via transform in ChatPage.
+// Set --app-height for root element sizing.
+// Keyboard handling uses CSS var(--keyboard-height) from edge-to-edge plugin.
 function syncAppHeight() {
-  const h = window.innerHeight;
-  document.documentElement.style.setProperty("--app-height", `${h}px`);
+  document.documentElement.style.setProperty("--app-height", `${window.innerHeight}px`);
 }
 window.addEventListener("resize", syncAppHeight);
 syncAppHeight();
