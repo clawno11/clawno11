@@ -39,7 +39,7 @@
     "iOS": {
       "minimumSystemVersion": "16.0",
       "developmentTeam": "YOUR_TEAM_ID",
-      "bundleVersion": "11"
+      "bundleVersion": "12"
     }
   },
   "plugins": {}
