@@ -4,23 +4,47 @@ import "./i18n.ts";
 import "./index.css";
 import { App } from "./App.tsx";
 
-// Keep --app-height in sync with the visible area so flex layout
-// pushes the chat input above the virtual keyboard on iOS.
-// interactive-widget=resizes-content handles the layout viewport,
-// but we still sync --app-height as a belt-and-suspenders fallback
-// because WKWebView behaviour varies across iOS versions.
-let rafId = 0;
-function syncAppHeight() {
-  cancelAnimationFrame(rafId);
-  rafId = requestAnimationFrame(() => {
-    const h = window.visualViewport?.height ?? window.innerHeight;
-    document.documentElement.style.setProperty("--app-height", `${h}px`);
-  });
+// iOS WKWebView keyboard handling.
+// visualViewport events are unreliable in WKWebView, so we use
+// focusin-triggered polling as the primary detection mechanism.
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+
+function applyHeight() {
+  const vv = window.visualViewport;
+  const h = vv ? vv.height : window.innerHeight;
+  const hPx = `${h}px`;
+  document.documentElement.style.setProperty("--app-height", hPx);
+  const root = document.getElementById("root");
+  if (root) root.style.height = hPx;
 }
-window.visualViewport?.addEventListener("resize", syncAppHeight);
-window.visualViewport?.addEventListener("scroll", syncAppHeight);
-window.addEventListener("resize", syncAppHeight);
-syncAppHeight();
+
+function startKeyboardPoll() {
+  stopKeyboardPoll();
+  applyHeight();
+  pollTimer = setInterval(applyHeight, 60);
+  setTimeout(stopKeyboardPoll, 1200);
+}
+
+function stopKeyboardPoll() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+}
+
+document.addEventListener("focusin", (e) => {
+  if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) {
+    startKeyboardPoll();
+  }
+});
+
+document.addEventListener("focusout", (e) => {
+  if (e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement) {
+    setTimeout(() => { stopKeyboardPoll(); applyHeight(); }, 300);
+  }
+});
+
+window.visualViewport?.addEventListener("resize", applyHeight);
+window.visualViewport?.addEventListener("scroll", applyHeight);
+window.addEventListener("resize", applyHeight);
+applyHeight();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

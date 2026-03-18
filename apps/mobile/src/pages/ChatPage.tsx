@@ -151,19 +151,32 @@ export function ChatPage() {
     return () => { cancelled = true; };
   }, [selectedId, instances, configuredProviders]);
 
-  // When the keyboard opens, scroll the message list to the bottom
-  // so the latest messages stay visible above the input bar.
+  // Scroll messages to bottom when keyboard opens.
+  // Uses focusin + polling because visualViewport events are
+  // unreliable in iOS WKWebView.
   useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    function onResize() {
-      const diff = window.innerHeight - (vv?.height ?? window.innerHeight);
-      if (diff > 150) {
-        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-      }
+    let scrollTimer: ReturnType<typeof setInterval> | null = null;
+
+    function handleFocusIn(e: FocusEvent) {
+      if (!(e.target instanceof HTMLTextAreaElement)) return;
+      let attempts = 0;
+      scrollTimer = setInterval(() => {
+        const diff = window.innerHeight - (window.visualViewport?.height ?? window.innerHeight);
+        if (diff > 150) {
+          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+          if (scrollTimer) { clearInterval(scrollTimer); scrollTimer = null; }
+        }
+        if (++attempts > 20) {
+          if (scrollTimer) { clearInterval(scrollTimer); scrollTimer = null; }
+        }
+      }, 80);
     }
-    vv.addEventListener("resize", onResize);
-    return () => vv.removeEventListener("resize", onResize);
+
+    document.addEventListener("focusin", handleFocusIn);
+    return () => {
+      document.removeEventListener("focusin", handleFocusIn);
+      if (scrollTimer) clearInterval(scrollTimer);
+    };
   }, [bottomRef]);
 
   // ── Chat proxy port discovery ──────────────────────────────────────────

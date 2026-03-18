@@ -45,7 +45,6 @@
 html,
 body,
 #root {
-  height: var(--app-height, 100dvh);
   height: var(--app-height, 100%);
   margin: 0;
   padding: 0;
