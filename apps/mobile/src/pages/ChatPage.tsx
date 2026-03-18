@@ -151,31 +151,63 @@ export function ChatPage() {
     return () => { cancelled = true; };
   }, [selectedId, instances, configuredProviders]);
 
-  // Scroll messages to bottom when keyboard opens.
-  // Uses focusin + polling because visualViewport events are
-  // unreliable in iOS WKWebView.
+  // WeChat-style keyboard handling:
+  // Translate the entire chat container up by the keyboard height so
+  // the input bar sits directly above the keyboard.
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
-    let scrollTimer: ReturnType<typeof setInterval> | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let appliedKb = 0;
+
+    function getKeyboardHeight(): number {
+      const vv = window.visualViewport;
+      if (!vv) return 0;
+      return Math.max(0, Math.round(window.innerHeight - vv.height));
+    }
+
+    function apply(kbHeight: number) {
+      const el = chatContainerRef.current;
+      if (!el || kbHeight === appliedKb) return;
+      appliedKb = kbHeight;
+      el.style.transform = kbHeight > 0 ? `translateY(-${kbHeight}px)` : "";
+      if (kbHeight > 0) {
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+        });
+      }
+    }
 
     function handleFocusIn(e: FocusEvent) {
       if (!(e.target instanceof HTMLTextAreaElement)) return;
+      if (pollTimer) clearInterval(pollTimer);
       let attempts = 0;
-      scrollTimer = setInterval(() => {
-        const diff = window.innerHeight - (window.visualViewport?.height ?? window.innerHeight);
-        if (diff > 150) {
-          bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-          if (scrollTimer) { clearInterval(scrollTimer); scrollTimer = null; }
+      pollTimer = setInterval(() => {
+        const kbh = getKeyboardHeight();
+        if (kbh > 150) {
+          apply(kbh);
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
         }
-        if (++attempts > 20) {
-          if (scrollTimer) { clearInterval(scrollTimer); scrollTimer = null; }
+        if (++attempts > 30) {
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+          if (appliedKb === 0) apply(Math.round(window.innerHeight * 0.4));
         }
-      }, 80);
+      }, 50);
     }
 
-    document.addEventListener("focusin", handleFocusIn);
+    function handleFocusOut(e: FocusEvent) {
+      if (!(e.target instanceof HTMLTextAreaElement)) return;
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      setTimeout(() => apply(0), 100);
+    }
+
+    const el = chatContainerRef.current;
+    el?.addEventListener("focusin", handleFocusIn);
+    el?.addEventListener("focusout", handleFocusOut);
     return () => {
-      document.removeEventListener("focusin", handleFocusIn);
-      if (scrollTimer) clearInterval(scrollTimer);
+      if (pollTimer) clearInterval(pollTimer);
+      el?.removeEventListener("focusin", handleFocusIn);
+      el?.removeEventListener("focusout", handleFocusOut);
     };
   }, [bottomRef]);
 
@@ -451,7 +483,8 @@ export function ChatPage() {
   );
 
   return (
-    <div className="flex flex-col h-full relative overflow-hidden">
+    <div ref={chatContainerRef} className="flex flex-col h-full relative overflow-hidden"
+      style={{ transition: "transform 0.25s ease-out", willChange: "transform" }}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2.5 flex-shrink-0 top-bar"
         style={{ borderBottom: "1px solid rgba(6,182,212,0.12)", background: "rgba(6,182,212,0.02)" }}>
