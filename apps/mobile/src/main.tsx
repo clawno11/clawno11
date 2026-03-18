@@ -4,14 +4,18 @@ import "./i18n.ts";
 import "./index.css";
 import { App } from "./App.tsx";
 
-// Keep --app-height in sync with the actual visible area.
-// On iOS WKWebView the virtual keyboard overlays the webview without
-// resizing it, so CSS height:100% still includes the area behind the
-// keyboard.  By binding the root height to visualViewport.height the
-// flex layout naturally pushes the chat input above the keyboard.
+// Keep --app-height in sync with the visible area so flex layout
+// pushes the chat input above the virtual keyboard on iOS.
+// interactive-widget=resizes-content handles the layout viewport,
+// but we still sync --app-height as a belt-and-suspenders fallback
+// because WKWebView behaviour varies across iOS versions.
+let rafId = 0;
 function syncAppHeight() {
-  const h = window.visualViewport?.height ?? window.innerHeight;
-  document.documentElement.style.setProperty("--app-height", `${h}px`);
+  cancelAnimationFrame(rafId);
+  rafId = requestAnimationFrame(() => {
+    const h = window.visualViewport?.height ?? window.innerHeight;
+    document.documentElement.style.setProperty("--app-height", `${h}px`);
+  });
 }
 window.visualViewport?.addEventListener("resize", syncAppHeight);
 window.visualViewport?.addEventListener("scroll", syncAppHeight);

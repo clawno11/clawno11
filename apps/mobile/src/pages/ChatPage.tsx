@@ -151,7 +151,20 @@ export function ChatPage() {
     return () => { cancelled = true; };
   }, [selectedId, instances, configuredProviders]);
 
-  // Keyboard handling is done globally in main.tsx via --app-height.
+  // When the keyboard opens, scroll the message list to the bottom
+  // so the latest messages stay visible above the input bar.
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    function onResize() {
+      const diff = window.innerHeight - (vv?.height ?? window.innerHeight);
+      if (diff > 150) {
+        bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, [bottomRef]);
 
   // ── Chat proxy port discovery ──────────────────────────────────────────
 

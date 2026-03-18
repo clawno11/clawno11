@@ -2,6 +2,7 @@ import { Component, useEffect, type ReactNode } from "react";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import i18n from "./i18n.ts";
 import { BottomNav } from "./components/BottomNav.tsx";
+import { useKeyboardVisible } from "./hooks/useKeyboardVisible.ts";
 import { ChatPage } from "./pages/ChatPage.tsx";
 import { InstancesPage } from "./pages/InstancesPage.tsx";
 import { ConnectPage } from "./pages/ConnectPage.tsx";
@@ -54,8 +55,8 @@ class PageErrorBoundary extends Component<{ children: ReactNode }, EBState> {
 
 function AppContent() {
   const { load } = useAiConfigStore();
+  const keyboardVisible = useKeyboardVisible();
 
-  // Hydrate AI config from encrypted store once on mount
   useEffect(() => {
     load().catch(() => {});
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -64,7 +65,6 @@ function AppContent() {
     <div
       className="flex flex-col h-full bg-[hsl(var(--background))] text-[hsl(var(--foreground))]"
     >
-      {/* Page content */}
       <main className="flex-1 min-h-0 overflow-hidden">
         <PageErrorBoundary>
           <Routes>
@@ -83,8 +83,7 @@ function AppContent() {
         </PageErrorBoundary>
       </main>
 
-      {/* Bottom navigation */}
-      <BottomNav />
+      {!keyboardVisible && <BottomNav />}
     </div>
   );
 }
