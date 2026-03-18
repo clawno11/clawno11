@@ -32,6 +32,7 @@ jobs:
             target: x86_64-unknown-linux-gnu
 
     runs-on: ${{ matrix.platform }}
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v4
@@ -59,16 +60,17 @@ jobs:
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
+        timeout-minutes: 30
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: "Developer ID Application: shiyi yan (R4F6WVNKS8)"
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_CERTIFICATE: ${{ contains(matrix.platform, 'macos') && secrets.MACOS_CERTIFICATE_P12_BASE64 || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ contains(matrix.platform, 'macos') && secrets.MACOS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ contains(matrix.platform, 'macos') && 'Developer ID Application: shiyi yan (R4F6WVNKS8)' || '' }}
+          APPLE_ID: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_APP_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ contains(matrix.platform, 'macos') && secrets.APPLE_TEAM_ID || '' }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
