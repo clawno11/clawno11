@@ -56,6 +56,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Install signing tools (Windows)
+        if: matrix.platform == 'windows-latest'
+        run: choco install jsign temurin -y
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         timeout-minutes: 30
@@ -69,6 +73,11 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          SIGN_ENABLED: ${{ matrix.platform == 'windows-latest' && 'true' || '' }}
+          SSL_COM_CREDENTIAL_ID: ${{ secrets.SSL_COM_CREDENTIAL_ID }}
+          SSL_COM_USERNAME: ${{ secrets.SSL_COM_USERNAME }}
+          SSL_COM_PASSWORD: ${{ secrets.SSL_COM_PASSWORD }}
+          SSL_COM_TOTP_SECRET: ${{ secrets.SSL_COM_TOTP_SECRET }}
         with:
           projectPath: apps/desktop
           tagName: ${{ github.ref_name }}
@@ -76,4 +85,4 @@ jobs:
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
           prerelease: false
           includeUpdaterJson: true
-          args: --target ${{ matrix.target }} --skip-stapling
+          args: --target ${{ matrix.target }}
