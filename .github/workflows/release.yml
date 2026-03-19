@@ -61,6 +61,7 @@ jobs:
         run: choco install jsign temurin -y
 
       - name: Build Tauri app
+        id: tauri
         uses: tauri-apps/tauri-action@v0
         timeout-minutes: 30
         env:
@@ -70,9 +71,6 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: "Developer ID Application: shiyi yan (R4F6WVNKS8)"
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           SIGN_ENABLED: ${{ matrix.platform == 'windows-latest' && 'true' || '' }}
           SSL_COM_CREDENTIAL_ID: ${{ secrets.SSL_COM_CREDENTIAL_ID }}
           SSL_COM_USERNAME: ${{ secrets.SSL_COM_USERNAME }}
@@ -86,3 +84,25 @@ jobs:
           prerelease: false
           includeUpdaterJson: true
           args: --target ${{ matrix.target }}
+
+      - name: Notarize macOS DMG
+        if: matrix.platform == 'macos-latest'
+        run: |
+          DMG=$(find apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/dmg -name '*.dmg' | head -1)
+          if [ -z "$DMG" ]; then
+            echo "::error::No DMG found to notarize"
+            exit 1
+          fi
+          echo "Notarizing $DMG ..."
+          xcrun notarytool submit "$DMG" \
+            --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" \
+            --team-id "$APPLE_TEAM_ID" \
+            --wait --timeout 10m
+          echo "Stapling $DMG ..."
+          xcrun stapler staple "$DMG"
+          echo "Notarization complete."
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
