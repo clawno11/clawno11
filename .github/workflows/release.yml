@@ -56,6 +56,12 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Setup Python (Windows signing)
+        if: matrix.platform == 'windows-latest'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Install signing tools (Windows)
         if: matrix.platform == 'windows-latest'
         run: choco install jsign temurin -y

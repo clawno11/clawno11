@@ -103,6 +103,12 @@ def main() -> None:
         print(f"[sign] DRY RUN: {basename} (set SIGN_ENABLED=true to sign)")
         sys.exit(0)
 
+    required = ["SSL_COM_CREDENTIAL_ID", "SSL_COM_USERNAME", "SSL_COM_PASSWORD", "SSL_COM_TOTP_SECRET"]
+    missing = [v for v in required if not os.environ.get(v)]
+    if missing:
+        print(f"[sign] SKIP: {basename} (missing env: {', '.join(missing)})")
+        sys.exit(0)
+
     print(f"[sign] SIGNING: {basename}")
     sign(path)
     print(f"[sign] OK: {basename}")
