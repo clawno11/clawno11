@@ -2,6 +2,7 @@
 
 import { Apple, Monitor, Smartphone, Github, Star } from "lucide-react";
 import { useI18n } from "@/i18n/context";
+import { downloads } from "@/lib/downloads";
 
 export function Download() {
   const { t } = useI18n();
@@ -25,7 +26,7 @@ export function Download() {
         <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
           {/* Mac */}
           <a
-            href={d.releasesLink}
+            href={downloads.mac}
             target="_blank"
             rel="noopener noreferrer"
             className="group flex flex-col items-center gap-3 p-6 rounded-2xl border border-border-dim bg-bg-card card-hover hover:glow-cyan-sm transition-all"
@@ -38,7 +39,7 @@ export function Download() {
 
           {/* Windows */}
           <a
-            href={d.releasesLink}
+            href={downloads.windows}
             target="_blank"
             rel="noopener noreferrer"
             className="group flex flex-col items-center gap-3 p-6 rounded-2xl border border-border-dim bg-bg-card card-hover hover:glow-cyan-sm transition-all"
@@ -51,7 +52,7 @@ export function Download() {
 
           {/* iOS */}
           <a
-            href={d.releasesLink}
+            href={downloads.ios}
             target="_blank"
             rel="noopener noreferrer"
             className="group flex flex-col items-center gap-3 p-6 rounded-2xl border border-border-dim bg-bg-card card-hover hover:glow-cyan-sm transition-all"
@@ -64,7 +65,7 @@ export function Download() {
 
           {/* Android */}
           <a
-            href={d.releasesLink}
+            href={downloads.android}
             target="_blank"
             rel="noopener noreferrer"
             className="group flex flex-col items-center gap-3 p-6 rounded-2xl border border-border-dim bg-bg-card card-hover hover:glow-cyan-sm transition-all"
@@ -77,7 +78,7 @@ export function Download() {
 
           {/* GitHub */}
           <a
-            href={d.githubLink}
+            href={downloads.github}
             target="_blank"
             rel="noopener noreferrer"
             className="group flex flex-col items-center gap-3 p-6 rounded-2xl border border-border-dim bg-bg-card card-hover transition-all"
@@ -95,7 +96,7 @@ export function Download() {
 
         <div className="flex flex-wrap items-center justify-center gap-3">
           <a
-            href={d.releasesLink}
+            href={downloads.mac}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-primary hover:bg-primary-dark text-white font-bold text-lg transition-all glow-cyan hover:scale-105"
@@ -103,7 +104,7 @@ export function Download() {
             {d.mac}
           </a>
           <a
-            href={d.releasesLink}
+            href={downloads.windows}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-bold text-lg transition-all hover:scale-105"

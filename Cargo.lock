@@ -647,7 +647,7 @@ dependencies = [
 
 [[package]]
 name = "clawno-core"
-version = "2026.3.20"
+version = "26.3.20"
 dependencies = [
  "aes-gcm",
  "async-trait",
@@ -667,7 +667,7 @@ dependencies = [
 
 [[package]]
 name = "clawno-desktop"
-version = "2026.3.20"
+version = "26.3.20"
 dependencies = [
  "async-trait",
  "axum",
@@ -701,7 +701,7 @@ dependencies = [
 
 [[package]]
 name = "clawno-mobile"
-version = "2026.3.20"
+version = "26.3.20"
 dependencies = [
  "async-trait",
  "clawno-core",

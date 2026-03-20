@@ -3,6 +3,7 @@
 import { Apple, Monitor, Smartphone, ArrowRight } from "lucide-react";
 import { useI18n } from "@/i18n/context";
 import { AppIcon } from "@/components/AppIcon";
+import { downloads } from "@/lib/downloads";
 
 function ClawIcon() {
   return (
@@ -15,7 +16,6 @@ function ClawIcon() {
 
 export function Hero() {
   const { t } = useI18n();
-  const releases = "https://github.com/clawno11/clawno11/releases";
 
   return (
     <section className="relative min-h-screen flex flex-col items-center justify-center text-center px-4 pt-20 pb-24">
@@ -49,7 +49,7 @@ export function Hero() {
         {/* Primary CTAs — Desktop */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-4">
           <a
-            href={releases}
+            href={downloads.mac}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-6 py-3 rounded-full bg-primary hover:bg-primary-dark text-white font-semibold text-sm transition-all"
@@ -59,7 +59,7 @@ export function Hero() {
             {t.hero.ctaMac}
           </a>
           <a
-            href={releases}
+            href={downloads.windows}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-semibold text-sm transition-all"
@@ -72,7 +72,7 @@ export function Hero() {
         {/* Secondary CTAs — Mobile */}
         <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
           <a
-            href={releases}
+            href={downloads.ios}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/4 hover:bg-white/8 border border-white/8 hover:border-primary/25 text-slate-300 hover:text-white font-medium text-xs transition-all"
@@ -81,7 +81,7 @@ export function Hero() {
             {t.hero.ctaIos}
           </a>
           <a
-            href={releases}
+            href={downloads.android}
             target="_blank"
             rel="noopener noreferrer"
             className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/4 hover:bg-white/8 border border-white/8 hover:border-primary/25 text-slate-300 hover:text-white font-medium text-xs transition-all"
@@ -102,7 +102,7 @@ export function Hero() {
 
         {/* Announcement pill */}
         <a
-          href={releases}
+          href={downloads.releases}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/4 hover:border-primary/30 hover:bg-primary/5 text-slate-400 hover:text-white text-xs transition-all"
