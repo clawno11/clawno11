@@ -23,8 +23,8 @@ export function Download() {
           <p className="text-slate-400">{d.subtitle}</p>
         </div>
 
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-          {/* Mac */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-6 gap-4 mb-8">
+          {/* Mac Apple Silicon */}
           <a
             href={downloads.mac}
             target="_blank"
@@ -35,6 +35,19 @@ export function Download() {
               <Apple size={22} className="text-primary" />
             </div>
             <div className="font-semibold text-white text-sm">{d.mac}</div>
+          </a>
+
+          {/* Mac Intel */}
+          <a
+            href={downloads.macIntel}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="group flex flex-col items-center gap-3 p-6 rounded-2xl border border-border-dim bg-bg-card card-hover hover:glow-cyan-sm transition-all"
+          >
+            <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+              <Apple size={22} className="text-primary" />
+            </div>
+            <div className="font-semibold text-white text-sm">{d.macIntel}</div>
           </a>
 
           {/* Windows */}
@@ -102,6 +115,14 @@ export function Download() {
             className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-primary hover:bg-primary-dark text-white font-bold text-lg transition-all glow-cyan hover:scale-105"
           >
             {d.mac}
+          </a>
+          <a
+            href={downloads.macIntel}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-bold text-lg transition-all hover:scale-105"
+          >
+            {d.macIntel}
           </a>
           <a
             href={downloads.windows}

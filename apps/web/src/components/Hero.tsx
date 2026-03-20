@@ -59,6 +59,15 @@ export function Hero() {
             {t.hero.ctaMac}
           </a>
           <a
+            href={downloads.macIntel}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-semibold text-sm transition-all"
+          >
+            <Apple size={15} />
+            {t.hero.ctaMacIntel}
+          </a>
+          <a
             href={downloads.windows}
             target="_blank"
             rel="noopener noreferrer"
