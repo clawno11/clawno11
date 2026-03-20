@@ -12,7 +12,7 @@ export const downloads = {
   linuxDeb: ghRelease(`ClawNo.11_${VERSION}_amd64.deb`),
   linuxAppImage: ghRelease(`ClawNo.11_${VERSION}_amd64.AppImage`),
   linuxRpm: ghRelease(`ClawNo.11-${VERSION}-1.x86_64.rpm`),
-  ios: "https://testflight.apple.com/join/TODO",
+  ios: "https://testflight.apple.com/join/BmVqFUkC",
   android: `https://github.com/${REPO}/actions/workflows/android-build.yml`,
   releases: `https://github.com/${REPO}/releases`,
   github: `https://github.com/${REPO}`,
