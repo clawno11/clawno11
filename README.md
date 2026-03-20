@@ -11,14 +11,14 @@
 
 *Your AI, Your Data, Your Home.*
 
-### Supported Platforms
+### Download & Install
 
-| Platform | Status | Install Method |
-|----------|--------|---------------|
-| Windows | ✅ | `.msi` / `.exe` |
-| macOS | ✅ | `.dmg` |
-| iOS | ✅ | TestFlight / App Store |
-| Android | ✅ | `.apk` |
+| Platform | Install |
+|----------|---------|
+| Windows | [Download `.msi` / `.exe`](https://github.com/clawno11/clawno11/releases/latest) |
+| macOS | [Download `.dmg`](https://github.com/clawno11/clawno11/releases/latest) |
+| **iOS** | [**Join TestFlight Beta**](https://testflight.apple.com/join/BmVqFUkC) |
+| Android | `.apk` (coming soon) |
 
 ---
 

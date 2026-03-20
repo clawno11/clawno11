@@ -6,16 +6,43 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      version_suffix:
+        description: '同日多次发布时追加序号（留空=首次，填2=第二次）'
+        required: false
+        default: ''
       dry_run:
         description: '仅构建不发布 Release（true=dry run）'
         required: false
-        default: 'true'
+        default: 'false'
 
 permissions:
   contents: write
 
 jobs:
+  resolve-version:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.ver.outputs.tag }}
+      name: ${{ steps.ver.outputs.name }}
+    steps:
+      - name: Compute CalVer tag
+        id: ver
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DATE_TAG="v$(date -u +%Y.%-m.%-d)"
+            SUFFIX="${{ github.event.inputs.version_suffix }}"
+            if [ -n "$SUFFIX" ]; then
+              DATE_TAG="${DATE_TAG}.${SUFFIX}"
+            fi
+            echo "tag=${DATE_TAG}" >> "$GITHUB_OUTPUT"
+            echo "name=ClawNo.11 ${DATE_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "name=ClawNo.11 ${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          fi
+
   build-desktop:
+    needs: resolve-version
     strategy:
       fail-fast: false
       matrix:
@@ -69,8 +96,8 @@ jobs:
           APPLE_SIGNING_IDENTITY: "Developer ID Application: shiyi yan (R4F6WVNKS8)"
         with:
           projectPath: apps/desktop
-          tagName: ${{ github.ref_name }}
-          releaseName: "ClawNo.11 ${{ github.ref_name }}"
+          tagName: ${{ needs.resolve-version.outputs.tag }}
+          releaseName: ${{ needs.resolve-version.outputs.name }}
           releaseDraft: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry_run == 'true' }}
           prerelease: false
           includeUpdaterJson: true

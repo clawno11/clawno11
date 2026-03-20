@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "ClawNo.11",
-  "version": "1.0.0",
+  "version": "2026.3.20",
   "identifier": "ai.clawno11.mobile",
   "build": {
     "beforeDevCommand": "pnpm --filter @clawno/openclaw-client build && pnpm --filter @clawno/mobile run dev",
