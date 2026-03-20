@@ -36,12 +36,8 @@ const PROBES: Record<string, ProbeSpec> = {
     url:     "https://api.openai.com/v1/models",
     headers: {},
   },
-  minimax: {
-    url:     "https://api.minimaxi.com/v1/models",
-    headers: {},
-  },
-  // moonshot / qwen / doubao: 厂商 API 无 CORS 头，webview fetch 会被阻止。
-  // 不设探针 → verifyProviderKey 直接返回 "ok"（key 已由后端写入）。
+  // minimax / moonshot / qwen / doubao: 厂商 API 不支持 /v1/models 或无 CORS 头，
+  // webview fetch 无法验证。不设探针 → verifyProviderKey 直接返回 "ok"（key 已由后端写入）。
 };
 
 /**

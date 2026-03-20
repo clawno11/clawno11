@@ -62,6 +62,7 @@ const ERROR_MAP: Array<[test: (s: string) => boolean, msg: string]> = [
   [(s) => s.includes("gateway-http-5") || s.includes("网关返回错误 5"), "网关内部错误，请稍后重试"],
   [(s) => s.includes("429") || s.includes("过于频繁"), "请求过于频繁，请稍后再试"],
   [(s) => s.includes("Unauthorized") || s.includes("401"), "认证失败，请重新配对连接"],
+  [(s) => s.includes("Forbidden") || s.includes("403") || s.includes("invalid token"), "配对令牌已失效，请重新配对连接"],
   [(s) => s.includes("Ollama API error"), "Ollama 接口异常，系统正在尝试自动恢复…"],
 ];
 
