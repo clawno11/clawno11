@@ -1,6 +1,6 @@
 {
   "name": "@clawno/shared",
-  "version": "2026.3.20",
+  "version": "26.3.20",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",

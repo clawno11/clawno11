@@ -1,6 +1,6 @@
 {
   "name": "@clawno/openclaw-client",
-  "version": "2026.3.20",
+  "version": "26.3.20",
   "description": "OpenClaw Gateway HTTP API and WebSocket client",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
