@@ -349,10 +349,111 @@ pub fn scan_openclaw_mjs() -> Option<String> {
         }
     }
 
-    let _ = home; // suppress unused warning on Windows
-    candidates
-        .into_iter()
-        .find(|p| std::path::Path::new(p).exists())
+    // nvm-windows: global modules live next to node.exe in the active version dir
+    #[cfg(target_os = "windows")]
+    {
+        for nvm_base in &[
+            format!("{local}\\nvm"),
+            format!("{home}\\AppData\\Local\\nvm"),
+            r"C:\nvm".to_string(),
+        ] {
+            if let Ok(entries) = std::fs::read_dir(nvm_base) {
+                for e in entries.flatten() {
+                    let s = e.file_name().to_string_lossy().to_string();
+                    if s.starts_with('v') {
+                        candidates.push(format!(
+                            "{nvm_base}\\{s}\\node_modules\\openclaw\\openclaw.mjs"
+                        ));
+                    }
+                }
+            }
+        }
+        // ClawNo direct-download Node.js
+        let clawno_node = format!("{local}\\clawno\\node");
+        if let Ok(entries) = std::fs::read_dir(&clawno_node) {
+            for e in entries.flatten() {
+                let s = e.file_name().to_string_lossy().to_string();
+                if s.starts_with("node-v") {
+                    candidates.push(format!(
+                        "{clawno_node}\\{s}\\node_modules\\openclaw\\openclaw.mjs"
+                    ));
+                }
+            }
+        }
+    }
+
+    let _ = home;
+    if let Some(p) = candidates
+        .iter()
+        .find(|p| std::path::Path::new(p.as_str()).exists())
+    {
+        return Some(p.clone());
+    }
+
+    // Ultimate fallback: locate the `openclaw` binary via PATH and derive
+    // the mjs path from it.  On Windows npm creates a `.cmd` shim next to
+    // `node_modules/`, so the parent directory of `openclaw.cmd` is the npm
+    // prefix where `node_modules/openclaw/openclaw.mjs` lives.
+    derive_mjs_from_bin()
+}
+
+/// Locate `openclaw.mjs` by finding the `openclaw` binary on PATH and
+/// resolving the sibling `node_modules/openclaw/openclaw.mjs`.
+fn derive_mjs_from_bin() -> Option<String> {
+    #[cfg(target_os = "windows")]
+    let bin_path = {
+        let out = crate::platform::shell_output("where openclaw.cmd");
+        let first = out.lines().next().unwrap_or("").trim().to_string();
+        if first.is_empty() {
+            crate::platform::shell_output("where openclaw")
+                .lines()
+                .next()
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        } else {
+            first
+        }
+    };
+    #[cfg(not(target_os = "windows"))]
+    let bin_path = crate::platform::shell_output("which openclaw")
+        .trim()
+        .to_string();
+
+    if bin_path.is_empty() {
+        return None;
+    }
+
+    // Follow symlinks to the real path
+    let resolved = std::fs::canonicalize(&bin_path)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| bin_path.clone());
+
+    // Try parent dir: {prefix}/node_modules/openclaw/openclaw.mjs
+    for base in [&resolved, &bin_path] {
+        if let Some(parent) = std::path::Path::new(base).parent() {
+            let mjs = parent
+                .join("node_modules")
+                .join("openclaw")
+                .join("openclaw.mjs");
+            if mjs.exists() {
+                return Some(mjs.to_string_lossy().to_string());
+            }
+            // npm might install the .cmd shim one level above node_modules
+            // e.g. {prefix}/openclaw.cmd and {prefix}/node_modules/openclaw/
+            // Already covered above, but also check lib/ for Unix-style layouts
+            let mjs_lib = parent
+                .join("lib")
+                .join("node_modules")
+                .join("openclaw")
+                .join("openclaw.mjs");
+            if mjs_lib.exists() {
+                return Some(mjs_lib.to_string_lossy().to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Build the list of well-known directories that may contain a `node` binary.

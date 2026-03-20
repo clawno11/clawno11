@@ -309,18 +309,21 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
     emit_progress(StepPhase::Probing, "locating openclaw.mjs", 5.0);
 
     let mjs = {
-        let from_shell = {
-            let npm_root = shell_output("npm root -g").trim().to_string();
-            if !npm_root.is_empty() {
-                let p = path_join(&path_join(&npm_root, "openclaw"), "openclaw.mjs");
-                if std::path::Path::new(&p).exists() {
-                    Some(p)
-                } else {
-                    None
-                }
+        let npm_root = shell_output("npm root -g").trim().to_string();
+        let from_shell = if !npm_root.is_empty() {
+            let p = path_join(&path_join(&npm_root, "openclaw"), "openclaw.mjs");
+            if std::path::Path::new(&p).exists() {
+                Some(p)
             } else {
+                fixes.push(format!(
+                    "npm-root-miss:{}",
+                    npm_root.chars().take(120).collect::<String>()
+                ));
                 None
             }
+        } else {
+            fixes.push("npm-root-empty".to_string());
+            None
         };
         match from_shell {
             Some(p) => p,
@@ -330,9 +333,23 @@ pub async fn deploy_step_start(port: Option<u16>, app: tauri::AppHandle) -> Step
                     p
                 }
                 None => {
+                    let where_out = shell_output(if cfg!(target_os = "windows") {
+                        "where openclaw.cmd 2>nul & where openclaw 2>nul"
+                    } else {
+                        "which openclaw 2>/dev/null"
+                    });
                     return StepResult::err_fixed(
-                        "openclaw-mjs-not-found: reinstall openclaw via the deploy steps"
-                            .to_string(),
+                        format!(
+                            "openclaw-mjs-not-found: npm-root=[{}] where=[{}]",
+                            npm_root.chars().take(100).collect::<String>(),
+                            where_out
+                                .lines()
+                                .next()
+                                .unwrap_or("")
+                                .chars()
+                                .take(100)
+                                .collect::<String>()
+                        ),
                         fixes,
                     );
                 }
