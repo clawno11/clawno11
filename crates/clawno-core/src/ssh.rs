@@ -405,6 +405,7 @@ export PATH="$HOME/.fnm:$HOME/.local/bin:$(npm prefix -g 2>/dev/null)/bin:$PATH"
 eval "$(~/.fnm/fnm env --shell bash 2>/dev/null)" 2>/dev/null || true
 
 openclaw onboard --yes > /dev/null 2>&1 || true
+openclaw config set agents.defaults.models '{}' > /dev/null 2>&1 || true
 echo "config-initialized"
 "#;
 

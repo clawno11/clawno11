@@ -116,12 +116,30 @@ fn pick_model_from_catalog(providers: &[String]) -> Option<String> {
     None
 }
 
+/// Remove the model allowlist so users can freely switch to any model.
+///
+/// OpenClaw's `openclaw configure` wizard creates an allowlist by default,
+/// which blocks models not explicitly added. For private deployments this
+/// is unnecessarily restrictive — clear it once during initial setup.
+pub fn clear_model_allowlist(fixes: &mut Vec<String>) {
+    let (ok, out) = super::run_silent("openclaw config set agents.defaults.models {}");
+    if ok {
+        fixes.push("model-allowlist-cleared".to_string());
+    } else {
+        fixes.push(format!(
+            "model-allowlist-clear-failed:{}",
+            out.chars().take(120).collect::<String>()
+        ));
+    }
+}
+
 /// Automatically select the best active model based on what OpenClaw
 /// actually has configured.
 ///
 /// Called after first deployment (`deploy_step_onboard`) and on startup
 /// (`fix_model_config`).
 pub fn auto_select_active_model(fixes: &mut Vec<String>) {
+    clear_model_allowlist(fixes);
     let (_allowed, providers, current) = query_openclaw_models();
 
     // If current model is valid AND exists in catalog, keep it
