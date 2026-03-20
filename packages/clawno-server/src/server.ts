@@ -12,7 +12,11 @@ export interface ServerConfig {
   bearerToken?: string;
 }
 
-export function createServer(config: ServerConfig) {
+export function createServer(config: ServerConfig): {
+  start(): void;
+  app: express.Express;
+  token: string;
+} {
   const app = express();
   const token = config.bearerToken || generateToken();
 
