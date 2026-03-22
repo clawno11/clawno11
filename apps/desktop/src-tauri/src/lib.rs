@@ -18,6 +18,7 @@ pub mod security; // port scanning, firewall rules, security report
 pub mod ssh_deploy; // SSH remote deployment (step-by-step)
 pub mod token_log; // SQLite schema migrations
 pub mod types; // shared serializable types (StepResult, ServiceInfo, …)
+pub mod weixin; // WeChat channel plugin install / status / QR login
 
 use tauri::Manager;
 
@@ -154,6 +155,12 @@ pub fn run() {
             mcp::scan_mcp_server,
             mcp::list_openclaw_plugins,
             mcp::toggle_openclaw_plugin,
+            // ── WeChat channel plugin ────────────────────────────────────────
+            weixin::check_weixin_plugin,
+            weixin::install_weixin_plugin,
+            weixin::restart_weixin_gateway,
+            weixin::get_weixin_qr_url,
+            weixin::get_weixin_channel_status,
             // ── RAG ──────────────────────────────────────────────────────────
             rag::read_text_file,
             // ── Chat (desktop no longer calls stream_chat — OpenClaw Web UI

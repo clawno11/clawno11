@@ -182,6 +182,20 @@ export const startDiscordBot       = (port: number)              => invoke<void>
 export const stopDiscordBot        = ()                           => invoke<void>("stop_discord_bot");
 export const getDiscordBotStatus   = ()                           => invoke<boolean>("get_discord_bot_status");
 
+// ── WeChat channel plugin commands ──────────────────────────────────────────
+
+export interface WeixinChannelStatus {
+  installed: boolean;
+  connected: boolean;
+  account_name: string | null;
+}
+
+export const checkWeixinPlugin        = ()  => invoke<boolean>("check_weixin_plugin");
+export const installWeixinPlugin      = ()  => invoke<{ ok: boolean; message: string }>("install_weixin_plugin");
+export const restartWeixinGateway     = ()  => invoke<{ ok: boolean; message: string }>("restart_weixin_gateway");
+export const getWeixinQrUrl           = ()  => invoke<string>("get_weixin_qr_url");
+export const getWeixinChannelStatus   = ()  => invoke<WeixinChannelStatus>("get_weixin_channel_status");
+
 // ── MCP desktop-only commands ───────────────────────────────────────────────
 
 export interface OpenClawPlugin {

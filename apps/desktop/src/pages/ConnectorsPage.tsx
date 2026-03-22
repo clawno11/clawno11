@@ -7,6 +7,7 @@ import { XEdgePanel } from "./connectors/XEdgePanel";
 import { MobileQrPanel } from "./connectors/MobileQrPanel";
 import { TelegramPanel } from "./connectors/TelegramPanel";
 import { DiscordPanel } from "./connectors/DiscordPanel";
+import { WeixinPanel } from "./connectors/WeixinPanel";
 
 export function ConnectorsPage() {
   const { t } = useTranslation();
@@ -34,12 +35,15 @@ export function ConnectorsPage() {
         <MobileQrPanel />
       </div>
 
-      {/* 飞书机器人（国内） */}
+      {/* 国内 IM：微信 + 飞书 */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3 px-0.5">
           {t("connectors.imTitle")}
         </p>
-        <FeishuWizard />
+        <div className="space-y-3">
+          <WeixinPanel />
+          <FeishuWizard />
+        </div>
       </div>
 
       {/* 国际 IM：Telegram + Discord */}
