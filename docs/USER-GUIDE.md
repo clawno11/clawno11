@@ -545,7 +545,7 @@ The **Local Models** page manages Ollama for running AI models entirely on your 
 4. **设为默认** — 选择要使用的模型
 5. 模型完全本地运行 — 你的数据不会离开你的电脑
 
----
+
 
 ## 13. Remote Sessions / 远程会话
 

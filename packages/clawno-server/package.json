@@ -1,6 +1,6 @@
 {
   "name": "@clawno/server",
-  "version": "26.3.20",
+  "version": "26.3.22",
   "description": "Standalone ClawNO11 server — chat proxy, provider management, and pairing API for mobile clients",
   "type": "module",
   "bin": {
