@@ -23,7 +23,12 @@ const QR_LOAD_TIMEOUT = 30000;
 
 export function WeixinPanel() {
   const { t } = useTranslation();
-  const [phase, setPhase]           = useState<Phase>("checking");
+
+  const CACHE_KEY = "weixin_plugin_installed";
+  const cached = localStorage.getItem(CACHE_KEY) === "1";
+  const initialPhase: Phase = cached ? "installed" : "checking";
+
+  const [phase, setPhase]           = useState<Phase>(initialPhase);
   const [error, setError]           = useState<string | null>(null);
   const [qrUrl, setQrUrl]          = useState<string | null>(null);
   const [status, setStatus]         = useState<WeixinChannelStatus | null>(null);
@@ -71,24 +76,33 @@ export function WeixinPanel() {
     }, 1000);
   }, [stopPolling, t]);
 
-  const checkStatus = useCallback(async () => {
+  const checkStatus = useCallback(async (silent = false) => {
     try {
       const st = await getWeixinChannelStatus();
       setStatus(st);
       if (st.connected) {
+        localStorage.setItem(CACHE_KEY, "1");
         setPhase("connected");
       } else if (st.installed) {
-        setPhase("installed");
+        localStorage.setItem(CACHE_KEY, "1");
+        if (!silent) setPhase("installed");
       } else {
+        localStorage.removeItem(CACHE_KEY);
         setPhase("not-installed");
       }
     } catch {
       const installed = await checkWeixinPlugin().catch(() => false);
-      setPhase(installed ? "installed" : "not-installed");
+      if (installed) {
+        localStorage.setItem(CACHE_KEY, "1");
+        if (!silent) setPhase("installed");
+      } else {
+        localStorage.removeItem(CACHE_KEY);
+        setPhase("not-installed");
+      }
     }
   }, []);
 
-  useEffect(() => { checkStatus(); }, [checkStatus]);
+  useEffect(() => { checkStatus(cached); }, [checkStatus]);
 
   const handleInstall = async () => {
     setPhase("installing");
