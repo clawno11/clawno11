@@ -1,6 +1,7 @@
 import { Stars } from "@/components/Stars";
 import { Nav } from "@/components/Nav";
 import { Hero } from "@/components/Hero";
+import { ProductShowcase } from "@/components/ProductShowcase";
 import { Stats } from "@/components/Stats";
 import { Features } from "@/components/Features";
 import { HowItWorks } from "@/components/HowItWorks";
@@ -17,6 +18,7 @@ export default function Home() {
       <main className="relative z-10">
         <Nav />
         <Hero />
+        <ProductShowcase />
         <Stats />
         <Features />
         <HowItWorks />

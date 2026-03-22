@@ -12,8 +12,9 @@ export const en: I18nDict = {
   hero: {
     badge: "Fully Open Source · Apache 2.0 License",
     title: "ClawNo.11",
-    tagline: "THE PRIVATE AI GATEWAY THAT NEVER LEAKS.",
-    subtitle: "Deploy a private AI gateway on your own device. Access securely from phone or PC.\nYour data never leaves your machine.",
+    tagline: "OPENCLAW, MADE SIMPLE.",
+    subtitle: "Deploy your OpenClaw AI gateway in 3 minutes. Connect securely from any device.\nYour keys, your data — always under your control.",
+    ctaDownload: "Download Now",
     ctaMac: "Mac Apple Silicon",
     ctaMacIntel: "Mac Intel",
     ctaWindows: "Windows (.exe)",
@@ -23,6 +24,16 @@ export const en: I18nDict = {
     announcement: "NEW  MiniMax M2 · DeepSeek V3 · GLM-4-Flash now supported →",
     screenshotAlt: "ClawNo.11 App Screenshot",
     screenshotHint: "Place app screenshot here",
+  },
+  showcase: {
+    items: [
+      { tab: "One-Click Deploy", desc: "5-step automated pipeline — up and running in 3 minutes", screenshot: "/screenshots/deploy.png" },
+      { tab: "AI Chat", desc: "Multi-model conversation with RAG knowledge injection", screenshot: "/screenshots/chat.png" },
+      { tab: "Security Center", desc: "Real-time scoring, Kill Switch, PII auto-redaction", screenshot: "/screenshots/security.png" },
+      { tab: "Model Router", desc: "Auto-switch to the best AI model by keyword", screenshot: "/screenshots/router.png" },
+      { tab: "IM Connectors", desc: "Feishu / Discord bot setup in 4 steps", screenshot: "/screenshots/connectors.png" },
+      { tab: "Mobile Connect", desc: "Enter address to connect to your home AI instantly", screenshot: "/screenshots/mobile-connect.png" },
+    ],
   },
   stats: [
     { value: "~10MB", label: "Install size" },

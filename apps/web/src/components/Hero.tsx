@@ -1,6 +1,6 @@
 "use client";
 
-import { Apple, Monitor, Smartphone, ArrowRight } from "lucide-react";
+import { ArrowDown, ArrowRight } from "lucide-react";
 import { useI18n } from "@/i18n/context";
 import { AppIcon } from "@/components/AppIcon";
 import { downloads } from "@/lib/downloads";
@@ -46,66 +46,23 @@ export function Hero() {
           {t.hero.subtitle}
         </p>
 
-        {/* Primary CTAs — Desktop */}
-        <div className="flex flex-wrap items-center justify-center gap-3 mb-4">
+        <div className="flex items-center gap-4 mb-6">
           <a
-            href={downloads.mac}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-6 py-3 rounded-full bg-primary hover:bg-primary-dark text-white font-semibold text-sm transition-all"
+            href="#download"
+            className="flex items-center gap-2 px-7 py-3 rounded-full bg-primary hover:bg-primary-dark text-white font-semibold text-sm transition-all"
             style={{ boxShadow: "0 0 20px rgba(6,182,212,0.35)" }}
           >
-            <Apple size={15} />
-            {t.hero.ctaMac}
-          </a>
-          <a
-            href={downloads.macIntel}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-semibold text-sm transition-all"
-          >
-            <Apple size={15} />
-            {t.hero.ctaMacIntel}
-          </a>
-          <a
-            href={downloads.windows}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-6 py-3 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-semibold text-sm transition-all"
-          >
-            <Monitor size={15} />
-            {t.hero.ctaWindows}
-          </a>
-        </div>
-
-        {/* Secondary CTAs — Mobile */}
-        <div className="flex flex-wrap items-center justify-center gap-3 mb-6">
-          <a
-            href={downloads.ios}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/4 hover:bg-white/8 border border-white/8 hover:border-primary/25 text-slate-300 hover:text-white font-medium text-xs transition-all"
-          >
-            <Apple size={13} />
-            {t.hero.ctaIos}
-          </a>
-          <a
-            href={downloads.android}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white/4 hover:bg-white/8 border border-white/8 hover:border-primary/25 text-slate-300 hover:text-white font-medium text-xs transition-all"
-          >
-            <Smartphone size={13} />
-            {t.hero.ctaAndroid}
+            <ArrowDown size={15} />
+            {t.hero.ctaDownload}
           </a>
           <a
             href="https://github.com/clawno11/clawno11"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1.5 px-4 py-2.5 text-slate-400 hover:text-white font-semibold text-xs transition-colors"
+            className="flex items-center gap-1.5 px-5 py-3 rounded-full bg-white/6 hover:bg-white/10 border border-white/10 hover:border-primary/30 text-white font-semibold text-sm transition-all"
           >
             {t.hero.ctaGithub}
-            <ArrowRight size={13} />
+            <ArrowRight size={14} />
           </a>
         </div>
 

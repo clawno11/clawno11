@@ -10,8 +10,9 @@ export const zh = {
   hero: {
     badge: "完全开源 · Apache 2.0 协议",
     title: "ClawNo.11",
-    tagline: "THE PRIVATE AI GATEWAY THAT NEVER LEAKS.",
-    subtitle: "本地部署私有 AI 网关，手机 PC 随时安全访问。\n数据永不离开你的设备。",
+    tagline: "OPENCLAW, MADE SIMPLE.",
+    subtitle: "三分钟部署 OpenClaw 私有 AI 网关，手机 PC 全平台安全连接。\n你的 Key、你的数据，永远在你掌控。",
+    ctaDownload: "立即下载",
     ctaMac: "Mac Apple 芯片",
     ctaMacIntel: "Mac Intel",
     ctaWindows: "Windows (.exe)",
@@ -21,6 +22,16 @@ export const zh = {
     announcement: "全新 支持 MiniMax M2 · DeepSeek V3 · GLM-4-Flash →",
     screenshotAlt: "ClawNo.11 应用截图",
     screenshotHint: "在此处放置应用截图",
+  },
+  showcase: {
+    items: [
+      { tab: "一键部署", desc: "5 步自动化流水线，新手 3 分钟上手", screenshot: "/screenshots/deploy.png" },
+      { tab: "AI 聊天", desc: "多模型对话，RAG 知识库自动注入", screenshot: "/screenshots/chat.png" },
+      { tab: "安全中心", desc: "实时安全评分、Kill Switch、PII 自动脱敏", screenshot: "/screenshots/security.png" },
+      { tab: "模型路由", desc: "按关键词自动切换最佳 AI 模型", screenshot: "/screenshots/router.png" },
+      { tab: "IM 连接器", desc: "飞书 / Discord 机器人，四步接入", screenshot: "/screenshots/connectors.png" },
+      { tab: "手机连接", desc: "输入地址一键连接家中 AI", screenshot: "/screenshots/mobile-connect.png" },
+    ],
   },
   stats: [
     { value: "~10MB", label: "安装包大小" },
