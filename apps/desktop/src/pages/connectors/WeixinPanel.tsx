@@ -4,7 +4,6 @@ import {
   Download, QrCode, RefreshCw, Wifi,
   ChevronDown, Info, MessageCircle, Clock,
 } from "lucide-react";
-import QRCode from "react-qr-code";
 import { useTranslation } from "react-i18next";
 import {
   checkWeixinPlugin,
@@ -98,11 +97,11 @@ export function WeixinPanel() {
     try {
       const result = await installWeixinPlugin();
       if (result.ok) {
-        setInstallMsg(result.message || t("connectors.weixin.installSuccess"));
+        setInstallMsg(result.detail || t("connectors.weixin.installSuccess"));
         await restartWeixinGateway().catch(() => {});
         await checkStatus();
       } else {
-        setError(result.message || t("connectors.weixin.installFail"));
+        setError(result.detail || t("connectors.weixin.installFail"));
         setPhase("not-installed");
       }
     } catch (e) {
@@ -239,8 +238,18 @@ export function WeixinPanel() {
           <div className="flex flex-col items-center gap-4 py-2">
             {qrUrl ? (
               <>
-                <div className="p-4 bg-white rounded-2xl shadow-sm border border-border">
-                  <QRCode value={qrUrl} size={200} level="M" />
+                <div className="bg-white rounded-2xl shadow-sm border border-border p-4 flex items-center justify-center">
+                  <pre
+                    className="text-black select-none"
+                    style={{
+                      fontFamily: "'Courier New', Consolas, monospace",
+                      fontSize: "4px",
+                      lineHeight: "4.8px",
+                      letterSpacing: "0.1em",
+                      whiteSpace: "pre",
+                      margin: 0,
+                    }}
+                  >{qrUrl}</pre>
                 </div>
                 <p className="text-sm text-muted-foreground text-center">
                   {t("connectors.weixin.scanHint")}
