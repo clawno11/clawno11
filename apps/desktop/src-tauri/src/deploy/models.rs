@@ -101,6 +101,11 @@ fn current_model_is_valid(current: &str, providers: &[String]) -> bool {
     providers.iter().any(|p| p.as_str() == prov)
 }
 
+/// True when at least one non-Ollama provider has auth configured.
+fn has_cloud_providers(providers: &[String]) -> bool {
+    providers.iter().any(|p| p != "ollama")
+}
+
 /// Pick the first valid catalog model from providers that have auth configured.
 /// This queries the REAL catalog, not the `allowed` list (which may contain bad names).
 fn pick_model_from_catalog(providers: &[String]) -> Option<String> {
@@ -136,11 +141,29 @@ pub fn clear_model_allowlist(fixes: &mut Vec<String>) {
 /// Automatically select the best active model based on what OpenClaw
 /// actually has configured.
 ///
-/// Called after first deployment (`deploy_step_onboard`) and on startup
-/// (`fix_model_config`).
+/// Called after first deployment (`deploy_step_onboard`), on startup
+/// (`fix_model_config`), and after a new API key is configured.
+///
+/// Cloud providers always take priority over Ollama.  If the current
+/// default is an Ollama model but a cloud provider with a valid catalog
+/// model is available, we upgrade to the cloud model automatically.
 pub fn auto_select_active_model(fixes: &mut Vec<String>) {
     clear_model_allowlist(fixes);
     let (_allowed, providers, current) = query_openclaw_models();
+
+    // Ollama is fallback-only: upgrade to cloud whenever possible.
+    if current.starts_with("ollama/") && has_cloud_providers(&providers) {
+        if let Some(cloud) = pick_model_from_catalog(&providers) {
+            let (ok, _) = super::run_silent(&format!("openclaw models set {}", cloud));
+            if ok {
+                fixes.push(format!("upgraded-from-ollama-to-cloud:{}", cloud));
+                let _ = super::run_silent(&format!("openclaw models fallbacks add {}", cloud));
+                return;
+            }
+            fixes.push(format!("cloud-upgrade-failed:{}", cloud));
+        }
+        // Cloud catalog empty despite having providers — keep Ollama for now
+    }
 
     // If current model is valid AND exists in catalog, keep it
     if current_model_is_valid(&current, &providers) && model_exists_in_catalog(&current) {
@@ -211,17 +234,23 @@ pub async fn repair_model_config(port: u16) -> StepResult {
         fixes.push("detected:no-active-model".to_string());
         need_switch = true;
     } else if current.starts_with("ollama/") {
-        let ollama_name = current.trim_start_matches("ollama/");
-        match crate::ollama::ollama_model_supports_tools(ollama_name).await {
-            Ok(false) => {
-                fixes.push(format!("detected:no-tool-support:{}", current));
-                need_switch = true;
+        // Ollama is fallback-only: upgrade to cloud when a provider is available
+        if has_cloud_providers(&providers) {
+            fixes.push(format!("detected:ollama-with-cloud-available:{}", current));
+            need_switch = true;
+        } else {
+            let ollama_name = current.trim_start_matches("ollama/");
+            match crate::ollama::ollama_model_supports_tools(ollama_name).await {
+                Ok(false) => {
+                    fixes.push(format!("detected:no-tool-support:{}", current));
+                    need_switch = true;
+                }
+                Err(e) => {
+                    fixes.push(format!("detected:ollama-unreachable:{}", e));
+                    need_switch = true;
+                }
+                Ok(true) => {}
             }
-            Err(e) => {
-                fixes.push(format!("detected:ollama-unreachable:{}", e));
-                need_switch = true;
-            }
-            Ok(true) => {}
         }
     } else if !model_exists_in_catalog(&current) {
         fixes.push(format!("detected:unknown-model:{}", current));
@@ -297,5 +326,13 @@ mod tests {
         assert!(is_safe_model_name("zai/glm-4.7"));
         assert!(!is_safe_model_name("foo;bar"));
         assert!(!is_safe_model_name(""));
+    }
+
+    #[test]
+    fn has_cloud_providers_ignores_ollama() {
+        assert!(!has_cloud_providers(&[]));
+        assert!(!has_cloud_providers(&["ollama".into()]));
+        assert!(has_cloud_providers(&["zai".into()]));
+        assert!(has_cloud_providers(&["ollama".into(), "zai".into()]));
     }
 }

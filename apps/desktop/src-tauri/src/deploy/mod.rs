@@ -288,6 +288,10 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
         fixes.push(format!("verify-pending:{}", verify_detail));
     }
 
+    // Re-evaluate the active model: if the default is Ollama (fallback-only)
+    // and this new cloud provider is usable, upgrade to cloud automatically.
+    models::auto_select_active_model(&mut fixes);
+
     StepResult::ok_fixed("api-key-configured".to_string(), fixes)
 }
 
