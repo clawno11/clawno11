@@ -1,6 +1,6 @@
 {
   "name": "@clawno/desktop",
-  "version": "26.3.22",
+  "version": "26.3.23",
   "private": true,
   "type": "module",
   "scripts": {

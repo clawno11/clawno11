@@ -1,5 +1,5 @@
 const REPO = "clawno11/clawno11";
-const VERSION = "26.3.22";
+const VERSION = "26.3.23";
 
 const ghRelease = (file: string) =>
   `https://github.com/${REPO}/releases/download/v${VERSION}/${file}`;
