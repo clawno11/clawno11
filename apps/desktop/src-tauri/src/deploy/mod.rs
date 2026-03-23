@@ -237,6 +237,25 @@ fn run_silent(cmd: &str) -> (bool, String) {
     }
 }
 
+/// Probe until the gateway port is listening or `max_secs` elapses.
+async fn wait_for_gateway_port(port: u16, max_secs: u8) {
+    use std::net::{TcpStream, ToSocketAddrs};
+    for _ in 0..max_secs {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        let ok = format!("127.0.0.1:{}", port)
+            .to_socket_addrs()
+            .ok()
+            .and_then(|mut a| a.next())
+            .map(|sa| {
+                TcpStream::connect_timeout(&sa, std::time::Duration::from_millis(500)).is_ok()
+            })
+            .unwrap_or(false);
+        if ok {
+            return;
+        }
+    }
+}
+
 /// Write an AI provider key directly into OpenClaw's auth-profiles.json,
 /// then restart the gateway so the running process picks it up.
 ///
@@ -269,6 +288,7 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
         return StepResult::err_fixed("auth-profiles-write-failed".to_string(), fixes);
     }
 
+    // Restart gateway so the running process loads the new API key.
     let (restart_ok, _, _) = crate::pm2::run_pm2(&["restart", "openclaw"]);
     if restart_ok {
         fixes.push("gateway-restarted-for-auth".into());
@@ -276,11 +296,11 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
         fixes.push("gateway-restart-skipped".into());
     }
 
-    // Non-blocking verify: check if OpenClaw picked up the provider.
-    // For implicit providers (moonshot, modelstudio, volcengine) that aren't
-    // in agents.defaults.models yet, verify may report "not found" even
-    // though the key is correctly written — this is expected.
-    std::thread::sleep(std::time::Duration::from_secs(2));
+    // Wait for gateway to be fully ready before querying model status.
+    // A fixed 2 s sleep was too short; probe the port instead.
+    wait_for_gateway_port(18789, 10).await;
+
+    // Verify OpenClaw recognised the new provider key.
     let (verified, verify_detail) = verify_provider_configured(oc_provider);
     if verified {
         fixes.push("verify-ok".into());
@@ -290,7 +310,26 @@ pub async fn configure_api_key(provider: String, api_key: String) -> StepResult 
 
     // Re-evaluate the active model: if the default is Ollama (fallback-only)
     // and this new cloud provider is usable, upgrade to cloud automatically.
+    let fixes_before = fixes.len();
     models::auto_select_active_model(&mut fixes);
+
+    // auto_select_active_model writes to config files via CLI, but the
+    // running gateway still has old config in memory.  If the model or
+    // allowlist changed, restart the gateway a second time so it picks up
+    // both the new key AND the new model/allowlist in one go.
+    let model_changed = fixes[fixes_before..].iter().any(|f| {
+        f.starts_with("upgraded-from-ollama")
+            || f.starts_with("cloud-model-active")
+            || f.starts_with("fallback-ollama-active")
+            || f.starts_with("model-allowlist-cleared")
+    });
+    if model_changed {
+        let (ok, _, _) = crate::pm2::run_pm2(&["restart", "openclaw"]);
+        if ok {
+            fixes.push("gateway-restarted-for-model".into());
+        }
+        wait_for_gateway_port(18789, 8).await;
+    }
 
     StepResult::ok_fixed("api-key-configured".to_string(), fixes)
 }
@@ -419,6 +458,20 @@ pub fn diagnose_auth() -> serde_json::Value {
 pub fn fix_model_config() -> String {
     let mut fixes = Vec::new();
     models::auto_select_active_model(&mut fixes);
+
+    let model_changed = fixes.iter().any(|f| {
+        f.starts_with("upgraded-from-ollama")
+            || f.starts_with("cloud-model-active")
+            || f.starts_with("fallback-ollama-active")
+            || f.starts_with("model-allowlist-cleared")
+    });
+    if model_changed {
+        let (ok, _, _) = crate::pm2::run_pm2(&["restart", "openclaw"]);
+        if ok {
+            fixes.push("gateway-restarted-for-model".into());
+        }
+    }
+
     if fixes.is_empty() {
         "ok:no-changes-needed".to_string()
     } else {
