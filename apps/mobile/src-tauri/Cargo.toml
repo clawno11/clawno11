@@ -1,6 +1,6 @@
 [package]
 name = "clawno-mobile"
-version = "26.3.23"
+version = "26.3.24"
 description = "ClawNo.11 Mobile — AI Gateway Client"
 authors = ["Clawno Team"]
 license = "MIT"

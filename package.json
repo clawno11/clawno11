@@ -1,6 +1,6 @@
 {
   "name": "clawno",
-  "version": "26.3.23",
+  "version": "26.3.24",
   "private": true,
   "description": "One-click deployment & AI chat client for OpenClaw",
   "scripts": {
