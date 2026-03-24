@@ -15,7 +15,7 @@ import {
 } from "../../ipc";
 import { GuideSteps } from "./helpers";
 
-type Phase = "checking" | "not-installed" | "installing" | "installed" | "qr" | "connected";
+type Phase = "checking" | "not-installed" | "installing" | "installed" | "incompatible" | "qr" | "connected";
 
 const QR_POLL_INTERVAL = 3000;
 const QR_EXPIRE_SECONDS = 300;
@@ -111,9 +111,15 @@ export function WeixinPanel() {
     try {
       const result = await installWeixinPlugin();
       if (result.ok) {
-        setInstallMsg(result.detail || t("connectors.weixin.installSuccess"));
-        await restartWeixinGateway().catch(() => {});
-        await checkStatus();
+        const isIncompat = result.detail?.includes("不兼容");
+        if (isIncompat) {
+          setInstallMsg(result.detail);
+          setPhase("incompatible");
+        } else {
+          setInstallMsg(result.detail || t("connectors.weixin.installSuccess"));
+          await restartWeixinGateway().catch(() => {});
+          await checkStatus();
+        }
       } else {
         setError(result.detail || t("connectors.weixin.installFail"));
         setPhase("not-installed");
@@ -247,6 +253,29 @@ export function WeixinPanel() {
           </>
         )}
 
+        {/* ── Incompatible (installed but version mismatch) ── */}
+        {phase === "incompatible" && (
+          <>
+            <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 text-xs text-amber-800 leading-relaxed">
+              <AlertTriangle size={14} className="text-amber-500 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="font-semibold mb-1">{t("connectors.weixin.incompatTitle", "插件已安装，但版本暂不兼容")}</p>
+                <p>{installMsg}</p>
+                <p className="mt-1.5 text-amber-600">
+                  {t("connectors.weixin.incompatHint", "微信插件尚未适配当前 OpenClaw 版本，请关注插件更新后重试。")}
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={handleInstall}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm font-semibold transition-all hover:opacity-90 bg-muted/60 text-muted-foreground border border-border"
+            >
+              <RefreshCw size={14} />
+              {t("connectors.weixin.retryInstall", "重新安装")}
+            </button>
+          </>
+        )}
+
         {/* ── QR code display ── */}
         {phase === "qr" && (
           <div className="flex flex-col items-center gap-4 py-2">
@@ -319,8 +348,8 @@ export function WeixinPanel() {
           </div>
         )}
 
-        {/* ── Install success message ── */}
-        {installMsg && (
+        {/* ── Install success message (only in non-incompatible phases) ── */}
+        {installMsg && phase !== "incompatible" && (
           <div className="flex items-start gap-2 px-3 py-2 rounded-lg bg-green-50 border border-green-200">
             <CheckCircle2 size={14} className="text-green-500 flex-shrink-0 mt-0.5" />
             <span className="text-xs text-green-700">{installMsg}</span>
